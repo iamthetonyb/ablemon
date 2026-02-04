@@ -1,0 +1,32 @@
+# Secrets - NEVER commit
+.secrets/
+*.key
+*.pem
+*.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+
+# Runtime
+*.log
+*.jsonl
+audit/logs/*.jsonl
+audit/traces/*.jsonl
+clients/transcripts/**/*.jsonl
+memory/db/*.db
+memory/embeddings/*.bin
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/

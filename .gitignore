@@ -1,0 +1,13 @@
+# Virtual environments
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Secrets - NEVER commit
+.secrets/
+*.key
+*.pem
+
+# ATLAS runtime state (lives in ~/.atlas/, not in repo)
+*.log

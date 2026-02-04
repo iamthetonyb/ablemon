@@ -1,0 +1,25 @@
+{
+  "owner_telegram_id": "5690746813",
+  "master_bot_token": "USE_ATLAS_SECRETS",
+  "ai_backends": {
+    "primary": {
+      "name": "kimi-k2.5",
+      "endpoint": "https://integrate.api.nvidia.com/v1",
+      "model": "moonshotai/kimi-k2.5"
+    },
+    "fallback": {
+      "name": "claude-sonnet",
+      "endpoint": "https://api.anthropic.com/v1",
+      "model": "claude-sonnet-4-20250514"
+    }
+  },
+  "security": {
+    "min_trust_threshold": 0.7,
+    "require_approval_below": 0.85,
+    "max_command_risk": 5
+  },
+  "logging": {
+    "audit_retention_days": 180,
+    "transcript_retention_days": 365
+  }
+}
