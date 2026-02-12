@@ -1,0 +1,179 @@
+# SKILL_INDEX.yaml — Skill Registry
+#
+# Lists all available skills with their triggers and requirements.
+# Full documentation lives in each skill's SKILL.md file.
+
+version: "1.0"
+last_updated: "2026-02-03"
+
+skills:
+
+  # ══════════════════════════════════════════════════════════════
+  # RESEARCH SKILLS
+  # ══════════════════════════════════════════════════════════════
+  
+  web-research:
+    description: "Search the web and synthesize findings into a report"
+    trigger: 
+      - "research {topic}"
+      - "find out about {topic}"
+      - "look up {topic}"
+    trust_required: L1
+    tools_used: [web_search, web_fetch, read, write]
+    created: "2026-02-03"
+    use_count: 0
+    
+  document-analysis:
+    description: "Analyze documents for key information, summarize, extract data"
+    trigger:
+      - "analyze {document}"
+      - "summarize {document}"
+      - "extract from {document}"
+    trust_required: L1
+    tools_used: [read]
+    created: "2026-02-03"
+    use_count: 0
+
+  # ══════════════════════════════════════════════════════════════
+  # DEVELOPMENT SKILLS
+  # ══════════════════════════════════════════════════════════════
+    
+  code-review:
+    description: "Review code for bugs, security issues, and improvements"
+    trigger:
+      - "review {file}"
+      - "check code in {file}"
+    trust_required: L2
+    tools_used: [read, bash]
+    created: "2026-02-03"
+    use_count: 0
+    
+  git-workflow:
+    description: "Manage git operations: status, diff, commit, push"
+    trigger:
+      - "git status"
+      - "commit changes"
+      - "push to {branch}"
+    trust_required: L3
+    tools_used: [bash]
+    created: "2026-02-03"
+    use_count: 0
+
+  # ══════════════════════════════════════════════════════════════
+  # BILLING SKILLS
+  # ══════════════════════════════════════════════════════════════
+    
+  invoice-generator:
+    description: "Generate client invoices from billing sessions"
+    trigger:
+      - "generate invoice {client}"
+      - "invoice {client} for {period}"
+    trust_required: L3
+    tools_used: [read, write, bash]
+    created: "2026-02-03"
+    use_count: 0
+    
+  billing-report:
+    description: "Generate billing summary reports"
+    trigger:
+      - "billing report"
+      - "show billing for {client}"
+    trust_required: L2
+    tools_used: [read]
+    created: "2026-02-03"
+    use_count: 0
+
+  # ══════════════════════════════════════════════════════════════
+  # COMMUNICATION SKILLS
+  # ══════════════════════════════════════════════════════════════
+    
+  status-report:
+    description: "Generate comprehensive status reports"
+    trigger:
+      - "status"
+      - "status report"
+      - "what's happening"
+    trust_required: L1
+    tools_used: [read]
+    created: "2026-02-03"
+    use_count: 0
+    
+  daily-briefing:
+    description: "Morning briefing with priorities and schedule"
+    trigger:
+      - "morning briefing"
+      - "daily briefing"
+      - "what's on today"
+    trust_required: L1
+    tools_used: [read]
+    created: "2026-02-03"
+    use_count: 0
+
+  # ══════════════════════════════════════════════════════════════
+  # SECURITY SKILLS
+  # ══════════════════════════════════════════════════════════════
+    
+  security-audit:
+    description: "Audit logs for security anomalies"
+    trigger:
+      - "security check"
+      - "audit security"
+      - "check for threats"
+    trust_required: L2
+    tools_used: [read, bash]
+    created: "2026-02-03"
+    use_count: 0
+    
+  content-scan:
+    description: "Scan content for injection attempts or threats"
+    trigger:
+      - "scan {content}"
+      - "check for injection"
+    trust_required: L1
+    tools_used: [read]
+    created: "2026-02-03"
+    use_count: 0
+
+  # ══════════════════════════════════════════════════════════════
+  # MEMORY SKILLS
+  # ══════════════════════════════════════════════════════════════
+    
+  daily-consolidation:
+    description: "End of day consolidation: summarize, archive, update learnings"
+    trigger:
+      - "end of day"
+      - "consolidate"
+      - "wrap up day"
+    trust_required: L2
+    tools_used: [read, write]
+    created: "2026-02-03"
+    use_count: 0
+    
+  weekly-review:
+    description: "Weekly review: accomplishments, learnings, planning"
+    trigger:
+      - "weekly review"
+      - "week summary"
+    trust_required: L2
+    tools_used: [read, write]
+    created: "2026-02-03"
+    use_count: 0
+
+# ══════════════════════════════════════════════════════════════
+# NOTES
+# ══════════════════════════════════════════════════════════════
+#
+# To add a new skill:
+# 1. Create directory: mkdir ~/.atlas/skills/{skill-name}
+# 2. Create SKILL.md with documentation
+# 3. Add entry to this index
+#
+# Skills are loaded on-demand (progressive disclosure):
+# - At startup: Only name + description loaded
+# - On trigger: Full SKILL.md content loaded
+#
+# Trust requirements:
+# - L1: Read-only operations
+# - L2: Write operations (with approval)
+# - L3: Shell execution, sub-agent spawning
+# - L4: Full autonomy
