@@ -8,6 +8,18 @@ __pycache__/
 .secrets/
 *.key
 *.pem
+.env
+atlas-v2/.env
 
 # ATLAS runtime state (lives in ~/.atlas/, not in repo)
 *.log
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo

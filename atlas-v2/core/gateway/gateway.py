@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Dict, Optional
 from pathlib import Path
 
+from aiohttp import web
 from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -25,16 +26,26 @@ class ATLASGateway:
     """
 
     def __init__(self, config_path: str = "config/gateway.json"):
-        # Load config
+        # Load config file (non-secret settings only)
         config_file = Path(config_path)
         if config_file.exists():
             with open(config_file) as f:
                 self.config = json.load(f)
         else:
-            self.config = {
-                "owner_telegram_id": "",
-                "master_bot_token": ""
-            }
+            self.config = {}
+
+        # Critical credentials ALWAYS come from environment variables
+        self.bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+        self.owner_telegram_id = os.environ.get(
+            "ATLAS_OWNER_TELEGRAM_ID",
+            self.config.get("owner_telegram_id", "")
+        )
+
+        if not self.bot_token:
+            raise ValueError(
+                "TELEGRAM_BOT_TOKEN environment variable is not set. "
+                "Set it in your .env file or Docker environment."
+            )
 
         # Initialize audit directory
         self.audit_dir = Path("audit/logs")
@@ -114,7 +125,7 @@ class ATLASGateway:
         message = update.message.text
 
         # Check if owner
-        if user_id != self.config.get("owner_telegram_id"):
+        if user_id != self.owner_telegram_id:
             await update.message.reply_text("⚠️ Unauthorized")
             return
 
@@ -165,13 +176,28 @@ class ATLASGateway:
 
         await update.message.reply_text(response)
 
+    async def _health_handler(self, request: web.Request) -> web.Response:
+        """HTTP health check endpoint for Docker/load balancers"""
+        return web.json_response({
+            "status": "ok",
+            "version": "2.0",
+            "bots_active": len(self.client_bots) + (1 if self.master_bot else 0)
+        })
+
+    async def start_health_server(self, port: int = 8080):
+        """Start lightweight HTTP health check server"""
+        app = web.Application()
+        app.router.add_get("/health", self._health_handler)
+        app.router.add_get("/", self._health_handler)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", port)
+        await site.start()
+        print(f"✅ Health server listening on :{port}/health")
+
     async def start_master_bot(self):
         """Start the master Telegram bot"""
-        token = self.config.get("master_bot_token")
-        if not token:
-            raise ValueError("Master bot token not configured")
-
-        self.master_bot = Application.builder().token(token).build()
+        self.master_bot = Application.builder().token(self.bot_token).build()
 
         # Add handlers
         self.master_bot.add_handler(CommandHandler("start", self._cmd_start))
@@ -262,6 +288,9 @@ class ATLASGateway:
 
     async def run(self):
         """Main run loop"""
+        # Start health server first (so Docker health checks pass immediately)
+        await self.start_health_server()
+
         # Start queue
         await self.queue.start()
 
