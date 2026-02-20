@@ -1,12 +1,16 @@
 """
-Ollama Provider - Local LLM inference for privacy and offline operation.
+Ollama Provider - Local and hosted LLM inference.
 
-Always-available fallback that runs on local hardware.
+Supports:
+- Local Ollama instances (default)
+- Hosted Ollama services with API key authentication
+- Multiple model families: qwen, llama, mistral, etc.
 """
 
 import asyncio
 import json
 import logging
+import os
 from typing import List, Dict, Optional, AsyncIterator
 
 import aiohttp
@@ -27,45 +31,83 @@ logger = logging.getLogger(__name__)
 
 class OllamaProvider(LLMProvider):
     """
-    Ollama Provider for local LLM inference.
+    Ollama Provider for local and hosted LLM inference.
 
-    Default model: llama3.2 (good balance of speed and quality)
-    Alternative: mistral, codellama, phi3
+    Supported models:
+    - qwen3.5 / qwen2.5 (recommended for ATLAS)
+    - llama3.2 / llama3.1
+    - mistral / mixtral
+    - codellama
+    - phi3
+
+    Can connect to:
+    - Local Ollama: http://localhost:11434
+    - Hosted Ollama: Any URL with API key authentication
 
     Benefits:
-    - Free (runs locally)
-    - Private (no data leaves machine)
-    - Offline capable
-    - No rate limits
+    - Free when running locally
+    - Private (data stays on your infrastructure)
+    - API-compatible with hosted services
+    - Supports many model families
     """
 
-    DEFAULT_MODEL = "llama3.2"
+    DEFAULT_MODEL = "qwen2.5"  # Changed to qwen for better quality
     DEFAULT_URL = "http://localhost:11434"
+
+    # Model aliases for convenience
+    MODEL_ALIASES = {
+        "qwen3.5": "qwen2.5:latest",
+        "qwen": "qwen2.5:latest",
+        "llama": "llama3.2:latest",
+        "mistral": "mistral:latest",
+        "codellama": "codellama:latest",
+    }
 
     def __init__(
         self,
         model: str = None,
         base_url: str = None,
-        timeout: float = 300.0  # Local inference can be slow
+        api_key: str = None,
+        api_key_env: str = "OLLAMA_API_KEY",
+        timeout: float = 300.0,
+        cost_per_million_input: float = 0.0,  # Usually free
+        cost_per_million_output: float = 0.0,
     ):
+        # Resolve API key from env if not provided
+        resolved_api_key = api_key or os.environ.get(api_key_env, "")
+
+        # Resolve model alias
+        resolved_model = self.MODEL_ALIASES.get(model, model) if model else self.DEFAULT_MODEL
+
         config = ProviderConfig(
-            api_key="",  # Not needed for local
+            api_key=resolved_api_key,
             base_url=base_url or self.DEFAULT_URL,
-            model=model or self.DEFAULT_MODEL,
+            model=resolved_model,
             timeout=timeout,
-            cost_per_million_input=0.0,  # Free
-            cost_per_million_output=0.0
+            cost_per_million_input=cost_per_million_input,
+            cost_per_million_output=cost_per_million_output
         )
         super().__init__(config)
         self._session: Optional[aiohttp.ClientSession] = None
+        self._is_hosted = bool(resolved_api_key)
+
+        if self._is_hosted:
+            logger.info(f"Ollama configured for hosted endpoint: {config.base_url}")
+        else:
+            logger.info(f"Ollama configured for local endpoint: {config.base_url}")
 
     @property
     def name(self) -> str:
-        return "ollama"
+        return "ollama_hosted" if self._is_hosted else "ollama"
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
+            headers = {}
+            # Add auth header for hosted services
+            if self.config.api_key:
+                headers["Authorization"] = f"Bearer {self.config.api_key}"
             self._session = aiohttp.ClientSession(
+                headers=headers,
                 timeout=aiohttp.ClientTimeout(total=self.config.timeout)
             )
         return self._session

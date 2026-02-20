@@ -1,0 +1,44 @@
+# ATLAS v2 Docker Compose Configuration
+# Usage: docker-compose up -d
+#
+# Before running:
+# 1. Copy .env.example to .env
+# 2. Fill in your API keys in .env
+# 3. Run: docker-compose up -d
+
+version: '3.8'
+
+services:
+  atlas:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: atlas-v2
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - ATLAS_HOME=/home/atlas/.atlas
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+    volumes:
+      # Persistent data
+      - atlas_data:/home/atlas/.atlas
+      # Mount secrets (alternative to env file)
+      - ./secrets:/home/atlas/.atlas/.secrets:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  atlas_data:
+    driver: local
