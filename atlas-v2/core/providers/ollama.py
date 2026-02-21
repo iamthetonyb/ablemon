@@ -51,16 +51,22 @@ class OllamaProvider(LLMProvider):
     - Supports many model families
     """
 
-    DEFAULT_MODEL = "qwen2.5"  # Changed to qwen for better quality
+    DEFAULT_MODEL = "qwen3"  # Updated to Qwen 3 for latest capabilities
     DEFAULT_URL = "http://localhost:11434"
 
     # Model aliases for convenience
+    # IMPORTANT: Ensure model names match what's available on your Ollama instance
     MODEL_ALIASES = {
-        "qwen3.5": "qwen2.5:latest",
-        "qwen": "qwen2.5:latest",
+        "qwen3.5": "qwen3:latest",      # Qwen 3.5 -> Qwen 3 (latest)
+        "qwen3": "qwen3:latest",         # Qwen 3 explicit
+        "qwen2.5": "qwen2.5:latest",     # Qwen 2.5 for compatibility
+        "qwen": "qwen3:latest",          # Default qwen -> latest (Qwen 3)
         "llama": "llama3.2:latest",
+        "llama3": "llama3.2:latest",
         "mistral": "mistral:latest",
         "codellama": "codellama:latest",
+        "phi": "phi3:latest",
+        "gemma": "gemma2:latest",
     }
 
     def __init__(
