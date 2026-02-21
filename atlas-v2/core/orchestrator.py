@@ -489,3 +489,174 @@ async def auto_orchestrate(
         orchestrator = SkillOrchestrator()
 
     return await orchestrator.process(user_input, context)
+
+
+# =============================================================================
+# TOOL ATTEMPT TRACKING & NEVER SAY CAN'T ENFORCEMENT
+# =============================================================================
+
+@dataclass
+class ToolAttemptLog:
+    """Tracks all tool attempts for transparency"""
+    tool_name: str
+    success: bool
+    error: Optional[str] = None
+    execution_time: float = 0.0
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+
+
+class ToolAttemptTracker:
+    """
+    Tracks tool attempts and enforces the "try before saying can't" rule.
+    """
+
+    # Patterns that indicate the agent is about to say "can't"
+    CANT_PATTERNS = [
+        r"i cannot",
+        r"i can't",
+        r"i don't have access",
+        r"i'm not able to",
+        r"i am not able to",
+        r"i don't have the ability",
+        r"i'm unable to",
+        r"i am unable to",
+        r"outside my capabilities",
+        r"beyond my capabilities",
+        r"i lack the ability",
+        r"not within my capabilities",
+        r"i don't have internet",
+        r"i cannot browse",
+        r"i cannot access external",
+    ]
+
+    def __init__(self):
+        self.attempts: List[ToolAttemptLog] = []
+        self.min_attempts_before_cant = 3
+
+    def log_attempt(
+        self,
+        tool_name: str,
+        success: bool,
+        error: str = None,
+        execution_time: float = 0.0,
+    ):
+        """Log a tool attempt"""
+        self.attempts.append(ToolAttemptLog(
+            tool_name=tool_name,
+            success=success,
+            error=error,
+            execution_time=execution_time,
+        ))
+
+    def can_say_cant(self) -> Tuple[bool, str]:
+        """
+        Check if the agent has made enough attempts to say "can't".
+
+        Returns:
+            (allowed, reason) - Whether saying "can't" is allowed
+        """
+        if len(self.attempts) >= self.min_attempts_before_cant:
+            return True, f"Made {len(self.attempts)} attempts"
+
+        remaining = self.min_attempts_before_cant - len(self.attempts)
+        return False, f"Must try {remaining} more tools before giving up"
+
+    def would_say_cant(self, response: str) -> bool:
+        """Check if a response contains a 'can't' pattern"""
+        response_lower = response.lower()
+        for pattern in self.CANT_PATTERNS:
+            if re.search(pattern, response_lower):
+                return True
+        return False
+
+    def get_attempt_summary(self) -> str:
+        """Get a summary of all attempts made"""
+        if not self.attempts:
+            return "No tools attempted yet."
+
+        lines = ["Tools attempted:"]
+        for attempt in self.attempts:
+            status = "✓" if attempt.success else "✗"
+            lines.append(f"  {status} {attempt.tool_name} ({attempt.execution_time:.2f}s)")
+            if attempt.error:
+                lines.append(f"    Error: {attempt.error[:50]}...")
+        return "\n".join(lines)
+
+    def clear(self):
+        """Clear attempt history for new task"""
+        self.attempts = []
+
+
+class EnforcedOrchestrator(SkillOrchestrator):
+    """
+    Orchestrator that enforces the NEVER SAY CAN'T protocol.
+
+    Before any response that says "can't", it:
+    1. Checks if minimum tool attempts were made
+    2. If not, automatically tries relevant tools
+    3. Only allows "can't" after trying everything
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.tracker = ToolAttemptTracker()
+
+        # Default tools to try when task seems blocked
+        self.fallback_tools = [
+            "web_search",
+            "fetch_url",
+            "browser",
+            "shell",
+            "mcp",
+        ]
+
+    async def process_with_enforcement(
+        self,
+        user_input: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Process with NEVER SAY CAN'T enforcement.
+        """
+        self.tracker.clear()
+        context = context or {}
+
+        # First, try normal processing
+        result = await self.process(user_input, context)
+
+        # Check if any skill failed or no skills triggered
+        all_failed = not result.get("success", False) or not result.get("results")
+
+        if all_failed:
+            # Try fallback tools
+            for tool_name in self.fallback_tools:
+                if tool_name in self._skills:
+                    skill_result = await self._execute_skill(
+                        SkillInvocation(
+                            skill_name=tool_name,
+                            priority=1,
+                            parameters={},
+                        ),
+                        user_input,
+                        context,
+                    )
+                    self.tracker.log_attempt(
+                        tool_name=tool_name,
+                        success=skill_result.get("success", False),
+                        error=skill_result.get("error"),
+                        execution_time=skill_result.get("execution_time", 0),
+                    )
+
+                    if skill_result.get("success"):
+                        return {
+                            **result,
+                            "success": True,
+                            "results": {tool_name: skill_result},
+                            "enforcement_triggered": True,
+                        }
+
+        # Add attempt summary to result
+        result["tool_attempts"] = self.tracker.get_attempt_summary()
+        result["can_say_cant"], result["cant_reason"] = self.tracker.can_say_cant()
+
+        return result
