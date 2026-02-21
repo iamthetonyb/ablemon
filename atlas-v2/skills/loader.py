@@ -348,3 +348,99 @@ atlas skill {name}
 
             return skill
         return None
+
+    # =========================================================================
+    # HOT-RELOAD AND CONTEXT INJECTION
+    # =========================================================================
+
+    def reload_skill(self, name: str) -> Optional[Skill]:
+        """
+        Hot-reload a skill after modification.
+
+        Use this after updating SKILL.md or implement.py to pick up changes
+        without restarting the system.
+        """
+        # Check v2 path first
+        skill_dir = self.registry.v2_path / name
+        if not skill_dir.exists():
+            # Try v1 path
+            skill_dir = self.registry.v1_path / name
+            if not skill_dir.exists():
+                raise ValueError(f"Skill {name} not found in v1 or v2 paths")
+
+        # Unregister old version
+        if name in self.registry.skills:
+            del self.registry.skills[name]
+            logger.info(f"Unregistered old version of skill: {name}")
+
+        # Re-load from directory
+        skill = self.load_from_directory(skill_dir)
+        if skill:
+            self.registry.register(
+                name=skill.metadata.name,
+                metadata=skill.metadata,
+                implementation=skill.implementation_path,
+                source=skill.source
+            )
+            logger.info(f"Hot-reloaded skill: {name}")
+            return skill
+
+        return None
+
+    def list_skills_for_ai(self) -> str:
+        """
+        Generate a formatted string of available skills for LLM context injection.
+
+        This string can be injected into the system prompt so the AI knows
+        what skills are available and how to trigger them.
+        """
+        lines = [
+            "## Available Skills",
+            "",
+            "The following skills are available and will auto-trigger on matching phrases:",
+            "",
+        ]
+
+        for name, skill in self.registry.skills.items():
+            meta = skill.metadata
+            lines.append(f"### {name}")
+            lines.append(f"**Description:** {meta.description}")
+
+            if meta.trigger_phrases:
+                triggers = ", ".join([f'"{t}"' for t in meta.trigger_phrases[:5]])
+                lines.append(f"**Triggers:** {triggers}")
+
+            if meta.inputs:
+                inputs_str = ", ".join(meta.inputs.keys())
+                lines.append(f"**Inputs:** {inputs_str}")
+
+            lines.append("")
+
+        lines.extend([
+            "---",
+            "",
+            "To use a skill, simply include the trigger phrase in your request.",
+            "Skills will auto-activate when matching phrases are detected.",
+        ])
+
+        return "\n".join(lines)
+
+    def get_skill_protocol(self, name: str) -> str:
+        """
+        Get the SKILL.md protocol content for a skill.
+
+        This is what gets injected into the LLM context when a behavioral
+        skill is triggered - it contains the instructions that modify
+        how the AI thinks/writes.
+        """
+        skill = self.registry.skills.get(name)
+        if not skill:
+            return ""
+
+        skill_dir = skill.implementation_path.parent if skill.implementation_path else None
+        if skill_dir:
+            skill_md = skill_dir / "SKILL.md"
+            if skill_md.exists():
+                return skill_md.read_text()
+
+        return ""

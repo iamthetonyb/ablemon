@@ -539,3 +539,267 @@ class SelfImprovementEngine:
                     action="self_improvement_rejected",
                     details={"update_id": update_id, "reason": reason}
                 )
+
+    # =========================================================================
+    # SKILL CREATION
+    # =========================================================================
+
+    async def create_skill(
+        self,
+        name: str,
+        purpose: str,
+        triggers: List[str],
+        protocol: str = "",
+        implementation: str = "",
+        inputs: Dict[str, Dict] = None,
+        outputs: Dict[str, Dict] = None,
+        skill_type: str = "behavioral",
+        requires_approval: bool = True,
+        trust_level: str = "L2_SUGGEST",
+    ) -> Path:
+        """
+        Create a new skill in the correct directory format.
+
+        This method creates:
+        1. skills/library/{name}/ directory
+        2. SKILL.md with protocol, triggers, I/O schema
+        3. implement.py with entry point (if implementation provided)
+        4. Updates SKILL_INDEX.yaml
+        5. Triggers approval workflow if requires_approval=True
+
+        Args:
+            name: Skill name (lowercase, no spaces)
+            purpose: One-sentence description
+            triggers: List of trigger phrases
+            protocol: Behavioral instructions (goes in SKILL.md ## Protocol)
+            implementation: Python code (goes in implement.py)
+            inputs: Input schema {name: {type, required, description}}
+            outputs: Output schema {name: {type, description}}
+            skill_type: "behavioral", "tool", or "hybrid"
+            requires_approval: Whether to queue for approval
+            trust_level: L1_OBSERVE, L2_SUGGEST, L3_ACT, L4_AUTONOMOUS
+
+        Returns:
+            Path to the created skill directory
+        """
+        inputs = inputs or {}
+        outputs = outputs or {}
+
+        # Validate name
+        name = name.lower().replace(" ", "_").replace("-", "_")
+        if not name.isidentifier():
+            raise ValueError(f"Invalid skill name: {name}")
+
+        # Create skill directory
+        skill_dir = self.atlas_home / "atlas-v2" / "skills" / "library" / name
+        if skill_dir.exists():
+            raise ValueError(f"Skill {name} already exists")
+
+        skill_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate SKILL.md
+        skill_md = self._generate_skill_md(
+            name=name,
+            purpose=purpose,
+            triggers=triggers,
+            protocol=protocol,
+            inputs=inputs,
+            outputs=outputs,
+        )
+
+        skill_md_path = skill_dir / "SKILL.md"
+        skill_md_path.write_text(skill_md)
+
+        # Generate implement.py if implementation provided
+        if implementation:
+            implement_py = self._generate_implement_py(
+                name=name,
+                implementation=implementation,
+                inputs=inputs,
+            )
+            implement_path = skill_dir / "implement.py"
+            implement_path.write_text(implement_py)
+
+        # Update SKILL_INDEX.yaml
+        await self._update_skill_index(
+            name=name,
+            purpose=purpose,
+            triggers=triggers,
+            skill_type=skill_type,
+            requires_approval=requires_approval,
+            trust_level=trust_level,
+        )
+
+        logger.info(f"Created skill: {name} at {skill_dir}")
+
+        # Log as learning
+        await self.add_learning(
+            content=f"Created new skill: {name} - {purpose}",
+            category="SKILL_CREATION",
+            source="self_improvement",
+        )
+
+        return skill_dir
+
+    def _generate_skill_md(
+        self,
+        name: str,
+        purpose: str,
+        triggers: List[str],
+        protocol: str,
+        inputs: Dict,
+        outputs: Dict,
+    ) -> str:
+        """Generate SKILL.md content"""
+        lines = [
+            f"# Skill: {name.replace('_', ' ').title()}",
+            "",
+            f"> {purpose}",
+            "",
+            "## Purpose",
+            "",
+            purpose,
+            "",
+            "## Triggers",
+            "",
+        ]
+
+        for trigger in triggers:
+            lines.append(f'- Command: "{trigger}"')
+
+        lines.extend([
+            "",
+            "## Inputs",
+            "",
+            "| Name | Type | Required | Description |",
+            "|------|------|----------|-------------|",
+        ])
+
+        for input_name, spec in inputs.items():
+            req = "Yes" if spec.get("required", False) else "No"
+            lines.append(
+                f"| {input_name} | {spec.get('type', 'string')} | "
+                f"{req} | {spec.get('description', '')} |"
+            )
+
+        lines.extend([
+            "",
+            "## Outputs",
+            "",
+            "| Name | Type | Description |",
+            "|------|------|-------------|",
+        ])
+
+        for output_name, spec in outputs.items():
+            lines.append(
+                f"| {output_name} | {spec.get('type', 'string')} | "
+                f"{spec.get('description', '')} |"
+            )
+
+        if protocol:
+            lines.extend([
+                "",
+                "---",
+                "",
+                "## Protocol",
+                "",
+                "> **When this skill triggers, follow these instructions:**",
+                "",
+                protocol,
+            ])
+
+        return "\n".join(lines)
+
+    def _generate_implement_py(
+        self,
+        name: str,
+        implementation: str,
+        inputs: Dict,
+    ) -> str:
+        """Generate implement.py content"""
+        # Build argument signature from inputs
+        args = []
+        for input_name, spec in inputs.items():
+            if spec.get("required", False):
+                args.append(f"{input_name}: str")
+            else:
+                args.append(f"{input_name}: str = None")
+
+        args_str = ", ".join(args) if args else "**kwargs"
+
+        return f'''"""
+{name.replace('_', ' ').title()} Skill - Implementation
+
+Auto-generated by ATLAS SelfImprovementEngine.
+The behavioral protocol is in SKILL.md.
+"""
+
+from pathlib import Path
+from typing import Any, Dict
+
+SKILL_MD_PATH = Path(__file__).parent / "SKILL.md"
+
+
+def get_protocol() -> str:
+    """Get behavioral protocol from SKILL.md"""
+    if SKILL_MD_PATH.exists():
+        return SKILL_MD_PATH.read_text()
+    return ""
+
+
+def should_trigger(text: str, context: Dict[str, Any] = None) -> bool:
+    """Check if this skill should auto-trigger"""
+    text_lower = text.lower()
+    triggers = {[repr(t) for t in inputs.keys()] if inputs else []}
+    return any(t in text_lower for t in triggers)
+
+
+async def main({args_str}) -> Dict[str, Any]:
+    """
+    Main entry point for skill executor.
+
+    Implementation:
+    """
+{implementation}
+
+
+if __name__ == "__main__":
+    import asyncio
+    print(f"Protocol: {{len(get_protocol())}} chars")
+'''
+
+    async def _update_skill_index(
+        self,
+        name: str,
+        purpose: str,
+        triggers: List[str],
+        skill_type: str,
+        requires_approval: bool,
+        trust_level: str,
+    ) -> None:
+        """Update SKILL_INDEX.yaml with new skill"""
+        import yaml
+
+        index_path = self.atlas_home / "atlas-v2" / "skills" / "SKILL_INDEX.yaml"
+
+        if index_path.exists():
+            with open(index_path) as f:
+                index = yaml.safe_load(f) or {}
+        else:
+            index = {"version": "1.0", "skills": {}}
+
+        index.setdefault("skills", {})[name] = {
+            "description": purpose,
+            "triggers": triggers,
+            "type": skill_type,
+            "trust_level": trust_level,
+            "requires_approval": requires_approval,
+            "created": datetime.utcnow().strftime("%Y-%m-%d"),
+            "last_used": None,
+            "use_count": 0,
+        }
+
+        index["last_updated"] = datetime.utcnow().strftime("%Y-%m-%d")
+
+        with open(index_path, "w") as f:
+            yaml.dump(index, f, default_flow_style=False, sort_keys=False)

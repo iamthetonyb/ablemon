@@ -3,6 +3,9 @@ Iterative Problem Solver
 
 Wraps task execution with automatic retry logic using different approaches.
 Implements the "NEVER SAY CAN'T" protocol by forcing tool attempts before giving up.
+
+Behavioral rules are defined in ITERATIVE_SOLVER.md - read it for the full protocol.
+This file implements those rules in code.
 """
 
 import asyncio
@@ -10,10 +13,26 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import traceback
 
 logger = logging.getLogger(__name__)
+
+# Load rules from ITERATIVE_SOLVER.md
+RULES_PATH = Path(__file__).parent / "ITERATIVE_SOLVER.md"
+
+
+def get_protocol_rules() -> str:
+    """
+    Get the iterative solving rules from ITERATIVE_SOLVER.md.
+
+    This can be injected into LLM context to make any model
+    understand the iterative problem-solving approach.
+    """
+    if RULES_PATH.exists():
+        return RULES_PATH.read_text()
+    return ""
 
 
 class AttemptStrategy(str, Enum):
