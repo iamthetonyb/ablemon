@@ -1,0 +1,46 @@
+name: Deploy ATLAS to Digital Ocean
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # allow manual trigger from GitHub UI
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Digital Ocean
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 146.190.142.68
+          username: root
+          key: ${{ secrets.DO_SSH_KEY }}
+          script: |
+            set -e
+
+            echo "=== Pulling latest code ==="
+            if [ ! -d /opt/atlas/AIDE/.git ]; then
+              git clone https://github.com/iamthetonyb/AIDE.git /opt/atlas/AIDE
+            fi
+            cd /opt/atlas/AIDE
+            git fetch origin
+            git reset --hard origin/main
+            echo "✓ Code updated to $(git rev-parse --short HEAD)"
+
+            echo "=== Updating service file ==="
+            cp /opt/atlas/AIDE/atlas_gateway.py /home/atlas/.atlas/atlas_gateway.py
+            chown atlas:atlas /home/atlas/.atlas/atlas_gateway.py
+
+            echo "=== Restarting ATLAS ==="
+            systemctl restart atlas
+            sleep 5
+
+            echo "=== Verifying ==="
+            systemctl is-active --quiet atlas \
+              && echo "✅ ATLAS is running" \
+              || { echo "❌ ATLAS failed to start"; journalctl -u atlas -n 20 --no-pager; exit 1; }
