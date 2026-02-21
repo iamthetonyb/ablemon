@@ -1,0 +1,67 @@
+# ATLAS Skill Registry
+# This file is auto-discovered by skills/loader.py
+# Skills are loaded from skills/library/[name]/ directories
+
+version: "1.0"
+last_updated: "2026-02-21"
+
+skills:
+  copywriting:
+    description: "NLP-targeted direct-response copywriting with psychological profiling"
+    triggers:
+      - "respond"
+      - "reply"
+      - "email"
+      - "write"
+      - "draft"
+      - "message"
+      - "copy"
+      - "pitch"
+      - "follow up"
+      - "reach out"
+    context_boosters:
+      - "prospect"
+      - "client"
+      - "customer"
+      - "lead"
+      - "convert"
+      - "sell"
+    type: "behavioral"  # Primarily SKILL.md protocol
+    trust_level: "L1_OBSERVE"
+    requires_approval: false
+    created: "2026-02-21"
+    last_used: null
+    use_count: 0
+
+  notion:
+    description: "Notion workspace integration - pages, databases, blocks"
+    triggers:
+      - "notion"
+      - "create page"
+      - "save to notion"
+      - "add to notion"
+      - "search notion"
+      - "update notion"
+      - "notion database"
+      - "log this"
+    type: "tool"  # Primarily implement.py execution
+    trust_level: "L2_SUGGEST"
+    requires_approval: true  # API calls need approval
+    created: "2026-02-21"
+    last_used: null
+    use_count: 0
+    dependencies:
+      - "aiohttp"
+    env_required:
+      - "NOTION_API_KEY"
+
+# Skill Types:
+# - "behavioral": Protocol-driven, SKILL.md is primary (injected into LLM context)
+# - "tool": Action-driven, implement.py is primary (executed as code)
+# - "hybrid": Both protocol and execution are significant
+
+# Trust Levels:
+# - L1_OBSERVE: Read-only, no side effects
+# - L2_SUGGEST: Can propose actions, needs confirmation
+# - L3_ACT: Can execute with logging
+# - L4_AUTONOMOUS: Full autonomy
