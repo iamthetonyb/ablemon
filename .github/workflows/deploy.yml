@@ -32,13 +32,15 @@ jobs:
             git reset --hard origin/main
             echo "✓ Code updated to $(git rev-parse --short HEAD)"
 
-            echo "=== Updating service file ==="
+                        echo "=== Updating ATLAS files ==="
             rsync -av --delete /opt/atlas/AIDE/atlas/ /home/atlas/.atlas/atlas/
             cp /opt/atlas/AIDE/ATLAS.md /home/atlas/.atlas/ATLAS.md
             cp /opt/atlas/AIDE/SOUL.md /home/atlas/.atlas/SOUL.md
             chown -R atlas:atlas /home/atlas/.atlas/
 
-            chown atlas:atlas /home/atlas/.atlas/atlas_gateway.py
+            echo "=== Updating systemd service ==="
+            cp /opt/atlas/AIDE/atlas/atlas.service /etc/systemd/system/atlas.service
+            systemctl daemon-reload
 
             echo "=== Restarting ATLAS ==="
             systemctl restart atlas
