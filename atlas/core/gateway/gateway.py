@@ -287,10 +287,10 @@ class ATLASGateway:
         nvidia_key = os.environ.get("NVIDIA_API_KEY")
         if nvidia_key:
             try:
-                providers.append(NVIDIANIMProvider(ProviderConfig(
+                providers.append(NVIDIANIMProvider(
                     api_key=nvidia_key,
                     model="qwen/qwen3.5-397b-a17b",
-                )))
+                ))
                 logger.info("Provider added: NVIDIA NIM")
             except Exception as e:
                 logger.warning(f"Failed to init NVIDIA provider: {e}")
