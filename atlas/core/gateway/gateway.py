@@ -290,11 +290,11 @@ class ATLASGateway:
         if openrouter_key:
             try:
                 # Primary Provider: Qwen 3.5 397B (via OpenRouter FP8)
-                providers.append(OpenRouterProvider(ProviderConfig(
+                providers.append(OpenRouterProvider(
                     api_key=openrouter_key,
                     model="qwen/qwen3.5-397b-a17b",
                     timeout=120.0
-                )))
+                ))
                 logger.info("Provider added: OpenRouter (Qwen 397B)")
             except Exception as e:
                 logger.warning(f"Failed to init OpenRouter provider: {e}")
@@ -333,11 +333,11 @@ class ATLASGateway:
         if openrouter_key:
             try:
                 # Primary Vision Provider: Moonshot Kimi 2.5 (OpenRouter)
-                providers.append(OpenRouterProvider(ProviderConfig(
+                providers.append(OpenRouterProvider(
                     api_key=openrouter_key,
                     model="moonshotai/moonshot-v1-auto", # Also known as kimi-k2.5 equivalent
                     timeout=120.0
-                )))
+                ))
                 logger.info("Provider added: OpenRouter Vision (Kimi)")
             except Exception as e:
                 logger.warning(f"Failed to init OpenRouter vision provider: {e}")
