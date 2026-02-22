@@ -665,6 +665,17 @@ class ATLASGateway:
             await update.message.reply_text("⚠️ Unauthorized")
             return
 
+        text_lower = message_text.strip().lower()
+        if text_lower in ["approve", "deny"] and self.approval_workflow.pending:
+            latest_request_id = list(self.approval_workflow.pending.keys())[-1]
+            if text_lower == "approve":
+                await self.approval_workflow.approve_programmatically(latest_request_id, approved_by=int(user_id))
+                await update.message.reply_text("✅ Approved via text message.")
+            else:
+                await self.approval_workflow.deny_programmatically(latest_request_id, denied_by=int(user_id))
+                await update.message.reply_text("❌ Denied via text message.")
+            return
+
         # Process through pipeline
         response = await self.process_message(
             message=message,
@@ -685,6 +696,18 @@ class ATLASGateway:
         
         # Check for media content
         message_text = update.message.text or update.message.caption or ""
+        
+        text_lower = message_text.strip().lower()
+        if text_lower in ["approve", "deny"] and self.approval_workflow.pending:
+            latest_request_id = list(self.approval_workflow.pending.keys())[-1]
+            if text_lower == "approve":
+                await self.approval_workflow.approve_programmatically(latest_request_id, approved_by=int(user_id))
+                await update.message.reply_text("✅ Approved via text message.")
+            else:
+                await self.approval_workflow.deny_programmatically(latest_request_id, denied_by=int(user_id))
+                await update.message.reply_text("❌ Denied via text message.")
+            return
+
         message = message_text
         
         if update.message.photo:
@@ -753,7 +776,7 @@ class ATLASGateway:
 
     async def start_master_bot(self):
         """Start the master Telegram bot"""
-        self.master_bot = Application.builder().token(self.bot_token).build()
+        self.master_bot = Application.builder().token(self.bot_token).concurrent_updates(True).build()
 
         # Add handlers
         self.master_bot.add_handler(CommandHandler("start", self._cmd_start))
@@ -780,7 +803,7 @@ class ATLASGateway:
         if not client:
             raise ValueError(f"Client {client_id} not found")
 
-        app = Application.builder().token(client.telegram_bot_token).build()
+        app = Application.builder().token(client.telegram_bot_token).concurrent_updates(True).build()
 
         async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await self._handle_client_message(client_id, update, context)
