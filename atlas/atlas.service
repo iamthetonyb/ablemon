@@ -1,0 +1,39 @@
+[Unit]
+Description=ATLAS - Autonomous Task & Learning Agent System
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=atlas
+Group=atlas
+WorkingDirectory=/home/atlas/.atlas
+Environment="PATH=/home/atlas/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+
+# Load environment from .env file
+EnvironmentFile=-/home/atlas/.atlas/.env
+
+# Run the ATLAS agent
+ExecStart=/usr/bin/python3 /home/atlas/.atlas/atlas/start.py
+
+# Restart on failure
+Restart=on-failure
+RestartSec=10
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=atlas
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/atlas/.atlas
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
