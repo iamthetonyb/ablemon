@@ -32,8 +32,12 @@ jobs:
             git reset --hard origin/main
             echo "✓ Code updated to $(git rev-parse --short HEAD)"
 
-            echo "=== Installing Python dependencies ==="
-            pip3 install -r /opt/atlas/AIDE/atlas/requirements.txt --quiet
+            echo "=== Setting up Python virtual environment ==="
+            if [ ! -d /home/atlas/.atlas/venv ]; then
+              python3 -m venv /home/atlas/.atlas/venv
+              chown -R atlas:atlas /home/atlas/.atlas/venv
+            fi
+            /home/atlas/.atlas/venv/bin/pip install -r /opt/atlas/AIDE/atlas/requirements.txt --quiet --upgrade
 
             echo "=== Updating ATLAS files ==="
             rsync -av --delete /opt/atlas/AIDE/atlas/ /home/atlas/.atlas/atlas/
