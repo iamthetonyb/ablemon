@@ -319,10 +319,10 @@ class ATLASGateway:
 
         ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
         try:
-            providers.append(OllamaProvider(ProviderConfig(
+            providers.append(OllamaProvider(
                 base_url=ollama_url,
                 model="llama3.2",
-            )))
+            ))
             logger.info("Provider added: Ollama (local fallback)")
         except Exception as e:
             logger.warning(f"Failed to init Ollama provider: {e}")
