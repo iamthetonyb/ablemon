@@ -32,6 +32,9 @@ jobs:
             git reset --hard origin/main
             echo "✓ Code updated to $(git rev-parse --short HEAD)"
 
+            echo "=== Ensuring python3-venv is installed ==="
+            apt-get update -qq && apt-get install -y -qq python3-venv python3-pip > /dev/null
+
             echo "=== Setting up Python virtual environment ==="
             if [ ! -d /home/atlas/.atlas/venv ]; then
               python3 -m venv /home/atlas/.atlas/venv
