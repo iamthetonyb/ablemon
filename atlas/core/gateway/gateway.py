@@ -289,13 +289,13 @@ class ATLASGateway:
         openrouter_key = os.environ.get("OPENROUTER_API_KEY")
         if openrouter_key:
             try:
-                # Primary Provider: Qwen 2.5 72B Instruct (via OpenRouter FP8)
+                # Primary Provider: Qwen 3.5 397B (via OpenRouter FP8)
                 providers.append(OpenRouterProvider(ProviderConfig(
                     api_key=openrouter_key,
-                    model="qwen/qwen-2.5-72b-instruct",
+                    model="qwen/qwen3.5-397b-a17b",
                     timeout=120.0
                 )))
-                logger.info("Provider added: OpenRouter (Qwen 72B)")
+                logger.info("Provider added: OpenRouter (Qwen 397B)")
             except Exception as e:
                 logger.warning(f"Failed to init OpenRouter provider: {e}")
 
@@ -428,7 +428,7 @@ class ATLASGateway:
                         "require_parameters": True,
                         "data_collection": "deny"
                     },
-                    models=["qwen/qwen-2.5-72b-instruct"],
+                    models=["qwen/qwen3.5-397b-a17b"],
                     route="fallback",
                     # Allow massive context scaling in OpenRouter
                     extra_body={
