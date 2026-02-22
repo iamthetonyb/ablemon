@@ -128,6 +128,11 @@ class OpenRouterProvider(LLMProvider):
         for key in ["top_p", "top_k", "presence_penalty", "repetition_penalty", "seed"]:
             if key in kwargs:
                 payload[key] = kwargs[key]
+                
+        # Forward extra_body parameters if requested
+        if kwargs.get("extra_body"):
+            for k, v in kwargs["extra_body"].items():
+                payload[k] = v
 
         try:
             async with session.post(

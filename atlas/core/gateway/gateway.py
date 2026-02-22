@@ -415,7 +415,7 @@ class ATLASGateway:
                 result = await self.provider_chain.complete(
                     msgs,
                     tools=ATLAS_TOOL_DEFS,
-                    max_tokens=65536, # OpenRouter supports massive dynamic contexts natively 
+                    max_tokens=16384, # Reduced to prevent OpenRouter from reserving massive account balances and triggering 429
                     temperature=0.60,
                     top_p=0.95,
                     top_k=20,
@@ -772,7 +772,7 @@ class ATLASGateway:
         # Wire approval workflow to the bot
         self.approval_workflow.set_bot(self.master_bot.bot)
 
-        await self.master_bot.updater.start_polling()
+        await self.master_bot.updater.start_polling(drop_pending_updates=True)
 
     async def start_client_bot(self, client_id: str):
         """Start a client's Telegram bot"""
@@ -789,7 +789,7 @@ class ATLASGateway:
 
         await app.initialize()
         await app.start()
-        await app.updater.start_polling()
+        await app.updater.start_polling(drop_pending_updates=True)
 
         self.client_bots[client_id] = app
 
