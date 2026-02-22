@@ -348,13 +348,13 @@ class ATLASGateway:
         nvidia_key = os.environ.get("NVIDIA_API_KEY")
         if nvidia_key:
             try:
-                # Primary Vision Provider: Llama 3.2 90B Vision (Massive VLM on NIM)
+                # Primary Vision Provider: Moonshot Kimi 2.5 (Massive MM on NIM)
                 providers.append(NVIDIANIMProvider(
                     api_key=nvidia_key,
-                    model="meta/llama-3.2-90b-vision-instruct",
+                    model="moonshotai/kimi-k2.5",
                     timeout=120.0
                 ))
-                logger.info("Provider added: NVIDIA NIM Vision (Llama 3.2 90B Vision)")
+                logger.info("Provider added: NVIDIA NIM Vision (Kimi 2.5)")
             except Exception as e:
                 logger.warning(f"Failed to init NVIDIA vision provider: {e}")
                 
