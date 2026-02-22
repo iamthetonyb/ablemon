@@ -13,8 +13,8 @@ WorkingDirectory=/home/atlas/.atlas/atlas
 Environment="PATH=/home/atlas/.local/bin:/usr/local/bin:/usr/bin:/bin"
 Environment="PYTHONUNBUFFERED=1"
 
-# Load environment from .env file
-EnvironmentFile=-/home/atlas/.atlas/atlas/.env
+# Load environment from .env file (parent directory, not in git)
+EnvironmentFile=-/home/atlas/.atlas/.env
 
 # Run the ATLAS agent using venv Python
 ExecStart=/home/atlas/.atlas/venv/bin/python /home/atlas/.atlas/atlas/start.py
