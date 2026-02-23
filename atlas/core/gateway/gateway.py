@@ -431,8 +431,23 @@ class ATLASGateway:
                         temperature=0.60
                     )
                 else:
+                    # Sanitize msgs for the text-only provider chain by converting multimodal lists into pure text strings
+                    text_only_msgs = []
+                    for msg in msgs:
+                        if isinstance(msg.content, list):
+                            extracted_text = next((item.get("text", "") for item in msg.content if item.get("type") == "text"), "")
+                            text_only_msgs.append(Message(
+                                role=msg.role, 
+                                content=extracted_text, 
+                                name=msg.name, 
+                                tool_call_id=msg.tool_call_id, 
+                                tool_calls=msg.tool_calls
+                            ))
+                        else:
+                            text_only_msgs.append(msg)
+                            
                     result = await self.provider_chain.complete(
-                        msgs,
+                        text_only_msgs,
                         tools=ATLAS_TOOL_DEFS,
                         max_tokens=16384, # Reduced to prevent OpenRouter from reserving massive account balances and triggering 429
                         temperature=0.60,
