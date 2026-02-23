@@ -458,15 +458,10 @@ class ATLASGateway:
                         # Target atlas-cloud specifically, enabling up to 1M YaRN context expansion
                         provider={
                             "order": ["AtlasCloud"],
-                            "allow_fallbacks": False,
-                            "require_parameters": True,
+                            "allow_fallbacks": True,
                             "data_collection": "deny"
                         },
-                        models=["qwen/qwen3.5-397b-a17b"],
-                        # Allow massive context scaling in OpenRouter
-                        extra_body={
-                            "chat_template_kwargs": {"enable_thinking": True}
-                        }
+                        models=["qwen/qwen3.5-397b-a17b"]
                     )
 
                 # Step 4: Tool dispatch if AI called a tool
