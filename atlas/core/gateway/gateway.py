@@ -403,44 +403,74 @@ class ATLASGateway:
             msgs = [Message(role=Role.SYSTEM, content=ATLAS_SYSTEM_PROMPT)]
             msgs.append(Message(role=Role.USER, content=message))
 
-            # Route to a vision-capable provider if message is multimodal
-            if isinstance(message, list):
-                result = await self.vision_chain.complete(
-                    msgs,
-                    tools=ATLAS_TOOL_DEFS,
-                    max_tokens=4096,
-                    temperature=0.60
-                )
-            else:
-                result = await self.provider_chain.complete(
-                    msgs,
-                    tools=ATLAS_TOOL_DEFS,
-                    max_tokens=16384, # Reduced to prevent OpenRouter from reserving massive account balances and triggering 429
-                    temperature=0.60,
-                    top_p=0.95,
-                    top_k=20,
-                    presence_penalty=0,
-                    repetition_penalty=1,
-                    # Target atlas-cloud specifically, enabling up to 1M YaRN context expansion
-                    provider={
-                        "order": ["OpenRouter"],
-                        "allow_fallbacks": True,
-                        "require_parameters": True,
-                        "data_collection": "deny"
-                    },
-                    models=["qwen/qwen3.5-397b-a17b"],
-                    route="fallback",
-                    # Allow massive context scaling in OpenRouter
-                    extra_body={
-                        "chat_template_kwargs": {"enable_thinking": True}
-                    }
-                )
+            for loop_iteration in range(5):
+                # Route to a vision-capable provider if message is multimodal (only needed for first pass)
+                if isinstance(message, list) and loop_iteration == 0:
+                    result = await self.vision_chain.complete(
+                        msgs,
+                        tools=ATLAS_TOOL_DEFS,
+                        max_tokens=4096,
+                        temperature=0.60
+                    )
+                else:
+                    result = await self.provider_chain.complete(
+                        msgs,
+                        tools=ATLAS_TOOL_DEFS,
+                        max_tokens=16384, # Reduced to prevent OpenRouter from reserving massive account balances and triggering 429
+                        temperature=0.60,
+                        top_p=0.95,
+                        top_k=20,
+                        presence_penalty=0,
+                        repetition_penalty=1,
+                        # Target atlas-cloud specifically, enabling up to 1M YaRN context expansion
+                        provider={
+                            "order": ["OpenRouter"],
+                            "allow_fallbacks": True,
+                            "require_parameters": True,
+                            "data_collection": "deny"
+                        },
+                        models=["qwen/qwen3.5-397b-a17b"],
+                        route="fallback",
+                        # Allow massive context scaling in OpenRouter
+                        extra_body={
+                            "chat_template_kwargs": {"enable_thinking": True}
+                        }
+                    )
 
-            # Step 4: Tool dispatch if AI called a tool
-            if result.tool_calls:
-                return await self._handle_tool_call(result.tool_calls[0], update, user_id)
+                # Step 4: Tool dispatch if AI called a tool
+                if result.tool_calls:
+                    tool_call = result.tool_calls[0]
+                    
+                    # Log the assistant's action into the memory array
+                    msgs.append(Message(
+                        role=Role.ASSISTANT,
+                        content=result.content or "",
+                        tool_calls=[tool_call]
+                    ))
+                    
+                    # Execute the tool
+                    tool_output = await self._handle_tool_call(tool_call, update, user_id)
+                    
+                    # Notify the user on Telegram that a tool was executed so they aren't waiting in silence
+                    if update and update.message:
+                        try:
+                            # Drop the Markdown parse mode for tool outputs to prevent unescaped char errors from code snippets
+                            await update.message.reply_text(f"⚙️ `[{tool_call.name}]`\n{tool_output}")
+                        except Exception:
+                            pass
+                            
+                    # Inject the tool observation back into the prompt for the next loop
+                    msgs.append(Message(
+                        role=Role.TOOL,
+                        content=str(tool_output),
+                        name=tool_call.name,
+                        tool_call_id=tool_call.id
+                    ))
+                    continue
 
-            return result.content or "⚠️ Empty response from AI."
+                return result.content or "⚠️ Empty response from AI."
+                
+            return "⚠️ Agent exceeded maximum tool iterations (5)."
 
         except Exception as e:
             logger.error(f"AI completion failed: {e}", exc_info=True)
@@ -676,15 +706,21 @@ class ATLASGateway:
                 await update.message.reply_text("❌ Denied via text message.")
             return
 
-        # Process through pipeline
-        response = await self.process_message(
-            message=message,
-            user_id=user_id,
-            metadata={"source": "master_telegram", "is_owner": True},
-            update=update,
-        )
+        # Process through pipeline without blocking the PTB user queue
+        async def _run_pipeline():
+            try:
+                response = await self.process_message(
+                    message=message,
+                    user_id=user_id,
+                    metadata={"source": "master_telegram", "is_owner": True},
+                    update=update,
+                )
+                await update.message.reply_text(response, parse_mode="Markdown")
+            except Exception as e:
+                logger.error(f"Pipeline error: {e}", exc_info=True)
+                await update.message.reply_text(f"⚠️ Internal error: {e}")
 
-        await update.message.reply_text(response, parse_mode="Markdown")
+        asyncio.create_task(_run_pipeline())
 
     async def _handle_approval_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle Telegram inline button callbacks for approval workflow."""
@@ -733,26 +769,31 @@ class ATLASGateway:
             await update.message.reply_text("⚠️ Client not configured")
             return
 
-        # Process through pipeline with client's trust tier
-        response = await self.process_message(
-            message=message,
-            user_id=user_id,
-            client_id=client_id,
-            metadata={
-                "source": f"client_telegram:{client_id}",
-                "trust_tier": client.trust_tier
-            },
-            update=update,
-        )
+        # Process through pipeline without blocking
+        async def _run_client_pipeline():
+            try:
+                response = await self.process_message(
+                    message=message,
+                    user_id=user_id,
+                    client_id=client_id,
+                    metadata={
+                        "source": f"client_telegram:{client_id}",
+                        "trust_tier": client.trust_tier
+                    },
+                    update=update,
+                )
+                # Log response
+                self.transcript_manager.log_message(client_id, {
+                    "user_id": "bot",
+                    "message": response,
+                    "direction": "outbound"
+                })
+                await update.message.reply_text(response)
+            except Exception as e:
+                logger.error(f"Client pipeline error: {e}", exc_info=True)
+                await update.message.reply_text(f"⚠️ Internal error")
 
-        # Log response
-        self.transcript_manager.log_message(client_id, {
-            "user_id": "bot",
-            "message": response,
-            "direction": "outbound"
-        })
-
-        await update.message.reply_text(response)
+        asyncio.create_task(_run_client_pipeline())
 
     async def _health_handler(self, request: web.Request) -> web.Response:
         """HTTP health check endpoint for Docker/load balancers"""
