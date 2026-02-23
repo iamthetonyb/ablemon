@@ -215,12 +215,22 @@ class LLMProvider(ABC):
 
     def _convert_messages(self, messages: List[Message]) -> List[Dict]:
         """Convert normalized messages to provider format (override if needed)"""
+        import json
         result = []
         for msg in messages:
             converted = {
                 "role": msg.role.value,
-                "content": msg.content
             }
+            
+            # OpenAI / OpenRouter schemas require content to be present. 
+            # If assistant is doing a tool call, content should usually be None or null, not an empty string if omitted
+            if msg.role == Role.ASSISTANT and msg.tool_calls and not msg.content:
+                # Some strict parsers reject empty string for assistant tool calls, omit content entirely or pass None
+                # OpenRouter expects content to be strictly string or array, if empty, omitting is safest or passing None depending on backend. We'll omit it if empty and there are tool calls.
+                pass 
+            else:
+                converted["content"] = msg.content
+
             if msg.name:
                 converted["name"] = msg.name
             if msg.tool_call_id:
@@ -232,7 +242,8 @@ class LLMProvider(ABC):
                         "type": "function",
                         "function": {
                             "name": tc.name,
-                            "arguments": tc.arguments
+                            # OpenAI spec REQUIRES arguments to be a JSON string, not a dict
+                            "arguments": tc.arguments if isinstance(tc.arguments, str) else json.dumps(tc.arguments)
                         }
                     }
                     for tc in msg.tool_calls
