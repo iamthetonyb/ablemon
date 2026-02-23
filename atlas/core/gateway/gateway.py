@@ -507,6 +507,13 @@ class ATLASGateway:
 
         except Exception as e:
             logger.error(f"AI completion failed: {e}", exc_info=True)
+            if update and update.message:
+                try:
+                    import json
+                    dump = json.dumps([m.__dict__ for m in msgs], default=str, indent=2)
+                    await update.message.reply_text(f"⚠️ Payload Dump:\n```json\n{dump[:3500]}\n```")
+                except Exception as dump_e:
+                    pass
             return f"⚠️ AI error: {e}"
 
     async def _handle_tool_call(self, tool_call, update: Optional[Update], user_id: str) -> str:
