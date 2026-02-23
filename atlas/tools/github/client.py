@@ -29,7 +29,7 @@ class GitHubClient:
 
     def __init__(self):
         self.token = os.environ.get("GITHUB_TOKEN", "")
-        self.owner = os.environ.get("ATLAS_OWNER_USERNAME", "")
+        self.owner = os.environ.get("ATLAS_OWNER_USERNAME", "").lstrip("@")
         self.audit_log = Path("audit/logs/github_actions.jsonl")
         self.audit_log.parent.mkdir(parents=True, exist_ok=True)
 
@@ -107,6 +107,8 @@ class GitHubClient:
         from_branch: str = "main",
     ) -> Dict:
         """Create a new branch from an existing branch."""
+        if repo.startswith(f"{self.owner}/"):
+            repo = repo[len(self.owner) + 1:]
         # Get SHA of source branch
         ref_data = await self._get(f"/repos/{self.owner}/{repo}/git/refs/heads/{from_branch}")
         sha = ref_data["object"]["sha"]
@@ -129,6 +131,9 @@ class GitHubClient:
         Create or update a single file in a repo.
         content is raw string; it will be base64-encoded automatically.
         """
+        # Ensure repo doesn't contain owner/ prefix (AI sometimes provides "owner/repo")
+        if repo.startswith(f"{self.owner}/"):
+            repo = repo[len(self.owner) + 1:]
         encoded = base64.b64encode(content.encode()).decode()
         payload: Dict = {
             "message": message,
@@ -177,6 +182,8 @@ class GitHubClient:
         base: str = "main",
     ) -> Dict:
         """Open a pull request."""
+        if repo.startswith(f"{self.owner}/"):
+            repo = repo[len(self.owner) + 1:]
         result = await self._post(
             f"/repos/{self.owner}/{repo}/pulls",
             {"title": title, "body": body, "head": head, "base": base},
@@ -190,6 +197,8 @@ class GitHubClient:
         branch: str = "gh-pages",
     ) -> Dict:
         """Enable GitHub Pages for a repo from the given branch."""
+        if repo.startswith(f"{self.owner}/"):
+            repo = repo[len(self.owner) + 1:]
         result = await self._post(
             f"/repos/{self.owner}/{repo}/pages",
             {"source": {"branch": branch, "path": "/"}},
