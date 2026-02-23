@@ -457,7 +457,7 @@ class ATLASGateway:
                         repetition_penalty=1,
                         # Target atlas-cloud specifically, enabling up to 1M YaRN context expansion
                         provider={
-                            "order": ["Atlas Cloud"],
+                            "order": ["AtlasCloud"],
                             "allow_fallbacks": False,
                             "require_parameters": True,
                             "data_collection": "deny"
