@@ -118,7 +118,7 @@ ATLAS_TOOL_DEFS: List[Dict] = [
                     "repo": {"type": "string", "description": "Repository name"},
                     "files": {
                         "type": "object",
-                        "description": "Map of {filepath: file_content_string}",
+                        "description": "Map of {filepath: file_content_string}. CRITICAL: If your code is massive (> 10,000 chars), DO NOT PUT THE CODE HERE to avoid JSON crashes. INSTEAD, output the raw code in a Markdown block in your normal conversational response FIRST, and pass the exact string '<EXTRACT>' as the value here. ATLAS will auto-extract it.",
                         "additionalProperties": {"type": "string"},
                     },
                     "message": {"type": "string", "description": "Commit message (conventional commits format)"},
@@ -485,7 +485,7 @@ class ATLASGateway:
                     
                     for tool_call in result.tool_calls:
                         # Execute the tool
-                        tool_output = await self._handle_tool_call(tool_call, update, user_id)
+                        tool_output = await self._handle_tool_call(tool_call, update, user_id, msgs)
                         
                         # Notify the user on Telegram that a tool was executed so they aren't waiting in silence
                         if update and update.message:
@@ -522,7 +522,7 @@ class ATLASGateway:
                     pass
             return f"⚠️ AI error: {e}"
 
-    async def _handle_tool_call(self, tool_call, update: Optional[Update], user_id: str) -> str:
+    async def _handle_tool_call(self, tool_call, update: Optional[Update], user_id: str, msgs: List["Message"] = None) -> str:
         """Dispatch a tool call from the AI to the correct client, with approval for writes."""
         name = tool_call.name
         args = tool_call.arguments if isinstance(tool_call.arguments, dict) else {}
@@ -577,6 +577,20 @@ class ATLASGateway:
                 return f"✅ Repo created: {result['html_url']}"
 
             if name == "github_push_files":
+                # Handle <EXTRACT> bypass for massive code blocks
+                if msgs:
+                    for path, content in args.get("files", {}).items():
+                        if content == "<EXTRACT>":
+                            # Scan back through msgs
+                            import re
+                            for m in reversed(msgs):
+                                if m.role in (Role.ASSISTANT, Role.USER) and m.content:
+                                    # Find all markdown blocks
+                                    blocks = re.findall(r'```(?:\w+)?\n(.*?)```', m.content, re.DOTALL)
+                                    if blocks:
+                                        args["files"][path] = blocks[-1]
+                                        break
+                                        
                 approval = await self.approval_workflow.request_approval(
                     operation="github_push_files",
                     details=args,
