@@ -29,24 +29,27 @@ class AnthropicProvider(LLMProvider):
     """
     Anthropic Claude Provider for premium inference.
 
-    Default model: claude-sonnet-4-20250514
-    Premium model: claude-opus-4-5-20251101
+    Default model: claude-sonnet-4-6 (latest Sonnet — standard workloads)
+    Premium model: claude-opus-4-6 (latest Opus — critical thinking, planning)
 
-    Use for: Complex reasoning, legal review, sensitive communications
+    Model routing: Opus for complex reasoning/planning, Sonnet for execution.
     """
 
-    DEFAULT_MODEL = "claude-sonnet-4-20250514"
-    PREMIUM_MODEL = "claude-opus-4-5-20251101"
+    DEFAULT_MODEL = "claude-sonnet-4-6"
+    PREMIUM_MODEL = "claude-opus-4-6"
     BASE_URL = "https://api.anthropic.com/v1"
     API_VERSION = "2023-06-01"
 
     # Model pricing ($ per million tokens)
     MODEL_PRICING = {
+        "claude-opus-4-6": {"input": 15.00, "output": 75.00},
+        "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
         "claude-opus-4-5-20251101": {"input": 15.00, "output": 75.00},
         "claude-sonnet-4-20250514": {"input": 3.00, "output": 15.00},
         "claude-3-opus-20240229": {"input": 15.00, "output": 75.00},
         "claude-3-sonnet-20240229": {"input": 3.00, "output": 15.00},
         "claude-3-haiku-20240307": {"input": 0.25, "output": 1.25},
+        "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.00},
     }
 
     def __init__(

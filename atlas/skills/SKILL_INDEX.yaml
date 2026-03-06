@@ -3,7 +3,7 @@
 # Skills are loaded from skills/library/[name]/ directories
 
 version: "1.0"
-last_updated: "2026-02-21"
+last_updated: "2026-03-05"
 
 skills:
 
@@ -260,6 +260,21 @@ skills:
       openclaw: "https://github.com/openclaw/openclaw/tree/main/skills/skill-creator"
       registry: "https://skills.sh"
     created: "2026-02-22"
+    use_count: 0
+
+  skill-tester:
+    description: "Test and validate skills before registration — checks format, runs malware scan, validates package, verifies registry entry, and does a dry-run load test."
+    triggers:
+      - "test skill"
+      - "validate skill"
+      - "skill test"
+      - "check skill"
+    type: "tool"
+    trust_level: "L2_SUGGEST"
+    tools_used: [bash, read]
+    requires_approval: false
+    implementation: "atlas/skills/library/skill-tester/implement.py"
+    created: "2026-03-05"
     use_count: 0
 
   skills-sh-discovery:

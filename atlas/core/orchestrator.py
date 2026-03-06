@@ -258,6 +258,44 @@ class IntentDetector:
         return matches
 
 
+class ModelRouter:
+    """
+    Routes tasks to appropriate model tier based on complexity and domain.
+
+    Opus: planning, architecture, legal, security, self-improvement, audits
+    Sonnet: code generation, research synthesis, writing, standard workloads
+    """
+
+    HIGH_STAKES_DOMAINS = {"legal", "security", "financial", "production", "deploy", "audit"}
+    OPUS_INTENTS = {IntentType.PLANNING, IntentType.ANALYSIS}
+
+    @classmethod
+    def select_model(
+        cls,
+        complexity_score: "ComplexityScore",
+        intents: List["IntentMatch"],
+        user_input: str,
+    ) -> str:
+        """
+        Returns 'premium' for Opus or 'default' for Sonnet.
+        """
+        # High complexity always gets Opus
+        if complexity_score.score >= 0.7:
+            return "premium"
+
+        # High-stakes domains get Opus
+        text_lower = user_input.lower()
+        if any(domain in text_lower for domain in cls.HIGH_STAKES_DOMAINS):
+            return "premium"
+
+        # Planning and deep analysis intents get Opus
+        for intent in intents:
+            if intent.confidence >= 0.7 and intent.intent in cls.OPUS_INTENTS:
+                return "premium"
+
+        return "default"
+
+
 class SkillOrchestrator:
     """
     Main orchestrator that plans and executes skill invocations.
@@ -265,9 +303,10 @@ class SkillOrchestrator:
     Flow:
     1. Detect intent from user input
     2. Map intents to skills
-    3. Build execution plan
-    4. Execute skills in dependency order
-    5. Aggregate results
+    3. Route to appropriate model tier (Opus for critical, Sonnet for standard)
+    4. Build execution plan
+    5. Execute skills in dependency order
+    6. Aggregate results
     """
 
     def __init__(
@@ -278,6 +317,7 @@ class SkillOrchestrator:
         self.llm_provider = llm_provider
         self.enable_research = enable_research
         self.intent_detector = IntentDetector()
+        self.model_router = ModelRouter()
 
         # Skill registry: intent -> skill configurations
         self.skill_map = {
@@ -414,6 +454,13 @@ class SkillOrchestrator:
         elif len(skills) > 2 or complexity_score.score >= 0.35:
             complexity = "moderate"
 
+        # Route to appropriate model tier
+        model_tier = ModelRouter.select_model(complexity_score, intents, user_input)
+        if model_tier == "premium":
+            logger.info(
+                f"ModelRouter → Opus (premium) for complexity={complexity_score.score:.2f}"
+            )
+
         if complexity_score.use_swarm:
             logger.info(
                 f"Complexity score {complexity_score.score:.2f} >= 0.6 → "
@@ -425,13 +472,15 @@ class SkillOrchestrator:
             i.intent == IntentType.RESEARCH for i in intents
         )
 
-        return OrchestratorPlan(
+        plan = OrchestratorPlan(
             intents=intents,
             skills=skills,
             requires_research=requires_research,
             estimated_complexity=complexity,
             complexity_score=complexity_score,
         )
+        plan.model_tier = model_tier  # 'premium' (Opus) or 'default' (Sonnet)
+        return plan
 
     async def execute(
         self,

@@ -233,6 +233,70 @@ class WebhookServer:
             "sources": list(self.handlers.keys()),
         })
 
+    async def _handle_status(self, request) -> "web.Response":
+        """
+        Dashboard status endpoint — returns system health, active tasks,
+        recent audit entries, skill stats, and provider chain status.
+
+        Popebot-inspired: provides a lightweight API for agent monitoring.
+        """
+        from pathlib import Path
+        import yaml
+
+        atlas_home = Path.home() / ".atlas"
+        status = {
+            "system": "ATLAS",
+            "status": "operational",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "events_received": len(self.event_log),
+            "webhook_sources": list(self.handlers.keys()),
+        }
+
+        # Active objectives
+        objectives_file = atlas_home / "memory" / "current_objectives.yaml"
+        if objectives_file.exists():
+            try:
+                with open(objectives_file) as f:
+                    status["objectives"] = yaml.safe_load(f) or {}
+            except Exception:
+                status["objectives"] = {"error": "failed to load"}
+        else:
+            status["objectives"] = {}
+
+        # Pending queue count
+        queue_file = atlas_home / "queue" / "pending.yaml"
+        if queue_file.exists():
+            try:
+                with open(queue_file) as f:
+                    queue_data = yaml.safe_load(f) or {}
+                    tasks = queue_data.get("tasks", [])
+                    status["pending_tasks"] = len(tasks)
+            except Exception:
+                status["pending_tasks"] = 0
+        else:
+            status["pending_tasks"] = 0
+
+        # Audit trail summary
+        try:
+            from atlas.audit.git_trail import GitAuditTrail
+            trail = GitAuditTrail(atlas_home)
+            status["audit"] = trail.get_dashboard_summary()
+        except Exception:
+            status["audit"] = {"error": "audit trail unavailable"}
+
+        # Recent webhook events (last 10)
+        status["recent_events"] = [
+            {
+                "source": e.source,
+                "type": e.event_type,
+                "time": e.timestamp.isoformat(),
+                "verified": e.verified,
+            }
+            for e in self.event_log[-10:]
+        ]
+
+        return web.json_response(status)
+
     # ── Server lifecycle ──────────────────────────────────────────────────────
 
     def build_app(self) -> "web.Application":
@@ -243,6 +307,7 @@ class WebhookServer:
         app.router.add_post("/webhook/custom", self._handle_custom)
         app.router.add_post("/webhook/custom/{event_type}", self._handle_custom)
         app.router.add_get("/health", self._handle_health)
+        app.router.add_get("/status", self._handle_status)
         return app
 
     async def start(self):

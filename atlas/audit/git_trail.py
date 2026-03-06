@@ -241,3 +241,150 @@ class GitAuditTrail:
             logger.error(f"Failed to read git history: {e}")
 
         return history
+
+    # ── Popebot-Inspired Enhancements ────────────────────────────────────────
+
+    async def record_job(
+        self,
+        job_id: str,
+        action: str,
+        details: Dict[str, Any],
+        files_changed: Optional[List[Path]] = None,
+    ) -> Optional[str]:
+        """
+        Record a job action with structured commit message (popebot pattern).
+
+        Uses the "repository IS the agent" philosophy — every significant
+        agent action is a git commit for full auditability and reversibility.
+
+        Args:
+            job_id: Unique job identifier (e.g., "skill-create-2026-03-05")
+            action: Action verb (e.g., "started", "completed", "failed")
+            details: Job-specific details
+            files_changed: Files affected by this job step
+        """
+        record = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "job_id": job_id,
+            "action": action,
+            "details": details,
+        }
+        if files_changed:
+            record["files"] = [str(f) for f in files_changed]
+
+        # Write to daily JSONL
+        today_file = self.audit_dir / f"{date.today()}.jsonl"
+        line = json.dumps(record, separators=(",", ":")) + "\n"
+
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self._write_record, today_file, line)
+
+        # Structured commit message (popebot-style)
+        if self.auto_commit and self.repo:
+            summary = details.get("summary", action)
+            commit_msg = f"[JOB:{job_id}] {action}: {summary}"
+            return await self._commit_with_message(commit_msg, today_file, files_changed)
+
+        return None
+
+    async def _commit_with_message(
+        self,
+        message: str,
+        audit_file: Path,
+        files_changed: Optional[List[Path]] = None,
+    ) -> Optional[str]:
+        """Create git commit with custom message"""
+        if not self.repo:
+            return None
+
+        try:
+            self.repo.index.add([str(audit_file.relative_to(self.repo_path))])
+
+            if files_changed:
+                for f in files_changed:
+                    try:
+                        rel_path = f.relative_to(self.repo_path)
+                        self.repo.index.add([str(rel_path)])
+                    except ValueError:
+                        pass
+
+            commit = self.repo.index.commit(message)
+            logger.debug(f"Job commit: {commit.hexsha[:8]} — {message}")
+            return commit.hexsha
+
+        except Exception as e:
+            logger.error(f"Job commit failed: {e}")
+            return None
+
+    def get_job_history(self, job_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, str]]:
+        """
+        Get job history from git log, optionally filtered by job_id.
+
+        Popebot-style: every job action is traceable via git log.
+        """
+        if not self.repo:
+            return []
+
+        history = []
+        prefix = f"[JOB:{job_id}]" if job_id else "[JOB:"
+        try:
+            for commit in self.repo.iter_commits(max_count=limit * 2):
+                msg = commit.message.strip()
+                if msg.startswith("[AUDIT]") or msg.startswith(prefix):
+                    history.append({
+                        "sha": commit.hexsha,
+                        "message": msg,
+                        "date": commit.committed_datetime.isoformat(),
+                        "files": [d.a_path for d in commit.diff(commit.parents[0])] if commit.parents else [],
+                    })
+                    if len(history) >= limit:
+                        break
+        except Exception as e:
+            logger.error(f"Failed to read job history: {e}")
+
+        return history
+
+    def get_dashboard_summary(self) -> Dict[str, Any]:
+        """
+        Generate a dashboard-ready summary of recent audit activity.
+
+        Returns counts and recent entries for the status endpoint.
+        """
+        summary = {
+            "total_actions_today": 0,
+            "total_jobs_today": 0,
+            "recent_actions": [],
+            "action_types": {},
+        }
+
+        today_file = self.audit_dir / f"{date.today()}.jsonl"
+        if not today_file.exists():
+            return summary
+
+        try:
+            with open(today_file) as f:
+                for line in f:
+                    try:
+                        record = json.loads(line.strip())
+                        action = record.get("action", "unknown")
+                        summary["total_actions_today"] += 1
+                        summary["action_types"][action] = summary["action_types"].get(action, 0) + 1
+
+                        if "job_id" in record:
+                            summary["total_jobs_today"] += 1
+
+                        summary["recent_actions"].append({
+                            "time": record.get("timestamp", ""),
+                            "action": action,
+                            "summary": record.get("details", {}).get("summary", ""),
+                        })
+                    except json.JSONDecodeError:
+                        continue
+
+            # Keep only last 10 recent actions
+            summary["recent_actions"] = summary["recent_actions"][-10:]
+
+        except Exception as e:
+            logger.error(f"Failed to build dashboard summary: {e}")
+
+        return summary

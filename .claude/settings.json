@@ -1,0 +1,17 @@
+{
+  "model": "opusplan",
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "WebSearch",
+      "WebFetch",
+      "Bash(git *)",
+      "Bash(python atlas/*)",
+      "Bash(ls *)",
+      "Bash(cat ~/.atlas/*)"
+    ],
+    "deny": []
+  }
+}
