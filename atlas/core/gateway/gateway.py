@@ -282,6 +282,15 @@ class ATLASGateway:
         self.do_client = DigitalOceanClient()
         self.vercel = VercelClient()
 
+        # Skill outcome tracking — logs invocations + user response signals
+        self._last_skill_invoked: Optional[str] = None       # last skill name used
+        self._last_skill_trigger: Optional[str] = None       # the phrase that triggered it
+        self._skill_outcomes_log = self.audit_dir / "skill_outcomes.jsonl"
+
+        # Positive/negative outcome signal words
+        self._positive_signals = {"perfect", "exactly", "great", "good", "thanks", "thank", "love", "yes", "nice", "works", "correct", "right", "nailed"}
+        self._negative_signals = {"no", "wrong", "not what", "try again", "incorrect", "bad", "fix", "redo", "again", "didn't", "doesn't", "nope", "terrible"}
+
         # Client bots
         self.client_bots: Dict[str, Application] = {}
 
@@ -554,12 +563,43 @@ class ATLASGateway:
                     pass
             return f"⚠️ AI error: {e}"
 
+    def _log_skill_outcome(self, skill: str, trigger: str, outcome: str, signal: str):
+        """Append a skill invocation outcome to skill_outcomes.jsonl."""
+        try:
+            import json as _json
+            entry = {
+                "ts": datetime.utcnow().isoformat(),
+                "skill": skill,
+                "trigger": trigger[:200],
+                "outcome": outcome,   # "positive" | "negative" | "unknown"
+                "signal": signal[:100],
+            }
+            with open(self._skill_outcomes_log, "a") as f:
+                f.write(_json.dumps(entry) + "\n")
+        except Exception as e:
+            logger.debug(f"skill outcome log error: {e}")
+
+    def _detect_outcome_signal(self, text: str) -> str:
+        """Return 'positive', 'negative', or 'unknown' from the user's message."""
+        lower = text.lower()
+        for word in self._positive_signals:
+            if word in lower:
+                return "positive"
+        for phrase in self._negative_signals:
+            if phrase in lower:
+                return "negative"
+        return "unknown"
+
     async def _handle_tool_call(self, tool_call, update: Optional[Update], user_id: str, msgs: List["Message"] = None) -> str:
         """Dispatch a tool call from the AI to the correct client, with approval for writes."""
         name = tool_call.name
         args = tool_call.arguments if isinstance(tool_call.arguments, dict) else {}
 
         logger.info(f"Tool call: {name}({args})")
+
+        # Track skill invocation for outcome logging
+        self._last_skill_invoked = name
+        self._last_skill_trigger = str(next((m.content for m in (msgs or [])[::-1] if hasattr(m, "role") and str(m.role) in ("Role.USER", "user")), ""))[:200]
 
         # Short-circuit if parser injected an error (e.g., from truncated JSON args)
         if "error" in args and "JSONDecodeError" in str(args["error"]):
@@ -801,6 +841,19 @@ class ATLASGateway:
                 await self.approval_workflow.deny_programmatically(latest_request_id, denied_by=int(user_id))
                 await update.message.reply_text("❌ Denied via text message.")
             return
+
+        # Detect outcome signal for previous skill invocation
+        if self._last_skill_invoked and isinstance(message_text, str) and message_text:
+            signal = self._detect_outcome_signal(message_text)
+            if signal in ("positive", "negative"):
+                self._log_skill_outcome(
+                    skill=self._last_skill_invoked,
+                    trigger=self._last_skill_trigger or "",
+                    outcome=signal,
+                    signal=message_text[:100],
+                )
+                self._last_skill_invoked = None
+                self._last_skill_trigger = None
 
         # Log inbound
         self.transcript_manager.log_message("master", {
