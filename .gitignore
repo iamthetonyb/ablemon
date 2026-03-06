@@ -13,6 +13,7 @@ atlas-v2/.env
 
 # ATLAS runtime state (lives in ~/.atlas/, not in repo)
 *.log
+audit/logs/
 
 # macOS
 .DS_Store
