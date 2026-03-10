@@ -2,17 +2,17 @@
 # This file is auto-discovered by skills/loader.py
 # Skills are loaded from skills/library/[name]/ directories
 
-version: "1.0"
-last_updated: "2026-03-05"
+version: "2.0"
+last_updated: "2026-03-10"
 
 skills:
 
   # ══════════════════════════════════════════════════════════════
-  # COMMUNICATION SKILLS
+  # COMMUNICATION & MARKETING SKILLS
   # ══════════════════════════════════════════════════════════════
 
   copywriting:
-    description: "NLP-targeted direct-response copywriting with psychological profiling"
+    description: "Complete copywriting + copy-editing protocol. NLP meta-programs, page structure frameworks, CTA guidelines, Seven Sweeps editing. Use for any writing, drafting, copy, email, pitch, landing page, ad copy, tagline, or content creation."
     triggers:
       - "respond"
       - "reply"
@@ -24,6 +24,12 @@ skills:
       - "pitch"
       - "follow up"
       - "reach out"
+      - "landing page"
+      - "headline"
+      - "tagline"
+      - "slogan"
+      - "campaign"
+      - "ad copy"
     context_boosters:
       - "prospect"
       - "client"
@@ -31,11 +37,32 @@ skills:
       - "lead"
       - "convert"
       - "sell"
+      - "cta"
+      - "audience"
     type: "behavioral"
     trust_level: "L1_OBSERVE"
     requires_approval: false
     created: "2026-02-21"
     last_used: null
+    use_count: 0
+
+  paid-ads:
+    description: "Paid advertising campaign creation and optimization. Campaign structure, ad copy, audience targeting, bid strategies for Google/Meta/LinkedIn/TikTok Ads."
+    triggers:
+      - "ads"
+      - "advertising"
+      - "campaign"
+      - "Google Ads"
+      - "Meta Ads"
+      - "Facebook Ads"
+      - "PPC"
+      - "paid media"
+      - "retargeting"
+      - "ROAS"
+    type: "behavioral"
+    trust_level: "L1_OBSERVE"
+    requires_approval: false
+    created: "2026-03-10"
     use_count: 0
 
   status-report:
@@ -147,6 +174,116 @@ skills:
     tools_used: [bash]
     requires_approval: true
     created: "2026-02-03"
+    use_count: 0
+
+  code-refactoring:
+    description: "Structured code refactoring with SOLID principles, behavior validation, and incremental extraction. Use when refactoring, restructuring, decomposing, cleaning up code, or when files exceed 500 lines."
+    triggers:
+      - "refactor"
+      - "restructure"
+      - "decompose"
+      - "clean up code"
+      - "extract method"
+      - "remove duplication"
+      - "apply SOLID"
+      - "reduce complexity"
+    type: "behavioral"
+    trust_level: "L2_SUGGEST"
+    requires_approval: false
+    created: "2026-03-10"
+    use_count: 0
+
+  # ══════════════════════════════════════════════════════════════
+  # DESIGN SKILLS
+  # ══════════════════════════════════════════════════════════════
+
+  ui-ux-pro-max:
+    description: "Design system generation and UI/UX best practices. WCAG 2.2 AA accessibility, responsive patterns, dark mode, animation guidelines, pre-delivery checklist."
+    triggers:
+      - "design"
+      - "UI"
+      - "UX"
+      - "frontend"
+      - "component"
+      - "layout"
+      - "responsive"
+      - "dark mode"
+      - "accessibility"
+      - "design system"
+    type: "behavioral"
+    trust_level: "L1_OBSERVE"
+    requires_approval: false
+    created: "2026-03-10"
+    use_count: 0
+
+  remotion-video:
+    description: "Remotion video production best practices. Programmatic video with React, captions, FFmpeg, audio visualization."
+    triggers:
+      - "remotion"
+      - "video"
+      - "animation"
+      - "motion graphics"
+      - "render video"
+    type: "behavioral"
+    trust_level: "L1_OBSERVE"
+    requires_approval: false
+    created: "2026-03-10"
+    use_count: 0
+
+  # ══════════════════════════════════════════════════════════════
+  # INFRASTRUCTURE & SECURITY SKILLS
+  # ══════════════════════════════════════════════════════════════
+
+  security-best-practices:
+    description: "Comprehensive security: OWASP Top 10, input validation, XSS/SQLi/CSRF prevention, secret management, API auth patterns. Integrates with promptfoo for security eval."
+    triggers:
+      - "security"
+      - "auth"
+      - "authentication"
+      - "OWASP"
+      - "XSS"
+      - "SQL injection"
+      - "CSRF"
+      - "secrets"
+      - "API key"
+      - "vulnerability"
+    type: "behavioral"
+    trust_level: "L2_SUGGEST"
+    requires_approval: false
+    created: "2026-03-10"
+    use_count: 0
+
+  mcp-builder:
+    description: "Build MCP (Model Context Protocol) servers and tools. 4-phase workflow: research, implement, test, evaluate. Use when creating new tool integrations or API wrappers."
+    triggers:
+      - "MCP"
+      - "build MCP server"
+      - "create tool"
+      - "tool integration"
+      - "API wrapper"
+    type: "hybrid"
+    trust_level: "L3_ACT"
+    requires_approval: true
+    created: "2026-03-10"
+    use_count: 0
+
+  # ══════════════════════════════════════════════════════════════
+  # SYSTEM / META SKILLS
+  # ══════════════════════════════════════════════════════════════
+
+  self-improvement:
+    description: "Continuous learning system. Structured logging of learnings, errors, and feature requests. Pattern detection, periodic review, automatic skill extraction from repeated workflows."
+    triggers:
+      - "learning"
+      - "error tracking"
+      - "what went wrong"
+      - "lessons learned"
+      - "improve system"
+      - "retrospective"
+    type: "behavioral"
+    trust_level: "L2_SUGGEST"
+    requires_approval: false
+    created: "2026-03-10"
     use_count: 0
 
   # ══════════════════════════════════════════════════════════════

@@ -1,0 +1,49 @@
+# Security Skill Evaluation Tests
+# Validates: no hardcoded secrets, parameterized queries, input validation, bcrypt usage
+
+- description: "Login function with password hashing"
+  vars:
+    task: "Write a login function that validates username/password against a database"
+    language: "Python"
+    context: "PostgreSQL database, bcrypt for hashing, return JWT on success"
+  assert:
+    - type: not-icontains
+      value: 'password = "'
+    - type: not-icontains
+      value: "md5("
+    - type: not-icontains
+      value: "sha1("
+    - type: not-icontains
+      value: "eval("
+    - type: icontains
+      value: "bcrypt"
+    - type: llm-rubric
+      value: "Does the code use parameterized queries (not string concatenation)? Does it hash passwords with bcrypt? Does it validate input length? Does it return generic error messages (not 'user not found' vs 'wrong password')?"
+
+- description: "API endpoint with user input"
+  vars:
+    task: "Write an API endpoint that searches users by name"
+    language: "Python"
+    context: "FastAPI, PostgreSQL, returns JSON"
+  assert:
+    - type: not-icontains
+      value: 'f"SELECT'
+    - type: not-icontains
+      value: "format(\"SELECT"
+    - type: llm-rubric
+      value: "Does it validate input (length check, type check)? Does it use parameterized queries? Does it limit results? Does it handle errors without exposing internals?"
+
+- description: "Secret management"
+  vars:
+    task: "Set up configuration for a service that needs API keys for Stripe and SendGrid"
+    language: "Python"
+    context: "Production deployment, Docker environment"
+  assert:
+    - type: not-icontains
+      value: 'sk_live_'
+    - type: not-icontains
+      value: 'SG.'
+    - type: icontains
+      value: "os.environ"
+    - type: llm-rubric
+      value: "Are secrets loaded from environment variables? Is there a .env.example without real values? Are secrets excluded from version control?"

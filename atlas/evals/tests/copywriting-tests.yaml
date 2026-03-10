@@ -1,0 +1,60 @@
+# Copywriting Skill Evaluation Tests
+# Validates: forbidden lexicon avoidance, CTA presence, framework usage, human tone
+
+- description: "SaaS demo booking"
+  vars:
+    audience: "SaaS founder who downloaded our lead magnet"
+    objective: "Book a demo call"
+    tone: "casual but confident"
+    context: "They've been browsing the pricing page"
+  assert:
+    # Forbidden lexicon checks
+    - type: not-icontains
+      value: "delve"
+    - type: not-icontains
+      value: "leverage"
+    - type: not-icontains
+      value: "utilize"
+    - type: not-icontains
+      value: "In today's"
+    - type: not-icontains
+      value: "ever-evolving"
+    - type: not-icontains
+      value: "robust"
+    - type: not-icontains
+      value: "seamless"
+    # Must include a CTA
+    - type: llm-rubric
+      value: "Does the copy include a clear call-to-action? Is it direct and concise? Does it reference the demo/call specifically?"
+
+- description: "E-commerce landing page"
+  vars:
+    audience: "Online shoppers, 25-40, interested in sustainable fashion"
+    objective: "Purchase a hoodie from the collection"
+    tone: "energetic, culturally aware"
+    context: "Landing page from Instagram ad for World Cup 2026 collection"
+  assert:
+    - type: not-icontains
+      value: "leverage"
+    - type: not-icontains
+      value: "delve"
+    - type: not-icontains
+      value: "paramount"
+    - type: llm-rubric
+      value: "Does the copy follow a clear framework (AIDA/PAS/FAB)? Does it include specific proof points? Is the CTA visible and action-oriented?"
+
+- description: "B2B email follow-up"
+  vars:
+    audience: "VP of Engineering at a mid-size tech company"
+    objective: "Schedule a technical deep-dive call"
+    tone: "professional, technical"
+    context: "Follow-up after they attended our webinar on API security"
+  assert:
+    - type: not-icontains
+      value: "unlock"
+    - type: not-icontains
+      value: "empower"
+    - type: not-icontains
+      value: "transformative"
+    - type: llm-rubric
+      value: "Is the email concise (< 150 words)? Does it reference the webinar specifically? Does it propose a concrete next step?"

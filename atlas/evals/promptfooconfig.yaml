@@ -1,0 +1,36 @@
+# ATLAS Prompt Evaluation Suite
+# Uses promptfoo to test skill quality across models
+# Run: cd atlas/evals && npx promptfoo@latest eval
+# View: cd atlas/evals && npx promptfoo@latest view
+
+description: "ATLAS Skill Evaluation Suite — Cross-Model Quality Assurance"
+
+providers:
+  # Primary: OpenRouter (whatever model is configured)
+  - id: openai:chat:qwen/qwen3.5-397b-a17b
+    config:
+      apiBaseUrl: https://openrouter.ai/api/v1
+      apiKeyEnvar: OPENROUTER_API_KEY
+      temperature: 0.7
+    label: "OpenRouter (Qwen 397B)"
+
+  # Secondary: Anthropic latest
+  - id: anthropic:messages:claude-sonnet-4-20250514
+    config:
+      apiKeyEnvar: ANTHROPIC_API_KEY
+      temperature: 0.7
+    label: "Anthropic (Claude Sonnet 4)"
+
+prompts:
+  - file://prompts/copywriting.txt
+  - file://prompts/security.txt
+  - file://prompts/code-refactoring.txt
+
+defaultTest:
+  options:
+    transformVars: "JSON.parse(JSON.stringify(vars))"
+
+tests:
+  - file://tests/copywriting-tests.yaml
+  - file://tests/security-tests.yaml
+  - file://tests/code-refactoring-tests.yaml

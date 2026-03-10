@@ -1,49 +1,37 @@
-# Skill: Copywriting
+---
+name: copywriting
+description: "Complete copywriting + copy-editing protocol. NLP-targeted direct-response copy with page structure frameworks, CTA guidelines, and the Seven Sweeps editing system. Use for any writing, drafting, copy, email, pitch, landing page, ad copy, follow-up, or content creation task. Also triggers on: respond, reply, message, headline, tagline, slogan, campaign."
+---
 
-> **NLP-Targeted Direct-Response Copywriting Protocol**
-> When this skill triggers, internalize these rules and apply them to your output.
+# Copywriting & Copy-Editing Protocol
 
-## Purpose
+> NLP-Targeted Direct-Response Copywriting + Seven Sweeps Editing
 
-Generate high-converting, psychologically targeted, lexically authentic direct-response copy. Eradicate algorithmic AI signatures and deploy NLP behavioral psychology to maximize conversion.
+## Before Writing (REQUIRED)
 
-## Triggers
+### 1. Page Purpose
+- What type of page? (homepage, landing page, pricing, feature, about, email, ad)
+- What is the ONE primary action you want visitors to take?
 
-- Command: "respond"
-- Command: "reply"
-- Command: "email"
-- Command: "write"
-- Command: "draft"
-- Command: "message"
-- Command: "copy"
-- Command: "pitch"
-- Command: "follow up"
-- Command: "reach out"
+### 2. Audience
+- Who is the ideal customer?
+- What problem are they trying to solve?
+- What objections or hesitations do they have?
+- What language do they use to describe their problem?
 
-## Inputs
+### 3. Product/Offer
+- What are you selling or offering?
+- What makes it different from alternatives?
+- What's the key transformation or outcome?
+- Any proof points (numbers, testimonials, case studies)?
 
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| audience | string | Yes | Who you're writing to (prospect, client, customer) |
-| objective | string | Yes | What action you want them to take |
-| context | string | No | Background information, previous interactions |
-| tone | string | No | casual, professional, urgent, friendly |
-
-## Outputs
-
-| Name | Type | Description |
-|------|------|-------------|
-| copy | string | The generated copy |
-| framework_used | string | Which framework was applied (AIDA, PAS, FAB) |
-| meta_programs | object | Which NLP patterns were deployed |
+### 4. Context
+- Where is traffic coming from? (ads, organic, email)
+- What do visitors already know before arriving?
 
 ---
 
-## Protocol
-
-> **INTERNALIZE THESE RULES WHEN TRIGGERED**
-
-### PART 1: FORBIDDEN LEXICON (Never Use)
+## PART 1: FORBIDDEN LEXICON (Never Use)
 
 **Abstract/Diluted Nouns:**
 tapestry, realm, landscape, testament, multitude, plethora, arena, cornerstone, paradigm, synergy, complexities, treasure trove, overarching, bandwidth, efficiency, transformation, integration
@@ -54,24 +42,10 @@ delve, utilize, leverage, foster, align, augment, underscore, navigate, unlock, 
 **Padding Adjectives:**
 robust, crucial, essential, dynamic, transformative, seamless, paramount, cutting-edge, ever-evolving, vibrant, adept, invaluable, vital, comprehensive, commendable, bespoke, tailored
 
-**Transitional Adverbs:**
-furthermore, moreover, consequently, subsequently, ultimately, undeniably, meticulously, dynamically, specifically, generally speaking, accordingly, arguably, nevertheless, notwithstanding
-
 **Formulaic Openings (NEVER USE):**
 - "In today's fast-paced digital world,"
 - "In an ever-evolving landscape,"
 - "Welcome to the world of,"
-- "As we navigate the complexities of..."
-
-**Hedging (NEVER USE):**
-- "It is important to note that,"
-- "While X is important, Y is also crucial."
-
-**Weak Conclusions (NEVER USE):**
-- "In conclusion,"
-- "Ultimately,"
-- "At the end of the day,"
-- "Only time will tell."
 
 **Structural Fingerprints to Avoid:**
 - Contrastive negation: "It's not just about X. It's about Y."
@@ -79,143 +53,150 @@ furthermore, moreover, consequently, subsequently, ultimately, undeniably, metic
 
 ---
 
-### PART 2: NLP META-PROGRAMS
-
-Diagnose the target audience and encode matching linguistic triggers:
+## PART 2: NLP META-PROGRAMS
 
 #### Motivation Direction
-
-**Toward (40% of people):** Motivated by achieving goals
-- Triggers: achieve, gain, secure, build, grow, obtain, expand
-- Application: Emphasize what they can GET
-
-**Away From (40% of people):** Motivated by avoiding pain
-- Triggers: avoid, escape, eliminate, steer clear of, get rid of
-- Application: Agitate pain point, offer immediate exit
-
-*Balanced Strategy:* Interweave both in bullet points
+- **Toward (40%):** achieve, gain, secure, build, grow → emphasize what they GET
+- **Away From (40%):** avoid, escape, eliminate → agitate pain, offer exit
+- *Strategy:* Interweave both in bullet points
 
 #### Frame of Reference
-
-**Internal (40%):** Trust gut feelings, resist external pressure
-- Triggers: Only you can decide, trust your instincts, you evaluate
-- Soften CTAs: "Review the data and decide if this fits"
-
-**External (40%):** Need social proof and data
-- Triggers: Research shows, experts agree, proven results, the facts show
-- Lead with authority endorsements
+- **Internal (40%):** "Only you can decide", soften CTAs
+- **External (40%):** "Research shows", lead with authority
 
 #### Sorting Filter
-
-**Sameness (5-10%):** Look for identical to what they know
-- Triggers: exactly the same, consistent
-
-**Sameness with Exception (55%):** Similarity + incremental improvement
-- Triggers: better, advanced, the evolution of
-
-**Difference with Exception (25%):** Notice novel first, then ground
-- Lead with what's new
-
-**Difference (5-10%):** Emphasize revolution
-- Use reverse psychology, takeaway selling
+- **Sameness with Exception (55%):** "better, advanced, the evolution of"
+- **Difference with Exception (25%):** Lead with what's new
 
 #### Information Chunk Size
-
-**Global (60%):** Big picture, conceptual
-- Avoid sequences and modifiers
-
-**Specific (15%):** Granular data, step-by-step
-- Use exact details and proper nouns
-
-*Strategy:* Open Global (headline), transition to Specific (features)
-
-#### Representational Systems
-
-**Visual:** picture, envision, clear sight, show
-**Auditory:** hear, listen, sounds right
-**Kinesthetic:** feel, touch, experience, grasp
+- **Global (60%):** Big picture first (headlines)
+- **Specific (15%):** Granular details (features)
+- *Strategy:* Open Global, transition to Specific
 
 ---
 
-### PART 3: FRAMEWORKS
+## PART 3: FRAMEWORKS
 
-#### AIDA (Attention, Interest, Desire, Action)
-- **Attention:** Break state immediately
-- **Interest:** Match their context size (dense or summary)
-- **Desire:** Secure direct decision with sensory predicates
-- **Action:** Calibrate CTA to frame of reference
-
-#### PAS (Problem, Agitate, Solution)
-- **Problem:** Mirror exact "hot words" - no AI synonyms
-- **Agitate:** Map secondary and tertiary consequences
-- **Solution:** Present escape mapped to their value culture
-
-#### FAB (Features, Advantages, Benefits)
-- **Features:** Empirical data for specific/derived prospects
-- **Advantages:** Functional operation for systemic prospects
-- **Benefits:** Sensory experience for direct decision-makers
+| Framework | Best For | Structure |
+|-----------|----------|-----------|
+| **AIDA** | General conversion | Attention → Interest → Desire → Action |
+| **PAS** | Pain-driven audiences | Problem → Agitate → Solution |
+| **FAB** | Technical products | Features → Advantages → Benefits |
 
 ---
 
-### PART 4: EXECUTION CHECKLIST
+## PART 4: PAGE STRUCTURE
 
-Before generating copy:
+### Above the Fold
+- **Headline**: Clear benefit, not clever wordplay
+- **Subheadline**: Elaborate on how the benefit is delivered
+- **CTA**: One primary action, visible without scrolling
+- **Social proof snippet**: One stat or logo bar
 
-1. **Identify target meta-programs** (motivation, frame, chunk size)
-2. **Select framework** (AIDA for general, PAS for pain-driven, FAB for technical)
-3. **Choose representational system** (visual/auditory/kinesthetic)
-4. **Write copy** applying all triggers
-5. **Scrub** against forbidden lexicon
-6. **Verify** no AI structural fingerprints remain
+### Core Sections (Below Fold)
+1. Problem/pain agitation (1-2 paragraphs)
+2. Solution introduction
+3. How it works (3 steps max)
+4. Benefits with proof (testimonials, stats)
+5. Objection handling (FAQ or comparison)
+6. Final CTA with urgency/scarcity
+
+### Page-Specific Guidance
+
+| Page | Key Focus |
+|------|-----------|
+| **Homepage** | Value prop, trust signals, clear navigation to next step |
+| **Landing Page** | Single focus, no navigation distractions, one CTA |
+| **Pricing** | Anchoring, feature comparison, social proof near buy button |
+| **Feature Page** | Problem → solution → proof pattern per feature |
+| **About Page** | Mission, founder story, team credibility |
+
+### CTA Copy Guidelines
+- Use first person: "Start my free trial" > "Start your free trial"
+- Be specific: "Get the playbook" > "Submit"
+- Add benefit: "Save 2 hours/week — Start now"
+- Reduce risk: "No credit card required" near button
 
 ---
 
-### PART 5: SPIRAL DYNAMICS VALUE LEVELS
+## PART 5: SEVEN SWEEPS EDITING (Post-Writing)
 
-Match semantics to operating level:
+After writing, run these editing sweeps in order:
 
-**Level 3 (Red) - Impulsive/Power:**
-"Dominate, crush, immediate power, unapologetic"
+### Sweep 1: Clarity
+- Can a 12-year-old understand this?
+- Remove jargon unless audience expects it
+- One idea per sentence
 
-**Level 4 (Blue) - Conformist/Order:**
-"Duty, honor, compliance, proven system, the right thing"
+### Sweep 2: Voice and Tone
+- Does it sound like a human wrote it?
+- Check against forbidden lexicon
+- Read aloud — does it flow?
 
-**Level 5 (Orange) - Achiever:**
-"ROI, optimize, strategic advantage, science-backed, outsmart"
+### Sweep 3: So What?
+- After every claim, ask "So what? Why should they care?"
+- Connect features to outcomes
 
-**Level 6 (Green) - Humanistic:**
-"Sustainability, harmony, inclusive, sharing, mutual growth"
+### Sweep 4: Prove It
+- Every claim needs evidence (stat, testimonial, case study)
+- "We're the best" → "4,200 companies switched in Q1"
 
-**Level 7 (Yellow) - Systemic:**
-"Functional integrity, complex adaptive systems, macro-perspective"
-Avoid emotional manipulation at this level.
+### Sweep 5: Specificity
+- Replace vague with specific: "many customers" → "3,847 customers"
+- Replace adjectives with evidence
+
+### Sweep 6: Heightened Emotion
+- Does the opening create an emotional hook?
+- Is there tension/contrast/surprise?
+
+### Sweep 7: Zero Risk
+- Have all objections been addressed?
+- Is the CTA friction-free?
+- Money-back guarantee, free trial, no commitment
+
+### Quick-Pass Checks
+- **Word**: Kill adverbs, replace "very X" with stronger word
+- **Sentence**: Max 20 words, vary length
+- **Paragraph**: Max 3-4 sentences, one idea each
 
 ---
 
-## Examples
+## PART 6: SPIRAL DYNAMICS VALUE LEVELS
 
-**Input:**
-```
-audience: SaaS founder who downloaded our lead magnet
-objective: Book a demo call
-context: They've been browsing pricing page
-tone: casual but confident
-```
+| Level | Triggers |
+|-------|----------|
+| Red (Power) | "Dominate, crush, immediate power" |
+| Blue (Order) | "Duty, honor, compliance, proven system" |
+| Orange (Achiever) | "ROI, optimize, strategic advantage, outsmart" |
+| Green (Humanistic) | "Sustainability, harmony, inclusive, mutual growth" |
+| Yellow (Systemic) | "Functional integrity, complex adaptive systems" |
 
-**Output:**
-```
-Hey [Name],
+---
 
-Saw you grabbed our playbook and were checking out pricing.
+## Output Format
 
-Quick question: what's the one thing that would make this a no-brainer for you?
+### Page Copy
+Complete copy organized by section (above fold → body → CTA)
 
-If it's seeing how it actually works for companies like yours, I can show you in 15 minutes. No pitch, just a walkthrough.
+### Annotations
+Brief notes on framework used, meta-programs deployed, target value level
 
-[Calendar link]
+### Alternatives
+2-3 headline alternatives + 1 alternate CTA
 
-- [Your name]
-```
+### Meta Content (if relevant)
+- Page title (60 chars max)
+- Meta description (155 chars max)
+- OG title/description
 
-**Framework:** PAS (implied pain of uncertainty → demo as solution)
-**Meta-programs:** Internal reference (you decide), Away-from (eliminate uncertainty)
+---
+
+## Execution Checklist
+
+1. Complete "Before Writing" analysis
+2. Identify target meta-programs
+3. Select framework (AIDA/PAS/FAB)
+4. Write copy applying all triggers
+5. Run Seven Sweeps editing
+6. Scrub against forbidden lexicon
+7. Verify no AI structural fingerprints

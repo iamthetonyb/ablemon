@@ -1,0 +1,53 @@
+# Code Refactoring Skill Evaluation Tests
+# Validates: SOLID adherence, behavior preservation, method extraction, documentation
+
+- description: "Extract long function into focused modules"
+  vars:
+    task: "Refactor this function into smaller, focused functions"
+    language: "Python"
+    code: |
+      def process_order(order_data):
+          # Validate
+          if not order_data.get('items'):
+              raise ValueError('No items')
+          if not order_data.get('customer_id'):
+              raise ValueError('No customer')
+          total = 0
+          for item in order_data['items']:
+              total += item['price'] * item['quantity']
+          # Apply discount
+          if total > 100:
+              total *= 0.9
+          # Save to DB
+          db.execute("INSERT INTO orders (customer_id, total) VALUES (?, ?)",
+                     [order_data['customer_id'], total])
+          # Send email
+          send_email(order_data['customer_id'], f"Order confirmed: ${total}")
+          return {'total': total, 'status': 'confirmed'}
+  assert:
+    - type: llm-rubric
+      value: "Did the refactoring extract at least 3 focused functions? Is the original behavior preserved? Are function names descriptive (what, not how)? Is each function < 30 lines?"
+
+- description: "Remove code duplication"
+  vars:
+    task: "Remove duplication in this code"
+    language: "Python"
+    code: |
+      def get_user_report(user_id):
+          conn = get_connection()
+          cursor = conn.cursor()
+          cursor.execute("SELECT * FROM users WHERE id = %s", [user_id])
+          user = cursor.fetchone()
+          conn.close()
+          return format_report(user)
+
+      def get_order_report(order_id):
+          conn = get_connection()
+          cursor = conn.cursor()
+          cursor.execute("SELECT * FROM orders WHERE id = %s", [order_id])
+          order = cursor.fetchone()
+          conn.close()
+          return format_report(order)
+  assert:
+    - type: llm-rubric
+      value: "Did it extract the common database query pattern into a shared function? Is the DRY version still readable? Does it preserve the original behavior exactly?"
