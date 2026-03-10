@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-ATLAS v2 Startup Script
-Secure Multi-Tenant AI Agent System
+ATLAS v3 Startup Script
+Secure Multi-Tenant AI Agent System — Modular Gateway Architecture
 """
 
 import asyncio

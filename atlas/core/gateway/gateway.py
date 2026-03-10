@@ -1,6 +1,11 @@
 """
-Gateway Server - The coordinator that ties everything together
-Handles: Telegram channels, session routing, agent orchestration, AI responses
+Gateway Server — The coordinator that ties everything together.
+Handles: Telegram channels, session routing, agent orchestration, AI responses.
+
+Decomposed architecture:
+  - Tool definitions → core/gateway/tool_defs/
+  - Tool registry    → core/gateway/tool_registry.py
+  - Initiative       → core/gateway/initiative.py
 """
 
 import asyncio
@@ -31,7 +36,12 @@ from tools.digitalocean.client import DigitalOceanClient
 from tools.vercel.client import VercelClient
 from scheduler.cron import CronScheduler
 from core.gateway.initiative import InitiativeEngine
+from core.gateway.tool_registry import ToolRegistry, ToolContext
 from memory.hybrid_memory import HybridMemory, MemoryType
+from tools.search import WebSearch, SearchProvider
+
+# Tool definition modules
+from core.gateway.tool_defs import github_tools, infra_tools, web_tools
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +65,11 @@ You have access to these functions (use them when relevant):
 - `github_push_files` — Push files to a GitHub repository
 - `github_create_pr` — Open a pull request
 
+**Web Research:**
+- `web_search` — Search the web via Brave/Perplexity/Gemini/Google (read-only, use FIRST for any factual question)
+- `web_fetch` — Fetch and extract readable content from any URL (read-only)
+- `deep_research` — Deep research with cited sources via Perplexity/Gemini (read-only, use for complex questions)
+
 **Deployment:**
 - `github_pages_deploy` — Deploy static HTML/CSS/JS to GitHub Pages (free, instant)
 - `vercel_deploy` — Deploy React/Next.js/frontend to Vercel (free tier, CDN)
@@ -62,6 +77,11 @@ You have access to these functions (use them when relevant):
 **Infrastructure:**
 - `do_list_droplets` — List Digital Ocean droplets (read-only)
 - `do_create_droplet` — Provision a new Digital Ocean VPS ($6+/month, billable)
+
+## Research Protocol
+- ALWAYS use `web_search` before answering questions about current events, pricing, versions, or anything that may have changed
+- Use `deep_research` for complex questions requiring thorough analysis with citations
+- Use `web_fetch` to read the full content of a specific URL
 
 ## Hosting Decision Guide
 - Static HTML/CSS/JS → GitHub Pages (free, simple)
@@ -71,7 +91,7 @@ You have access to these functions (use them when relevant):
 
 ## Approval
 All write operations require owner approval via Telegram inline buttons.
-Read-only operations (list repos, list droplets) execute immediately.
+Read-only operations (list repos, list droplets, web search) execute immediately.
 
 ## Rules
 - NEVER say "I will do [X]", "Let me create [Y]", or acknowledge a request. Do it IMMEDIATELY in the current turn.
@@ -83,153 +103,16 @@ Read-only operations (list repos, list droplets) execute immediately.
 - Always show cost estimates before provisioning paid infrastructure
 """
 
-# ── Tool definitions (OpenAI function-calling format) ─────────────────────────
-
-ATLAS_TOOL_DEFS: List[Dict] = [
-    {
-        "type": "function",
-        "function": {
-            "name": "github_list_repos",
-            "description": "List all GitHub repositories for the authenticated user. Read-only, no approval needed.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "github_create_repo",
-            "description": "Create a new GitHub repository. Requires owner approval.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string", "description": "Repo name in kebab-case"},
-                    "description": {"type": "string", "description": "Short repo description"},
-                    "private": {"type": "boolean", "description": "True for private repo, false for public"},
-                },
-                "required": ["name"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "github_push_files",
-            "description": "Push one or more files to a GitHub repository. Requires owner approval.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "repo": {"type": "string", "description": "Repository name"},
-                    "files": {
-                        "type": "object",
-                        "description": "Map of {filepath: file_content_string}. CRITICAL: If your code is massive (> 10,000 chars), DO NOT PUT THE CODE HERE to avoid JSON crashes. INSTEAD, output the raw code in a Markdown block in your normal conversational response FIRST, and pass the exact string '<EXTRACT>' as the value here. ATLAS will auto-extract it.",
-                        "additionalProperties": {"type": "string"},
-                    },
-                    "message": {"type": "string", "description": "Commit message (conventional commits format)"},
-                    "branch": {"type": "string", "description": "Target branch (default: main)"},
-                },
-                "required": ["repo", "files"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "github_create_pr",
-            "description": "Open a pull request on GitHub. Requires owner approval.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "repo": {"type": "string"},
-                    "title": {"type": "string"},
-                    "body": {"type": "string", "description": "PR description in markdown"},
-                    "head": {"type": "string", "description": "Source branch"},
-                    "base": {"type": "string", "description": "Target branch (default: main)"},
-                },
-                "required": ["repo", "title", "head"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "github_pages_deploy",
-            "description": "Deploy static HTML/CSS/JS files to GitHub Pages. Requires owner approval.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "repo": {"type": "string", "description": "Repository name"},
-                    "files": {
-                        "type": "object",
-                        "description": "Map of {filepath: file_content_string}. Must include index.html.",
-                        "additionalProperties": {"type": "string"},
-                    },
-                    "commit_message": {"type": "string"},
-                },
-                "required": ["repo", "files"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "vercel_deploy",
-            "description": "Deploy a frontend or serverless app to Vercel. Free tier. Requires owner approval.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "project_name": {"type": "string", "description": "Vercel project name in kebab-case"},
-                    "files": {
-                        "type": "object",
-                        "description": "Map of {filepath: file_content_string}",
-                        "additionalProperties": {"type": "string"},
-                    },
-                    "env_vars": {
-                        "type": "object",
-                        "description": "Optional environment variables",
-                        "additionalProperties": {"type": "string"},
-                    },
-                },
-                "required": ["project_name", "files"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "do_list_droplets",
-            "description": "List all Digital Ocean droplets. Read-only, no approval needed.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "do_create_droplet",
-            "description": "Provision a new Digital Ocean VPS droplet. Billable ($6+/month). Requires owner approval.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string", "description": "Droplet name in kebab-case"},
-                    "region": {"type": "string", "description": "Region slug (e.g. nyc3, sfo3, ams3). Default: nyc3"},
-                    "size": {"type": "string", "description": "Size slug (e.g. s-1vcpu-1gb, s-2vcpu-2gb). Default: s-1vcpu-1gb"},
-                    "image": {"type": "string", "description": "Image slug (e.g. ubuntu-24-04-x64). Default: ubuntu-24-04-x64"},
-                    "ssh_key_ids": {
-                        "type": "array",
-                        "items": {"type": "integer"},
-                        "description": "List of SSH key IDs from DO account",
-                    },
-                },
-                "required": ["name"],
-            },
-        },
-    },
-]
-
 
 class ATLASGateway:
     """
     Main gateway coordinating all ATLAS components.
     Master instance that oversees all client bots.
+
+    Architecture (v3 — modular):
+      - ToolRegistry handles tool definitions and dispatch
+      - Tool modules self-register via register_tools()
+      - Gateway is the slim coordinator (~400 lines vs ~1200)
     """
 
     def __init__(self, config_path: str = "config/gateway.json"):
@@ -282,9 +165,19 @@ class ATLASGateway:
         self.do_client = DigitalOceanClient()
         self.vercel = VercelClient()
 
+        # Initialize web search (auto-detects Brave/Perplexity/Gemini/Google/DDG from env)
+        self.web_search = WebSearch()
+
+        # ── Build Tool Registry (modular pattern) ─────────────────────────
+        self.tool_registry = ToolRegistry()
+        self.tool_registry.register_module(github_tools)
+        self.tool_registry.register_module(infra_tools)
+        self.tool_registry.register_module(web_tools)
+        logger.info(f"Tool registry: {self.tool_registry.tool_count} tools registered: {self.tool_registry.tool_names}")
+
         # Skill outcome tracking — logs invocations + user response signals
-        self._last_skill_invoked: Optional[str] = None       # last skill name used
-        self._last_skill_trigger: Optional[str] = None       # the phrase that triggered it
+        self._last_skill_invoked: Optional[str] = None
+        self._last_skill_trigger: Optional[str] = None
         self._skill_outcomes_log = self.audit_dir / "skill_outcomes.jsonl"
 
         # Positive/negative outcome signal words
@@ -313,7 +206,6 @@ class ATLASGateway:
         openrouter_key = os.environ.get("OPENROUTER_API_KEY")
         if openrouter_key:
             try:
-                # Primary Provider: Qwen 3.5 397B (via OpenRouter FP8)
                 providers.append(OpenRouterProvider(
                     api_key=openrouter_key,
                     model="qwen/qwen3.5-397b-a17b",
@@ -323,7 +215,6 @@ class ATLASGateway:
             except Exception as e:
                 logger.warning(f"Failed to init OpenRouter provider: {e}")
 
-        # (OpenRouter block is now earlier, so we can remove the old Claude logic or keep it as fallback)
         anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
         if anthropic_key:
             try:
@@ -356,17 +247,15 @@ class ATLASGateway:
         openrouter_key = os.environ.get("OPENROUTER_API_KEY")
         if openrouter_key:
             try:
-                # Primary Vision Provider: Moonshot Kimi 2.5 (OpenRouter)
                 providers.append(OpenRouterProvider(
                     api_key=openrouter_key,
-                    model="moonshotai/moonshot-v1-auto", # Also known as kimi-k2.5 equivalent
+                    model="moonshotai/moonshot-v1-auto",
                     timeout=600.0
                 ))
                 logger.info("Provider added: OpenRouter Vision (Kimi)")
             except Exception as e:
                 logger.warning(f"Failed to init OpenRouter vision provider: {e}")
-                
-        # Create chain
+
         return ProviderChain(providers)
 
     def _init_agents(self):
@@ -389,145 +278,141 @@ class ATLASGateway:
             trust_tier=TrustTier.L4_AUTONOMOUS
         ), audit_dir=str(self.audit_dir))
 
+    # ── Message Processing Pipeline ───────────────────────────────────────────
+
     async def process_message(
         self,
-        message: Union[str, list],
+        message: Union[str, List[Dict]],
         user_id: str,
-        client_id: Optional[str] = None,
+        client_id: str,
         metadata: Dict = None,
         update: Optional[Update] = None,
     ) -> str:
-        """
-        Main message processing pipeline:
-        Input → Scanner → Auditor → Trust Gate → AI (ProviderChain) → Tool dispatch
-        """
-
-        # Extract textual content from multimodal list for security scanning
-        text_content = message
-        if isinstance(message, list):
-            text_content = next((item.get("text", "") for item in message if item.get("type") == "text"), "")
-
-        # Step 1: Scanner (read-only analysis)
-        scan_result = await self.scanner.process(text_content, metadata or {})
-
-        if not scan_result["security_verdict"]["passed"]:
-            return f"⚠️ Security check failed: {scan_result['blocked_reason']}"
-
-        # Step 2: Auditor (validation)
-        audit_result = await self.auditor.process(scan_result)
-
-        if not audit_result["approved_for_executor"]:
-            return f"⚠️ Audit failed: {'; '.join(audit_result['notes'])}"
-
-        # Step 3: AI response via ProviderChain
-        if not self.provider_chain.providers:
-            return "⚠️ No AI providers configured. Set NVIDIA_API_KEY, OPENROUTER_API_KEY, or ANTHROPIC_API_KEY."
+        """Run the full pipeline: scan → audit → AI → tool dispatch."""
+        metadata = metadata or {}
 
         try:
-            active_system_prompt = ATLAS_SYSTEM_PROMPT
-            
-            # Inject memory context if available
+            # Pipeline: scan → audit → pass
+            scan_result = await self.scanner.process({
+                "message": message if isinstance(message, str) else str(message),
+                "user_id": user_id,
+                "client_id": client_id,
+            })
+
+            trust_result = self.trust_gate.evaluate(
+                action=AgentAction(
+                    action_type="message",
+                    target=client_id,
+                    payload={"message": message if isinstance(message, str) else str(message)},
+                    confidence=scan_result.get("confidence", 0.5),
+                ),
+                context={"user_id": user_id, "scan": scan_result},
+            )
+
+            if not trust_result.passed:
+                return f"⚠️ Message blocked (threat level: {trust_result.threat_level})"
+
+            # Build system prompt
+            system_content = ATLAS_SYSTEM_PROMPT
+            soul_path = Path("SOUL.md")
+            if soul_path.exists():
+                system_content += f"\n\n## Soul Layer (Identity Core)\n{soul_path.read_text()}"
+
+            goals_path = Path("config/goals.json")
+            if goals_path.exists():
+                try:
+                    goals = json.loads(goals_path.read_text())
+                    goals_str = "\n".join(f"- {g.get('goal', g)}" for g in goals if isinstance(g, dict))
+                    if not goals_str:
+                        goals_str = "\n".join(f"- {g}" for g in goals)
+                    system_content += f"\n\n## Active Goals\n{goals_str}"
+                except Exception:
+                    pass
+
+            msgs = [Message(role=Role.SYSTEM, content=system_content)]
+
+            # Inject HybridMemory context
             if hasattr(self, 'memory') and self.memory:
                 try:
-                    recalled_context = self.memory.get_context_for_agent(objective=text_content, client_id=client_id)
-                    if recalled_context:
-                        active_system_prompt += f"\n\n## Recalled Context from Hybrid Memory\n{recalled_context}"
+                    query = message if isinstance(message, str) else str(message)
+                    relevant = self.memory.recall(query=query, limit=5, client_id=client_id)
+                    if relevant:
+                        context_block = "\n".join(f"- {m['content'][:200]}" for m in relevant)
+                        msgs.append(Message(role=Role.SYSTEM, content=f"## Relevant Memory\n{context_block}"))
                 except Exception as e:
-                    logger.warning(f"Failed to fetch memory context: {e}")
+                    logger.debug(f"Memory recall failed: {e}")
 
-            msgs = [Message(role=Role.SYSTEM, content=active_system_prompt)]
-            
-            # Inject Persistent Memory Context
-            target_id = client_id or "master"
-            history = self.transcript_manager.get_recent_messages(target_id, limit=20)
-            # History comes back newest-first, flip to chronological
-            history.reverse()
-            
-            for log in history:
-                # Skip the current message we just logged into the database to avoid duplication
-                if log.get("direction") == "inbound" and log.get("message") == message:
-                    continue
-                    
-                log_msg = log.get("message")
-                # Only feed text history (skip base64 images to preserve context window length)
-                if isinstance(log_msg, str):
-                    role = Role.USER if log.get("direction") == "inbound" else Role.ASSISTANT
-                    msgs.append(Message(role=role, content=log_msg))
+            # Main ATLAS prompt
+            atlas_prompt_path = Path("ATLAS.md")
+            if atlas_prompt_path.exists():
+                atlas_prompt = atlas_prompt_path.read_text()
+                msgs.append(Message(role=Role.SYSTEM, content=atlas_prompt))
 
-            msgs.append(Message(role=Role.USER, content=message))
+            # Handle vision / text
+            if isinstance(message, list):
+                msgs.append(Message(role=Role.USER, content=message))
+            else:
+                msgs.append(Message(role=Role.USER, content=message))
+
+            # Get tool definitions from registry
+            tool_defs = self.tool_registry.get_definitions()
 
             for loop_iteration in range(15):
-                # Send a thinking indicator to Telegram so the user knows the AI hasn't crashed
+                # Send typing action instead of flooding with status messages
                 if update and update.message:
                     try:
-                        await update.message.reply_text(f"⏳ `ATLAS is thinking... (Turn {loop_iteration + 1}/15)`", parse_mode="Markdown")
+                        await update.message.chat.send_action("typing")
                     except Exception:
                         pass
 
-                # Route to a vision-capable provider if message is multimodal (only needed for first pass)
-                if isinstance(message, list) and loop_iteration == 0:
-                    result = await self.vision_chain.complete(
-                        msgs,
-                        tools=ATLAS_TOOL_DEFS,
-                        max_tokens=4096,
-                        temperature=0.60
-                    )
-                else:
-                    # Sanitize msgs for the text-only provider chain by converting multimodal lists into pure text strings
-                    text_only_msgs = []
-                    for msg in msgs:
-                        if isinstance(msg.content, list):
-                            extracted_text = next((item.get("text", "") for item in msg.content if item.get("type") == "text"), "")
-                            text_only_msgs.append(Message(
-                                role=msg.role, 
-                                content=extracted_text, 
-                                name=msg.name, 
-                                tool_call_id=msg.tool_call_id, 
-                                tool_calls=msg.tool_calls
-                            ))
-                        else:
-                            text_only_msgs.append(msg)
-                            
-                    result = await self.provider_chain.complete(
-                        text_only_msgs,
-                        tools=ATLAS_TOOL_DEFS,
-                        max_tokens=16384, # Reduced to prevent OpenRouter from reserving massive account balances and triggering 429
-                        temperature=0.60,
-                        top_p=0.95,
-                        top_k=20,
-                        presence_penalty=0,
-                        repetition_penalty=1,
-                        # Target atlas-cloud specifically, enabling up to 1M YaRN context expansion
-                        provider={
-                            "order": ["AtlasCloud"],
-                            "allow_fallbacks": True,
-                            "data_collection": "deny"
-                        },
-                        models=["qwen/qwen3.5-397b-a17b"]
-                    )
+                # Select provider chain
+                chain = self.vision_chain if (isinstance(message, list) and self.vision_chain.providers) else self.provider_chain
 
-                # Step 4: Tool dispatch if AI called a tool
+                try:
+                    result = await chain.complete(
+                        messages=msgs,
+                        tools=tool_defs,
+                        temperature=0.7,
+                    )
+                except Exception as e:
+                    logger.error(f"Provider chain failed: {e}", exc_info=True)
+                    return f"⚠️ All AI providers failed: {e}"
+
                 if result.tool_calls:
-                    # Log the assistant's action into the memory array
-                    msgs.append(Message(
-                        role=Role.ASSISTANT,
-                        content=result.content or "",
-                        tool_calls=result.tool_calls
-                    ))
-                    
                     for tool_call in result.tool_calls:
-                        # Execute the tool
-                        tool_output = await self._handle_tool_call(tool_call, update, user_id, msgs)
-                        
-                        # Notify the user on Telegram that a tool was executed so they aren't waiting in silence
+                        # Track skill invocation for outcome logging
+                        self._last_skill_invoked = tool_call.name
+                        self._last_skill_trigger = str(next(
+                            (m.content for m in msgs[::-1] if hasattr(m, "role") and str(m.role) in ("Role.USER", "user")),
+                            ""
+                        ))[:200]
+
+                        # Build ToolContext with all necessary references
+                        tool_ctx = ToolContext(
+                            user_id=user_id,
+                            client_id=client_id,
+                            update=update,
+                            msgs=msgs,
+                            approval_workflow=self.approval_workflow,
+                            metadata={
+                                "github": self.github,
+                                "do_client": self.do_client,
+                                "vercel": self.vercel,
+                                "web_search": self.web_search,
+                            },
+                        )
+
+                        # Dispatch through registry
+                        tool_output = await self.tool_registry.dispatch(tool_call, tool_ctx)
+
+                        # Notify user on Telegram
                         if update and update.message:
                             try:
-                                # Drop the Markdown parse mode for tool outputs to prevent unescaped char errors from code snippets
                                 await update.message.reply_text(f"⚙️ `[{tool_call.name}]`\n{tool_output}")
                             except Exception:
                                 pass
-                                
-                        # Inject the tool observation back into the prompt for the next loop
+
+                        # Inject tool observation for next loop
                         msgs.append(Message(
                             role=Role.TOOL,
                             content=str(tool_output),
@@ -544,38 +429,38 @@ class ATLASGateway:
                         self.memory.store(content=final_text, memory_type=MemoryType.CONVERSATION, client_id=client_id)
                     except Exception as e:
                         logger.error(f"Failed to store memory: {e}")
-                
+
                 return final_text
-                
+
             return "⚠️ Agent exceeded maximum tool iterations (15)."
 
         except Exception as e:
             logger.error(f"AI completion failed: {e}", exc_info=True)
             if update and update.message:
                 try:
-                    import json
                     import io
                     dump = json.dumps([m.__dict__ for m in msgs], default=str, indent=2)
                     dump_bytes = io.BytesIO(dump.encode('utf-8'))
                     dump_bytes.name = "payload_dump.json"
                     await update.message.reply_document(document=dump_bytes, caption=f"⚠️ Exception Trace:\n{str(e)[:1000]}")
-                except Exception as dump_e:
+                except Exception:
                     pass
             return f"⚠️ AI error: {e}"
+
+    # ── Skill Outcome Tracking ────────────────────────────────────────────────
 
     def _log_skill_outcome(self, skill: str, trigger: str, outcome: str, signal: str):
         """Append a skill invocation outcome to skill_outcomes.jsonl."""
         try:
-            import json as _json
             entry = {
                 "ts": datetime.utcnow().isoformat(),
                 "skill": skill,
                 "trigger": trigger[:200],
-                "outcome": outcome,   # "positive" | "negative" | "unknown"
+                "outcome": outcome,
                 "signal": signal[:100],
             }
             with open(self._skill_outcomes_log, "a") as f:
-                f.write(_json.dumps(entry) + "\n")
+                f.write(json.dumps(entry) + "\n")
         except Exception as e:
             logger.debug(f"skill outcome log error: {e}")
 
@@ -590,237 +475,21 @@ class ATLASGateway:
                 return "negative"
         return "unknown"
 
-    async def _handle_tool_call(self, tool_call, update: Optional[Update], user_id: str, msgs: List["Message"] = None) -> str:
-        """Dispatch a tool call from the AI to the correct client, with approval for writes."""
-        name = tool_call.name
-        args = tool_call.arguments if isinstance(tool_call.arguments, dict) else {}
-
-        logger.info(f"Tool call: {name}({args})")
-
-        # Track skill invocation for outcome logging
-        self._last_skill_invoked = name
-        self._last_skill_trigger = str(next((m.content for m in (msgs or [])[::-1] if hasattr(m, "role") and str(m.role) in ("Role.USER", "user")), ""))[:200]
-
-        # Short-circuit if parser injected an error (e.g., from truncated JSON args)
-        if "error" in args and "JSONDecodeError" in str(args["error"]):
-            return f"⚠️ System Error: The tool parameter JSON was truncated or malformed: {args['error']}. If you are trying to output massive code files, do not push them all at once. Break them down."
-
-        try:
-            # ── Read-only tools (no approval) ─────────────────────────────────
-
-            if name == "github_list_repos":
-                repos = await self.github.list_repos()
-                if not repos:
-                    return "No repositories found."
-                lines = [
-                    f"• [{r['name']}]({r['html_url']}) — {'🔒 private' if r['private'] else '🌐 public'}"
-                    for r in repos[:20]
-                ]
-                return "**Your repositories:**\n" + "\n".join(lines)
-
-            if name == "do_list_droplets":
-                droplets = await self.do_client.list_droplets()
-                if not droplets:
-                    return "No droplets found on this account."
-                lines = []
-                for d in droplets:
-                    networks = d.get("networks", {}).get("v4", [])
-                    ip = next((n["ip_address"] for n in networks if n.get("type") == "public"), "no-ip")
-                    lines.append(f"• **{d['name']}** — {ip} ({d['region']['slug']}, {d['size_slug']}, {d['status']})")
-                return "**Droplets:**\n" + "\n".join(lines)
-
-            # ── Write tools (require approval) ────────────────────────────────
-
-            if name == "github_create_repo":
-                approval = await self.approval_workflow.request_approval(
-                    operation="github_create_repo",
-                    details=args,
-                    requester_id=user_id,
-                    risk_level="medium",
-                    context=f"Create {'private' if args.get('private') else 'public'} repo: {args.get('name')}",
-                )
-                if approval.status.value != "approved":
-                    return f"❌ Denied ({approval.status.value})"
-                result = await self.github.create_repo(
-                    name=args["name"],
-                    description=args.get("description", ""),
-                    private=args.get("private", False),
-                )
-                return f"✅ Repo created: {result['html_url']}"
-
-            if name == "github_push_files":
-                # Handle <EXTRACT> bypass for massive code blocks
-                if msgs:
-                    for path, content in args.get("files", {}).items():
-                        if content == "<EXTRACT>":
-                            # Scan back through msgs
-                            import re
-                            for m in reversed(msgs):
-                                if m.role in (Role.ASSISTANT, Role.USER) and m.content:
-                                    # Find all markdown blocks
-                                    blocks = re.findall(r'```(?:\w+)?\n(.*?)```', m.content, re.DOTALL)
-                                    if blocks:
-                                        args["files"][path] = blocks[-1]
-                                        break
-                                        
-                approval = await self.approval_workflow.request_approval(
-                    operation="github_push_files",
-                    details=args,
-                    requester_id=user_id,
-                    risk_level="medium",
-                    context=f"Push {len(args.get('files', {}))} files to {args.get('repo')}/{args.get('branch', 'main')}",
-                )
-                if approval.status.value != "approved":
-                    return f"❌ Denied ({approval.status.value})"
-                await self.github.push_files(
-                    repo=args["repo"],
-                    files_dict=args["files"],
-                    message=args.get("message", "chore: update via ATLAS"),
-                    branch=args.get("branch", "main"),
-                )
-                return f"✅ Pushed {len(args.get('files', {}))} files to `{args['repo']}`"
-
-            if name == "github_create_pr":
-                approval = await self.approval_workflow.request_approval(
-                    operation="github_create_pr",
-                    details=args,
-                    requester_id=user_id,
-                    risk_level="low",
-                    context=f"Open PR '{args.get('title')}' in {args.get('repo')}: {args.get('head')} → {args.get('base', 'main')}",
-                )
-                if approval.status.value != "approved":
-                    return f"❌ Denied ({approval.status.value})"
-                result = await self.github.create_pr(
-                    repo=args["repo"],
-                    title=args["title"],
-                    body=args.get("body", ""),
-                    head=args["head"],
-                    base=args.get("base", "main"),
-                )
-                return f"✅ PR opened: {result['html_url']}"
-
-            if name == "github_pages_deploy":
-                repo = args["repo"]
-                files_dict = args["files"]
-                message = args.get("commit_message", "deploy: update GitHub Pages via ATLAS")
-                pages_url = f"https://{self.github.owner}.github.io/{repo}/"
-                file_list = ", ".join(list(files_dict.keys())[:5])
-
-                approval = await self.approval_workflow.request_approval(
-                    operation="github_pages_deploy",
-                    details={"repo": repo, "files": list(files_dict.keys()), "live_url": pages_url},
-                    requester_id=user_id,
-                    risk_level="low",
-                    context=f"Deploy {len(files_dict)} files to {pages_url}\nFiles: {file_list}",
-                )
-                if approval.status.value != "approved":
-                    return f"❌ Denied ({approval.status.value})"
-
-                # Push to gh-pages branch
-                try:
-                    await self.github.push_files(repo, files_dict, message, branch="gh-pages")
-                except Exception:
-                    try:
-                        await self.github.create_branch(repo, "gh-pages", from_branch="main")
-                        await self.github.push_files(repo, files_dict, message, branch="gh-pages")
-                    except Exception:
-                        for path, content in files_dict.items():
-                            await self.github.push_file(repo, path, content, message, branch="gh-pages")
-
-                try:
-                    await self.github.enable_github_pages(repo, branch="gh-pages")
-                except Exception:
-                    pass  # May already be enabled
-
-                return (
-                    f"✅ Deployed to GitHub Pages!\n\n"
-                    f"🌐 URL: {pages_url}\n"
-                    f"📁 Files: {len(files_dict)} pushed to `gh-pages`\n"
-                    f"⏱ Live in ~60 seconds"
-                )
-
-            if name == "vercel_deploy":
-                project_name = args["project_name"]
-                files_dict = args["files"]
-                env_vars = args.get("env_vars")
-                file_list = ", ".join(list(files_dict.keys())[:5])
-
-                approval = await self.approval_workflow.request_approval(
-                    operation="vercel_deploy",
-                    details={"project": project_name, "files": list(files_dict.keys())},
-                    requester_id=user_id,
-                    risk_level="low",
-                    context=f"Deploy {len(files_dict)} files to Vercel '{project_name}'\nFiles: {file_list}",
-                )
-                if approval.status.value != "approved":
-                    return f"❌ Denied ({approval.status.value})"
-
-                result = await self.vercel.create_deployment(project_name, files_dict, env_vars)
-                state = result.get("readyState", "UNKNOWN")
-                url = result.get("url", "")
-                if state == "READY":
-                    live_url = f"https://{url}" if url and not url.startswith("http") else url
-                    return f"✅ Deployed to Vercel!\n\n🌐 {live_url}\n📦 {project_name}"
-                elif state == "ERROR":
-                    return f"❌ Vercel failed: {result.get('errorMessage', 'Unknown error')}"
-                else:
-                    return f"⏳ Deploying... state: {state}\nCheck vercel.com/dashboard"
-
-            if name == "do_create_droplet":
-                d_name = args["name"]
-                region = args.get("region", "nyc3")
-                size = args.get("size", "s-1vcpu-1gb")
-                image = args.get("image", "ubuntu-24-04-x64")
-                ssh_key_ids = args.get("ssh_key_ids", [])
-                size_costs = {"s-1vcpu-1gb": "$6/mo", "s-2vcpu-2gb": "$12/mo", "s-4vcpu-8gb": "$48/mo"}
-                cost = size_costs.get(size, "variable")
-
-                approval = await self.approval_workflow.request_approval(
-                    operation="do_create_droplet",
-                    details={"name": d_name, "region": region, "size": size, "image": image, "cost": cost},
-                    requester_id=user_id,
-                    risk_level="high",
-                    context=f"Provision DO droplet\nName: {d_name} | {region} | {size} | {image}\nCost: {cost} (billed immediately)",
-                )
-                if approval.status.value != "approved":
-                    return f"❌ Denied ({approval.status.value})"
-
-                droplet = await self.do_client.create_droplet(
-                    name=d_name, region=region, size=size, image=image, ssh_key_ids=ssh_key_ids,
-                )
-                networks = droplet.get("networks", {}).get("v4", [])
-                public_ip = next((n["ip_address"] for n in networks if n.get("type") == "public"), "pending")
-                status = droplet.get("status", "unknown")
-
-                if status == "active":
-                    return (
-                        f"✅ Droplet ready!\n\n"
-                        f"**{d_name}**\n"
-                        f"IP: `{public_ip}`\n"
-                        f"Region: {region} | {size} | {cost}\n\n"
-                        f"SSH: `ssh root@{public_ip}`"
-                    )
-                return f"⏳ Droplet created (status: {status})\nID: {droplet.get('id')}"
-
-            return f"❓ Unknown tool: {name}"
-
-        except Exception as e:
-            logger.error(f"Tool call {name} failed: {e}", exc_info=True)
-            return f"⚠️ Tool error ({name}): {e}"
+    # ── Telegram Handlers ─────────────────────────────────────────────────────
 
     async def _handle_master_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle messages to master bot"""
         user_id = str(update.effective_user.id)
-        
+
         # Check for media content
         message_text = update.message.text or update.message.caption or ""
         message = message_text
-        
+
         if update.message.photo:
             photo_file = await update.message.photo[-1].get_file()
             photo_bytes = await photo_file.download_as_bytearray()
             base64_image = base64.b64encode(photo_bytes).decode('utf-8')
-            
+
             message = [
                 {"type": "text", "text": message_text},
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
@@ -872,14 +541,14 @@ class ATLASGateway:
                     metadata={"source": "master_telegram", "is_owner": True},
                     update=update,
                 )
-                
+
                 # Log outbound
                 self.transcript_manager.log_message("master", {
                     "user_id": "bot",
                     "message": response,
                     "direction": "outbound"
                 })
-                
+
                 await update.message.reply_text(response, parse_mode="Markdown")
             except Exception as e:
                 logger.error(f"Pipeline error: {e}", exc_info=True)
@@ -894,10 +563,10 @@ class ATLASGateway:
     async def _handle_client_message(self, client_id: str, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle messages to client bots"""
         user_id = str(update.effective_user.id)
-        
+
         # Check for media content
         message_text = update.message.text or update.message.caption or ""
-        
+
         text_lower = message_text.strip().lower()
         if text_lower in ["approve", "deny"] and self.approval_workflow.pending:
             latest_request_id = list(self.approval_workflow.pending.keys())[-1]
@@ -910,12 +579,12 @@ class ATLASGateway:
             return
 
         message = message_text
-        
+
         if update.message.photo:
             photo_file = await update.message.photo[-1].get_file()
             photo_bytes = await photo_file.download_as_bytearray()
             base64_image = base64.b64encode(photo_bytes).decode('utf-8')
-            
+
             message = [
                 {"type": "text", "text": message_text},
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
@@ -960,13 +629,17 @@ class ATLASGateway:
 
         asyncio.create_task(_run_client_pipeline())
 
+    # ── HTTP & Bot Lifecycle ──────────────────────────────────────────────────
+
     async def _health_handler(self, request: web.Request) -> web.Response:
         """HTTP health check endpoint for Docker/load balancers"""
         return web.json_response({
             "status": "ok",
-            "version": "2.0",
+            "version": "3.0",
             "bots_active": len(self.client_bots) + (1 if self.master_bot else 0),
             "providers": len(self.provider_chain.providers),
+            "tools": self.tool_registry.tool_count,
+            "search_providers": [p.value for p in self.web_search.providers],
         })
 
     async def start_health_server(self, port: int = 8080):
@@ -1022,11 +695,17 @@ class ATLASGateway:
 
         self.client_bots[client_id] = app
 
+    # ── Bot Commands ──────────────────────────────────────────────────────────
+
     async def _cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         providers_status = f"{len(self.provider_chain.providers)} provider(s) active" if self.provider_chain.providers else "⚠️ No providers"
+        tools_status = f"{self.tool_registry.tool_count} tools registered"
+        search_status = f"Search: {', '.join(p.value for p in self.web_search.providers)}"
         await update.message.reply_text(
-            f"🤖 ATLAS v2 Master Bot\n"
-            f"AI: {providers_status}\n\n"
+            f"🤖 ATLAS v3 Gateway\n"
+            f"AI: {providers_status}\n"
+            f"🔧 {tools_status}\n"
+            f"🔍 {search_status}\n\n"
             f"Commands:\n"
             f"/status - System status\n"
             f"/clients - List clients\n"
@@ -1039,11 +718,13 @@ class ATLASGateway:
         provider_names = [p.name for p in self.provider_chain.providers]
 
         status = (
-            f"📊 ATLAS v2 Status\n\n"
+            f"📊 ATLAS v3 Status\n\n"
             f"🤖 Active client bots: {len(self.client_bots)}\n"
             f"👥 Registered clients: {client_count}\n"
             f"📋 Queue lanes: {stats['lane_count']}\n"
             f"🧠 AI providers: {', '.join(provider_names) or 'none'}\n"
+            f"🔧 Tools: {self.tool_registry.tool_count} ({', '.join(self.tool_registry.tool_names)})\n"
+            f"🔍 Search: {', '.join(p.value for p in self.web_search.providers)}\n"
         )
         await update.message.reply_text(status)
 
@@ -1078,6 +759,8 @@ class ATLASGateway:
 
         await update.message.reply_text(msg)
 
+    # ── Main Run Loop ─────────────────────────────────────────────────────────
+
     async def run(self):
         """Main run loop"""
         # Start health server first (so Docker health checks pass immediately)
@@ -1097,8 +780,8 @@ class ATLASGateway:
                 print(f"Failed to start bot for {client_id}: {e}")
 
         provider_count = len(self.provider_chain.providers)
-        print(f"🚀 ATLAS v2 Gateway running | {provider_count} AI provider(s) active")
-        
+        print(f"🚀 ATLAS v3 Gateway running | {provider_count} AI provider(s) | {self.tool_registry.tool_count} tools")
+
         # Start the Persistence Layer (Proactive AGI)
         self.initiative.register_jobs(self.scheduler)
         print(f"🕰️ ATLAS Persistent Scheduler started with {len(self.scheduler.jobs)} autonomous missions")

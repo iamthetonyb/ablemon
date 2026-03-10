@@ -2,7 +2,7 @@
 # Build: docker build -t atlas-v2 .
 # Run: docker run -d --env-file .env -p 8080:8080 atlas-v2
 
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \

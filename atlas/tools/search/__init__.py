@@ -1,9 +1,32 @@
 """
 Web Search Tools
 
-Multi-provider web search with DuckDuckGo, Google, and Bing support.
+Multi-provider web search with intelligent fallback.
+Priority: Brave → Perplexity → Gemini → Google → DuckDuckGo
 """
 
-from .web_search import WebSearch, SearchResult, SearchResponse, SearchProvider
+from .web_search import (
+    WebSearch,
+    SearchResult,
+    SearchResponse,
+    SearchProvider,
+    BraveSearch,
+    PerplexitySearch,
+    GeminiSearch,
+    GoogleSearch,
+    BingSearch,
+    DuckDuckGoSearch,
+)
 
-__all__ = ["WebSearch", "SearchResult", "SearchResponse", "SearchProvider"]
+__all__ = [
+    "WebSearch",
+    "SearchResult",
+    "SearchResponse",
+    "SearchProvider",
+    "BraveSearch",
+    "PerplexitySearch",
+    "GeminiSearch",
+    "GoogleSearch",
+    "BingSearch",
+    "DuckDuckGoSearch",
+]
