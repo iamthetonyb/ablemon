@@ -286,6 +286,21 @@ skills:
     created: "2026-03-10"
     use_count: 0
 
+  writing-skills:
+    description: "Use when creating new skills, editing existing skills, or verifying skills work before deployment. TDD applied to process documentation."
+    triggers:
+      - "new skill"
+      - "create skill"
+      - "edit skill"
+      - "skill builder"
+      - "write skill"
+      - "meta skill"
+    type: "behavioral"
+    trust_level: "L2_SUGGEST"
+    requires_approval: false
+    created: "2026-03-11"
+    use_count: 0
+
   # ══════════════════════════════════════════════════════════════
   # BILLING SKILLS
   # ══════════════════════════════════════════════════════════════
