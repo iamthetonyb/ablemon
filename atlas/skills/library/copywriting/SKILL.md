@@ -10,7 +10,7 @@ description: "Complete copywriting + copy-editing protocol. NLP meta-programs, p
 
 ## Triggers
 
-- Command: "respond", "reply", "email", "write", "draft", "message", "copy", "pitch"
+- Command: "respond", "reply", "email", "write", "draft", "message", "copy", "pitch", "edit"
 - Command: "follow up", "reach out", "landing page", "headline", "tagline", "slogan", "campaign", "ad copy"
 
 ## Inputs
@@ -59,25 +59,54 @@ description: "Complete copywriting + copy-editing protocol. NLP meta-programs, p
 
 ---
 
-## PART 3: NLP META-PROGRAMS
+## PART 3: DEEP NLP PROFILING (PEOPLE PATTERNS)
 
-Diagnose the target audience and encode matching linguistic triggers:
+Crucial System Requirement: The engine must establish two distinct tone variables:
+- **Tone_Social**: The baseline tone presented initially or during pleasantries (the "mask").
+- **Tone_Chronic**: The tone defaulted to under pressure or deep explanations.
 
-**Motivation Direction**
-- **Toward (40%):** Motivated by achieving goals (achieve, gain, secure, build, grow) → Emphasize what they GET.
-- **Away From (40%):** Motivated by avoiding pain (avoid, escape, eliminate) → Agitate pain point, offer immediate exit.
+### The Tone Hierarchy Scale (Bottom to Top)
+1. Failure / Useless / Apathy
+2. Hopeless / Making Amends / Grief
+3. Propitiation / Sympathy
+4. Numb / Terror / Despair / Fear
+5. Anxiety / Covert hostility
+6. Unexpressed resentment / No sympathy
+7. Resentment / Hate / Anger
+8. Pain / Hostility / Antagonism
+9. Monotony / Boredom
+10. Disinterested / Contentment
+11. Mild interest / Conservatism
+12. Strong interest / Cheerful / Enthusiasm
 
-**Frame of Reference**
-- **Internal (40%):** Trust gut feelings (Only you can decide, you evaluate) → Soften CTAs.
-- **External (40%):** Need social proof (Research shows, proven results) → Lead with authority.
+### NLP Semantic Parser Filters
+Listen for specific phrase structures to categorize the subject:
 
-**Sorting Filter**
-- **Sameness with Exception (55%):** Similarity + incremental improvement (better, advanced, the evolution of).
-- **Difference with Exception (25%):** Notice novel first, then ground (Lead with what's new).
+**Direction of Motivation**
+- **Move Toward**: Pleasure/Goal oriented (achieve, gain, secure). Emphasize what they get.
+- **Move Away From**: Pain/Avoidance oriented (avoid, escape). Agitate pain, offer exit.
 
-**Information Chunk Size**
-- **Global (60%):** Big picture, conceptual → Headline.
-- **Specific (15%):** Granular data, exact details → Features sections.
+**Relationship Sorting (Change Pattern)**
+- **Sameness (5-10%)**: Looks for correlations.
+- **Qualified Sameness (55%)**: Looks for correlations with exceptions (better, advanced).
+- **Difference (5-10%)**: Mismatcher, counter-examples, polarity responder.
+- **Qualified Difference (25%)**: Makes distinctions first.
+
+**Primary Interest Filter**
+What do they emphasize first?
+- People (Who) / Things (What) / Activity (How/When) / Place (Where) / Info (Why)
+
+**Information Processing Filter**
+- **Perceptual Source**: Tangible (75% - 5 senses/facts) vs. Intangible (25% - intuition/6th sense).
+- **Chunk Size**: Global/Overview (15%) vs. Specific/Details (60%) vs. Balanced (25%).
+
+**Evaluation & Frame of Reference**
+- **Internal**: Uses internal criteria ("I decided," "I feel"). Ignores external feedback. Soften CTAs.
+- **External**: Uses external criteria ("They said," "Industry standard"). Needs feedback for morale.
+
+**Decision Strategy Type**
+- **Direct**: Looks right, sounds right, feels right, acts right. (Visual/Auditory/Kinesthetic sensation driven).
+- **Derived (The WHY)**: Makes sense. Uses words, symbols, linguistic criteria, and a linear list of reasons.
 
 ---
 
@@ -115,14 +144,25 @@ After writing, run these editing sweeps in order:
 
 ---
 
-## PART 6: SPIRAL DYNAMICS VALUE LEVELS
+## PART 6: MACRO-CLASSIFICATIONS (VALUES & LIFESTYLES)
 
-Match semantics to operating level:
-- **Level 3 (Red) - Impulsive/Power:** "Dominate, crush, immediate power"
-- **Level 4 (Blue) - Conformist/Order:** "Duty, honor, compliance, proven system"
-- **Level 5 (Orange) - Achiever:** "ROI, optimize, strategic advantage, science-backed"
-- **Level 6 (Green) - Humanistic:** "Sustainability, harmony, inclusive, mutual growth"
-- **Level 7 (Yellow) - Systemic:** "Functional integrity, complex adaptive systems"
+Based on the aggregated semantic data, assign the subject to broader societal matrices.
+
+### Core Need
+- **Power**: Control/Domination
+- **Achievement**: Internal accomplishment/Success
+- **Affiliation**: Group approval/Harmony
+
+### Value System (Select 1)
+- **Tribalistic**
+- **Egocentric** (Impulsive/Power: "Dominate, crush, immediate power")
+- **Absolutistic** (Conformist/Order: "Duty, honor, compliance")
+- **Materialist/Multiplistic** (Achiever: "ROI, optimize, strategic advantage")
+- **Personalistic** (Humanistic: "Sustainability, harmony, inclusive")
+- **Existential/Systemic** (Systemic: "Functional integrity, complex adaptive systems")
+
+### Lifestyle Designation (Select 1)
+- Survivors, Sustainers, Belongers, Emulators, Achievers, I-Am-Me, Experientials, Societally Conscious, Integrated.
 
 ---
 

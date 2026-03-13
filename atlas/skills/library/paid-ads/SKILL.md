@@ -21,11 +21,13 @@ description: "Paid advertising campaign creation and optimization. Use for Googl
 - Current pricing/offer/promotion?
 - Landing page URL?
 
-### 3. Audience
-- Demographics (age, location, income)
-- Psychographics (interests, pain points)
-- Existing customer profile?
-- Lookalike audience data available?
+### 3. Audience (Deep NLP Profiling)
+- **Demographics**: Age, location, income
+- **Psychographics**: Interests, pain points
+- **Tone Match**: Tone_Social (mask) vs Tone_Chronic (under pressure)
+- **Macro-Classifications**: Core Need (Power/Achievement/Affiliation), Value System, Lifestyle Designation
+- **Decision Strategy**: Direct (sensation driven) vs Derived (reason driven)
+- **Lookalike**: Existing customer profiles mapping to NLP semantic filters
 
 ### 4. Current State
 - Running ads currently?
