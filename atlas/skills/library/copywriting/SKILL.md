@@ -83,7 +83,7 @@ Crucial System Requirement: The engine must establish two distinct tone variable
 Listen for specific phrase structures to categorize the subject:
 
 **Direction of Motivation**
-- **Move Toward (40%)**: Pleasure/Goal oriented (achieve, gain, secure, build, grow). Emphasize what they GET.
+- **Move Toward (40% of people)**: Pleasure/Goal oriented (achieve, gain, secure, build, grow). Emphasize what they GET.
 - **Move Away From (40%)**: Pain/Avoidance oriented (avoid, escape, eliminate). Agitate pain point, offer immediate exit.
 
 **Relationship Sorting (Change Pattern)**
@@ -173,11 +173,12 @@ Based on the aggregated semantic data, assign the subject to broader societal ma
 ```
 Hey [Name],
 
-Saw you grabbed our playbook and were checking out pricing.
+Saw you grabbed our playbook and were checking out pricing..
 
-Quick question: what's the one thing that would make this a no-brainer for you?
+Quick question: 
+What's the one thing that would make this a yes for you now?
 
-If it's seeing how it actually works for companies like yours, I can show you in 15 minutes. No pitch, just a walkthrough.
+If it's seeing how it actually works for companies like yours, I can show you in 15 minutes. No pitch, just a simple walkthrough.
 
 [Calendar link]
 
