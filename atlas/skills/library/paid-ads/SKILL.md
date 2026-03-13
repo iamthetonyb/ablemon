@@ -22,11 +22,15 @@ description: "Paid advertising campaign creation and optimization. Use for Googl
 - Landing page URL?
 
 ### 3. Audience (Deep NLP Profiling)
+Ad copy conversion strictly depends on matching the target's psychological profile. Ensure you define:
 - **Demographics**: Age, location, income
-- **Psychographics**: Interests, pain points
-- **Tone Match**: Tone_Social (mask) vs Tone_Chronic (under pressure)
-- **Macro-Classifications**: Core Need (Power/Achievement/Affiliation), Value System, Lifestyle Designation
-- **Decision Strategy**: Direct (sensation driven) vs Derived (reason driven)
+- **Psychographics**: Interests, core pain points
+- **Tone_Social (The Mask)**: The superficial tone they project (Scale 1-12). Write the **Hook / Headline** in this tone. Example: "Enthusiasm (12)" requires high energy.
+- **Tone_Chronic (The Reality)**: The baseline tone under pressure (Scale 1-12). Write the **Pain Agitation / CTA** in this tone. Example: "Anxiety (5)" requires reversing risk and offering safety.
+- **Macro-Classifications**: Core Need (Power/Achievement/Affiliation), Value System (e.g., Orange Achiever, Green Humanistic), Lifestyle Designation.
+- **Decision Strategy**: 
+  - *Direct*: They buy based on sensation ("Looks right, feels right"). Use kinesthetic/visual adjectives.
+  - *Derived (The WHY)*: They buy based on logic. Give a linear list of REASONS.
 - **Lookalike**: Existing customer profiles mapping to NLP semantic filters
 
 ### 4. Current State
