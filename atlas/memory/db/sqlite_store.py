@@ -21,16 +21,33 @@ class SQLiteStore:
     def __init__(self, db_path: Path):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        import zstandard as zstd
+        self.compressor = zstd.ZstdCompressor(level=3)
+        self.decompressor = zstd.ZstdDecompressor()
         self._init_db()
+
+    def _compress(self, text: str) -> bytes:
+        return self.compressor.compress(text.encode('utf-8'))
+
+    def _decompress(self, data: Any) -> str:
+        if isinstance(data, str):
+            return data  # Legacy uncompressed text
+        try:
+            return self.decompressor.decompress(data).decode('utf-8')
+        except Exception:
+            # Fallback if somehow it's bytes but not zstd
+            if isinstance(data, bytes):
+                return data.decode('utf-8', errors='replace')
+            return str(data)
 
     def _init_db(self):
         """Initialize database schema"""
         with self._connection() as conn:
-            # Main memories table
+            # Main memories table (content is BLOB for zstd)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS memories (
                     id TEXT PRIMARY KEY,
-                    content TEXT NOT NULL,
+                    content BLOB NOT NULL,
                     memory_type TEXT NOT NULL,
                     timestamp TEXT NOT NULL,
                     metadata TEXT,
@@ -41,7 +58,7 @@ class SQLiteStore:
                 )
             """)
 
-            # Full-text search virtual table
+            # Full-text search virtual table (stores uncompressed for searching)
             conn.execute("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
                     id,
@@ -53,30 +70,9 @@ class SQLiteStore:
                 )
             """)
 
-            # Triggers to keep FTS in sync
-            conn.execute("""
-                CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
-                    INSERT INTO memories_fts(rowid, id, content, memory_type, client_id)
-                    VALUES (new.rowid, new.id, new.content, new.memory_type, new.client_id);
-                END
-            """)
-
-            conn.execute("""
-                CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
-                    INSERT INTO memories_fts(memories_fts, rowid, id, content, memory_type, client_id)
-                    VALUES ('delete', old.rowid, old.id, old.content, old.memory_type, old.client_id);
-                END
-            """)
-
-            conn.execute("""
-                CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
-                    INSERT INTO memories_fts(memories_fts, rowid, id, content, memory_type, client_id)
-                    VALUES ('delete', old.rowid, old.id, old.content, old.memory_type, old.client_id);
-                    INSERT INTO memories_fts(rowid, id, content, memory_type, client_id)
-                    VALUES (new.rowid, new.id, new.content, new.memory_type, new.client_id);
-                END
-            """)
-
+            # Triggers: We DO NOT auto-sync `content` in the trigger anymore because the raw table has BLOBs 
+            # and FTS5 needs TEXT. We will handle FTS insertion manually in Python.
+            
             # Indexes
             conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_client ON memories(client_id)")
@@ -95,15 +91,18 @@ class SQLiteStore:
             conn.close()
 
     def insert(self, entry) -> bool:
-        """Insert a memory entry"""
+        """Insert a memory entry (compressed) and update FTS (uncompressed)"""
+        compressed_content = self._compress(entry.content)
+        
         with self._connection() as conn:
-            conn.execute("""
+            cursor = conn.cursor()
+            cursor.execute("""
                 INSERT OR REPLACE INTO memories
                 (id, content, memory_type, timestamp, metadata, client_id, session_id, relevance_score)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 entry.id,
-                entry.content,
+                sqlite3.Binary(compressed_content),
                 entry.memory_type.value,
                 entry.timestamp.isoformat(),
                 json.dumps(entry.metadata),
@@ -111,6 +110,21 @@ class SQLiteStore:
                 entry.session_id,
                 entry.relevance_score
             ))
+            rowid = cursor.lastrowid
+            
+            # Manually update FTS table with uncompressed text
+            cursor.execute("DELETE FROM memories_fts WHERE id = ?", (entry.id,))
+            cursor.execute("""
+                INSERT INTO memories_fts(rowid, id, content, memory_type, client_id)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                rowid,
+                entry.id,
+                entry.content,
+                entry.memory_type.value,
+                entry.client_id
+            ))
+            
             conn.commit()
         return True
 
@@ -133,7 +147,7 @@ class SQLiteStore:
         client_id: Optional[str] = None,
         limit: int = 10
     ) -> List[Tuple[Any, float]]:
-        """Full-text search with optional filters"""
+        """Full-text search using FTS5 (which holds uncompressed text)"""
         results = []
 
         with self._connection() as conn:
@@ -196,12 +210,12 @@ class SQLiteStore:
             return [self._row_to_entry(row) for row in rows]
 
     def _row_to_entry(self, row):
-        """Convert database row to MemoryEntry"""
+        """Convert database row to MemoryEntry, decompressing content"""
         from memory.hybrid_memory import MemoryEntry, MemoryType
 
         return MemoryEntry(
             id=row['id'],
-            content=row['content'],
+            content=self._decompress(row['content']),
             memory_type=MemoryType(row['memory_type']),
             timestamp=datetime.fromisoformat(row['timestamp']),
             metadata=json.loads(row['metadata']) if row['metadata'] else {},

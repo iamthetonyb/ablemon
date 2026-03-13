@@ -768,13 +768,58 @@ class EnforcedOrchestrator(SkillOrchestrator):
         context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        Process with NEVER SAY CAN'T enforcement.
+        Process with NEVER SAY CAN'T enforcement and DUAL-AGENT SWARM logic.
         """
         self.tracker.clear()
         context = context or {}
 
-        # First, try normal processing
-        result = await self.process(user_input, context)
+        # 1. Generate the Plan first to check complexity
+        plan = await self.plan(user_input, context)
+        is_swarm = plan.complexity_score and plan.complexity_score.score >= 0.7
+
+        # 2. DUAL-AGENT SWARM PATH (Complexity > 0.7)
+        if is_swarm:
+            logger.info("🐝 Activating Dual-Agent Swarm (Researcher -> Coder)")
+            swarm_results = {}
+            
+            # Agent 1: Researcher (Deep Context Gathering)
+            if "web_search" in self._skills:
+                research_res = await self._execute_skill(
+                    SkillInvocation("web_search", 10, {"query": user_input}),
+                    user_input,
+                    context
+                )
+                swarm_results["Researcher"] = research_res
+                if research_res.get("success"):
+                    context["swarm_research_context"] = str(research_res.get("output"))
+
+            # Agent 2: Coder/Executor (Takes Context and Acts)
+            executor_skill = "code_analysis" if "code_analysis" in self._skills else self.fallback_tools[0]
+            if executor_skill in self._skills:
+                coder_input = f"{user_input}\n\n[RESEARCH CONTEXT]:\n{context.get('swarm_research_context', 'No research found.')}"
+                coder_res = await self._execute_skill(
+                    SkillInvocation(executor_skill, 10, {}),
+                    coder_input,
+                    context
+                )
+                swarm_results["Coder"] = coder_res
+
+            return {
+                "plan": {
+                    "intents": [{"type": i.intent.value, "confidence": i.confidence} for i in plan.intents],
+                    "complexity": plan.estimated_complexity,
+                    "swarm_activated": True,
+                    "swarm_roles": ["RESEARCHER", "CODER"]
+                },
+                "results": swarm_results,
+                "success": any(r.get("success") for r in swarm_results.values()),
+                "tool_attempts": "Swarm Execution Bypassed Normal Tracking",
+                "can_say_cant": False,
+                "cant_reason": "Swarm active"
+            }
+
+        # 3. STANDARD PATH
+        result = await self.execute(plan, user_input, context)
 
         # Check if any skill failed or no skills triggered
         all_failed = not result.get("success", False) or not result.get("results")
