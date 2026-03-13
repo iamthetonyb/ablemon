@@ -1,0 +1,14 @@
+{
+  "eval_id": 0,
+  "eval_name": "forbidden-lexicon-compliance",
+  "prompt": "Write a cold outreach email to a SaaS founder named Marcus Chen who runs a project management tool called TaskFlow. He downloaded our lead magnet about scaling B2B sales teams. Objective: get him to book a 15-minute demo call. Tone: casual but confident. Context: He's been browsing our pricing page twice this week.",
+  "assertions": [
+    "Output contains zero words from the forbidden lexicon (no: leverage, delve, robust, crucial, seamless, transformative, cutting-edge, navigate, unlock, unleash, elevate, resonate, foster, paradigm, synergy, comprehensive, dynamic, paramount, furthermore, moreover, consequently, ultimately, meticulously)",
+    "Output does NOT start with any formulaic AI opening like 'In today's fast-paced...' or 'I hope this email finds you well'",
+    "Output does NOT use forced triads (three-word punchy fragments like 'Focused. Aligned. Measurable.')",
+    "Output does NOT use contrastive negation pattern ('It's not just about X. It's about Y.')",
+    "Output includes a clear call-to-action related to booking a demo or call",
+    "Output sounds like a human wrote it — uses contractions, casual phrasing, and natural sentence rhythm",
+    "Output mentions or references TaskFlow, pricing page visits, or the lead magnet contextually"
+  ]
+}
