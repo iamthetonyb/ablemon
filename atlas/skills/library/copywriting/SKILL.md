@@ -83,14 +83,14 @@ Crucial System Requirement: The engine must establish two distinct tone variable
 Listen for specific phrase structures to categorize the subject:
 
 **Direction of Motivation**
-- **Move Toward**: Pleasure/Goal oriented (achieve, gain, secure). Emphasize what they get.
-- **Move Away From**: Pain/Avoidance oriented (avoid, escape). Agitate pain, offer exit.
+- **Move Toward (40%)**: Pleasure/Goal oriented (achieve, gain, secure, build, grow). Emphasize what they GET.
+- **Move Away From (40%)**: Pain/Avoidance oriented (avoid, escape, eliminate). Agitate pain point, offer immediate exit.
 
 **Relationship Sorting (Change Pattern)**
 - **Sameness (5-10%)**: Looks for correlations.
-- **Qualified Sameness (55%)**: Looks for correlations with exceptions (better, advanced).
+- **Qualified Sameness (55%)**: Similarity + incremental improvement (better, advanced, the evolution of).
 - **Difference (5-10%)**: Mismatcher, counter-examples, polarity responder.
-- **Qualified Difference (25%)**: Makes distinctions first.
+- **Qualified Difference (25%)**: Makes distinctions first. Notice novel first, then ground (Lead with what's new).
 
 **Primary Interest Filter**
 What do they emphasize first?
@@ -98,11 +98,11 @@ What do they emphasize first?
 
 **Information Processing Filter**
 - **Perceptual Source**: Tangible (75% - 5 senses/facts) vs. Intangible (25% - intuition/6th sense).
-- **Chunk Size**: Global/Overview (15%) vs. Specific/Details (60%) vs. Balanced (25%).
+- **Chunk Size**: Global/Overview (15% - Big picture/conceptual → Headline) vs. Specific/Details (60% - Granular data → Features) vs. Balanced (25%).
 
 **Evaluation & Frame of Reference**
-- **Internal**: Uses internal criteria ("I decided," "I feel"). Ignores external feedback. Soften CTAs.
-- **External**: Uses external criteria ("They said," "Industry standard"). Needs feedback for morale.
+- **Internal (40%)**: Uses internal criteria ("I decided," "I feel"). Trust gut feelings (Only you can decide, you evaluate). Ignores external feedback. Soften CTAs.
+- **External (40%)**: Uses external criteria ("They said," "Industry standard"). Needs social proof (Research shows, proven results). Needs feedback for morale. Lead with authority.
 
 **Decision Strategy Type**
 - **Direct**: Looks right, sounds right, feels right, acts right. (Visual/Auditory/Kinesthetic sensation driven).
@@ -153,13 +153,13 @@ Based on the aggregated semantic data, assign the subject to broader societal ma
 - **Achievement**: Internal accomplishment/Success
 - **Affiliation**: Group approval/Harmony
 
-### Value System (Select 1)
-- **Tribalistic**
-- **Egocentric** (Impulsive/Power: "Dominate, crush, immediate power")
-- **Absolutistic** (Conformist/Order: "Duty, honor, compliance")
-- **Materialist/Multiplistic** (Achiever: "ROI, optimize, strategic advantage")
-- **Personalistic** (Humanistic: "Sustainability, harmony, inclusive")
-- **Existential/Systemic** (Systemic: "Functional integrity, complex adaptive systems")
+### Value System / Spiral Dynamics (Select 1)
+- **Tribalistic** (Level 2 Purple)
+- **Egocentric** (Level 3 Red - Impulsive/Power: "Dominate, crush, immediate power")
+- **Absolutistic** (Level 4 Blue - Conformist/Order: "Duty, honor, compliance, proven system")
+- **Materialist/Multiplistic** (Level 5 Orange - Achiever: "ROI, optimize, strategic advantage, science-backed")
+- **Personalistic** (Level 6 Green - Humanistic: "Sustainability, harmony, inclusive, mutual growth")
+- **Existential/Systemic** (Level 7 Yellow - Systemic: "Functional integrity, complex adaptive systems")
 
 ### Lifestyle Designation (Select 1)
 - Survivors, Sustainers, Belongers, Emulators, Achievers, I-Am-Me, Experientials, Societally Conscious, Integrated.
