@@ -51,16 +51,16 @@ This Skill is not needed in the following situations:
 
 | Priority | Category | Impact | Domain | Key Checks (Must Have) | Anti-Patterns (Avoid) |
 |----------|----------|--------|--------|------------------------|------------------------|
-| 1 | **Atlas Aesthetic** | **CRITICAL** | `style` | #050508 backdrops, Gold (#D4AF37) accents, 20% opacity glass borders | **Generic AI Blue/Purple gradients**, "Modern SaaS" standard blue, generic purple |
-| 2 | Accessibility | CRITICAL | `ux` | Contrast 4.5:1, Alt text, Keyboard nav, Aria-labels | Removing focus rings, Icon-only buttons without labels |
-| 3 | Touch & Interaction | CRITICAL | `ux` | Min size 44×44px, 8px+ spacing, Loading feedback | Reliance on hover only, Instant state changes (0ms) |
-| 4 | Performance | HIGH | `ux` | WebP/AVIF, Lazy loading, Reserve space (CLS < 0.1) | Layout thrashing, Cumulative Layout Shift |
-| 5 | Style Selection | HIGH | `style`, `product` | Match AGI/Luxury product type, Consistency, SVG icons | Neumorphism (unless requested), Generic "Bootstrap" look |
-| 6 | Layout & Responsive | HIGH | `ux` | Mobile-first breakpoints, Viewport meta, No horizontal scroll | Horizontal scroll, Fixed px container widths, Disable zoom |
-| 7 | Typography & Color | MEDIUM | `typography`, `color` | Base 16px, Line-height 1.5, Semantic gold tokens | Text < 12px body, Gray-on-gray, Generic Blue/Purple AI gradients |
-| 8 | Animation | MEDIUM | `ux` | Duration 150–300ms, Motion conveys meaning, Spatial continuity | Decorative-only animation, Animating width/height |
-| 9 | Forms & Feedback | MEDIUM | `ux` | Visible labels, Error near field, Helper text | Placeholder-only label, Errors only at top |
-| 10 | Navigation Patterns | HIGH | `ux` | Predictable back, Bottom nav ≤5, Deep linking | Overloaded nav, Broken back behavior, No deep links |
+| 1 | Accessibility | CRITICAL | `ux` | Contrast 4.5:1, Alt text, Keyboard nav, Aria-labels | Removing focus rings, Icon-only buttons without labels |
+| 2 | Touch & Interaction | CRITICAL | `ux` | Min size 44×44px, 8px+ spacing, Loading feedback | Reliance on hover only, Instant state changes (0ms) |
+| 3 | Performance | HIGH | `ux` | WebP/AVIF, Lazy loading, Reserve space (CLS &lt; 0.1) | Layout thrashing, Cumulative Layout Shift |
+| 4 | Style Selection | HIGH | `style`, `product` | Match product type, Consistency, SVG icons (no emoji) | Mixing flat & skeuomorphic randomly, Emoji as icons |
+| 5 | Layout & Responsive | HIGH | `ux` | Mobile-first breakpoints, Viewport meta, No horizontal scroll | Horizontal scroll, Fixed px container widths, Disable zoom |
+| 6 | Typography & Color | MEDIUM | `typography`, `color` | Base 16px, Line-height 1.5, Semantic color tokens | Text &lt; 12px body, Gray-on-gray, Raw hex in components |
+| 7 | Animation | MEDIUM | `ux` | Duration 150–300ms, Motion conveys meaning, Spatial continuity | Decorative-only animation, Animating width/height, No reduced-motion |
+| 8 | Forms & Feedback | MEDIUM | `ux` | Visible labels, Error near field, Helper text, Progressive disclosure | Placeholder-only label, Errors only at top, Overwhelm upfront |
+| 9 | Navigation Patterns | HIGH | `ux` | Predictable back, Bottom nav ≤5, Deep linking | Overloaded nav, Broken back behavior, No deep links |
+| 10 | Charts & Data | LOW | `chart` | Legends, Tooltips, Accessible colors | Relying on color alone to convey meaning |
 
 ## Quick Reference
 
@@ -125,8 +125,6 @@ This Skill is not needed in the following situations:
 
 ### 4. Style Selection (HIGH)
 
-- **`atlas-aesthetic`** - STRICT: Use Dark #050508 background, Glassmorphism panels (bg-white/5), and Gold (#D4AF37) for interactive accents.
-- **`ban-generic-ai`** - MANDATORY: Do NOT use blue/purple gradients or generic "AI Glow" patterns. All glowing elements must use a gold/amber spectrum.
 - `style-match` - Match style to product type (use `--design-system` for recommendations)
 - `consistency` - Use same style across all pages
 - `no-emoji-icons` - Use SVG icons (Heroicons, Lucide), not emojis
