@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+
+# next.js build
+.next/
+out/
+
+# env files (secrets)
+.env
+.env.local
+.env.production.local
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+
+# drizzle
+src/db/migrations/
