@@ -262,12 +262,23 @@ class ModelRouter:
     """
     Routes tasks to appropriate model tier based on complexity and domain.
 
-    Opus: planning, architecture, legal, security, self-improvement, audits
-    Sonnet: code generation, research synthesis, writing, standard workloads
+    Tier routing:
+    - premium (Opus): planning, architecture, legal, security, self-improvement, audits
+      → Uses Claude Code plan subscription (FREE) or Anthropic API
+    - default (Sonnet): code generation, research synthesis, writing, standard workloads
+      → Spawns Claude Code --model sonnet subagents (FREE) or OpenRouter Qwen 3.5
+    - budget (Qwen 3.5): research, data gathering, bulk processing
+      → OpenRouter Qwen 3.5 ($0.60/$3.00 per M) or local Ollama
+
+    Cost strategy:
+    - Claude Code subscription handles planning + execution at $0
+    - OpenRouter Qwen 3.5 for high-volume research at $0.60/$3.00 per M
+    - Anthropic API only used as fallback when Claude Code CLI unavailable
     """
 
     HIGH_STAKES_DOMAINS = {"legal", "security", "financial", "production", "deploy", "audit"}
     OPUS_INTENTS = {IntentType.PLANNING, IntentType.ANALYSIS}
+    BUDGET_INTENTS = {IntentType.RESEARCH}
 
     @classmethod
     def select_model(
@@ -277,7 +288,7 @@ class ModelRouter:
         user_input: str,
     ) -> str:
         """
-        Returns 'premium' for Opus or 'default' for Sonnet.
+        Returns 'premium' (Opus), 'default' (Sonnet), or 'budget' (Qwen 3.5).
         """
         # High complexity always gets Opus
         if complexity_score.score >= 0.7:
@@ -293,7 +304,43 @@ class ModelRouter:
             if intent.confidence >= 0.7 and intent.intent in cls.OPUS_INTENTS:
                 return "premium"
 
+        # Pure research tasks can use budget tier (Qwen 3.5 via OpenRouter)
+        research_only = all(
+            i.intent in cls.BUDGET_INTENTS
+            for i in intents if i.confidence >= 0.5
+        )
+        if research_only and intents:
+            return "budget"
+
         return "default"
+
+    @classmethod
+    def get_provider_config(cls, tier: str) -> dict:
+        """
+        Returns provider-specific config for each tier.
+        Used by the orchestrator to configure the provider chain.
+        """
+        configs = {
+            "premium": {
+                "preferred_provider": "claude-code",
+                "model": "opus",
+                "fallback_provider": "anthropic",
+                "description": "Opus via Claude Code plan (free) → Anthropic API (paid)",
+            },
+            "default": {
+                "preferred_provider": "claude-code",
+                "model": "sonnet",
+                "fallback_provider": "openrouter",
+                "description": "Sonnet via Claude Code plan (free) → OpenRouter (paid)",
+            },
+            "budget": {
+                "preferred_provider": "openrouter",
+                "model": "qwen/qwen3-235b-a22b",
+                "fallback_provider": "ollama",
+                "description": "Qwen 3.5 via OpenRouter ($0.60/M) → Ollama (free)",
+            },
+        }
+        return configs.get(tier, configs["default"])
 
 
 class SkillOrchestrator:
