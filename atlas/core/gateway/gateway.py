@@ -35,6 +35,104 @@ from memory.hybrid_memory import HybridMemory, MemoryType
 
 logger = logging.getLogger(__name__)
 
+# ── Studio Dashboard Integration ──────────────────────────────────────────────
+
+STUDIO_BASE_URL = os.environ.get("ATLAS_STUDIO_URL", "http://localhost:3000")
+ATLAS_SERVICE_TOKEN = os.environ.get("ATLAS_SERVICE_TOKEN", "")
+
+
+async def fetch_authorized_tools(org_id: str = None) -> List[Dict]:
+    """
+    Fetch authorized tools from the atlas-studio dashboard.
+
+    Pings GET /api/settings to check which MCP skills are toggled ON.
+    If a tool is toggled OFF in the UI, it is physically removed from
+    the tool list — the agent cannot call it.
+
+    Falls back to full ATLAS_TOOL_DEFS if dashboard is unreachable.
+    """
+    import aiohttp
+
+    try:
+        url = f"{STUDIO_BASE_URL}/api/settings"
+        if org_id:
+            url += f"?org_id={org_id}"
+
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    logger.warning(f"Studio settings endpoint returned {resp.status}, using all tools")
+                    return ATLAS_TOOL_DEFS
+
+                data = await resp.json()
+                tool_settings = data.get("tools", {})
+
+                if not tool_settings:
+                    return ATLAS_TOOL_DEFS
+
+                # Filter: only include tools that are enabled in the dashboard
+                authorized = []
+                for tool_def in ATLAS_TOOL_DEFS:
+                    tool_name = tool_def["function"]["name"]
+                    setting = tool_settings.get(tool_name)
+
+                    if setting is None:
+                        # Tool not in dashboard — include by default
+                        authorized.append(tool_def)
+                    elif setting.get("enabled", True):
+                        authorized.append(tool_def)
+                    else:
+                        logger.info(f"Tool '{tool_name}' disabled via dashboard — removed from agent")
+
+                return authorized
+
+    except Exception as e:
+        logger.debug(f"Could not reach Studio dashboard ({e}), using all tools")
+        return ATLAS_TOOL_DEFS
+
+
+async def fetch_client_keys(org_id: str) -> dict:
+    """
+    Retrieve a client's decrypted API keys from the dashboard.
+
+    Ensures billing isolation — each client's token costs are tied
+    to their own API key rather than the global .env.
+
+    Returns: { anthropic_api_key, openrouter_api_key, config: { ... } }
+    """
+    import aiohttp
+
+    try:
+        url = f"{STUDIO_BASE_URL}/api/clients/keys?org_id={org_id}"
+        headers = {}
+        if ATLAS_SERVICE_TOKEN:
+            headers["x-atlas-service-token"] = ATLAS_SERVICE_TOKEN
+
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+            async with session.get(url, headers=headers) as resp:
+                if resp.status != 200:
+                    return {}
+                return await resp.json()
+
+    except Exception as e:
+        logger.debug(f"Could not fetch client keys ({e})")
+        return {}
+
+
+async def post_audit_log(entry: dict):
+    """
+    Post an audit log entry to the dashboard for the semantic viewer.
+    Non-blocking — failures are logged but don't break the pipeline.
+    """
+    import aiohttp
+
+    try:
+        url = f"{STUDIO_BASE_URL}/api/audit"
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
+            await session.post(url, json=entry)
+    except Exception:
+        pass  # Dashboard logging is best-effort
+
 # ── System prompt ──────────────────────────────────────────────────────────────
 
 ATLAS_SYSTEM_PROMPT = """You are ATLAS — Autonomous Task & Learning Agent System.
@@ -415,8 +513,12 @@ class ATLASGateway:
             return "⚠️ No AI providers configured. Set NVIDIA_API_KEY, OPENROUTER_API_KEY, or ANTHROPIC_API_KEY."
 
         try:
+            # ── Dashboard-driven tool authorization ──
+            # Fetch which tools are enabled from atlas-studio dashboard
+            authorized_tools = await fetch_authorized_tools(client_id)
+
             active_system_prompt = ATLAS_SYSTEM_PROMPT
-            
+
             # Inject memory context if available
             if hasattr(self, 'memory') and self.memory:
                 try:
@@ -459,7 +561,7 @@ class ATLASGateway:
                 if isinstance(message, list) and loop_iteration == 0:
                     result = await self.vision_chain.complete(
                         msgs,
-                        tools=ATLAS_TOOL_DEFS,
+                        tools=authorized_tools,
                         max_tokens=4096,
                         temperature=0.60
                     )
@@ -481,7 +583,7 @@ class ATLASGateway:
                             
                     result = await self.provider_chain.complete(
                         text_only_msgs,
-                        tools=ATLAS_TOOL_DEFS,
+                        tools=authorized_tools,
                         max_tokens=16384, # Reduced to prevent OpenRouter from reserving massive account balances and triggering 429
                         temperature=0.60,
                         top_p=0.95,
@@ -535,7 +637,35 @@ class ATLASGateway:
                         self.memory.store(content=final_text, memory_type=MemoryType.CONVERSATION, client_id=client_id)
                     except Exception as e:
                         logger.error(f"Failed to store memory: {e}")
-                
+
+                # ── Post audit log to dashboard ──
+                import uuid as _uuid
+                _run_id = str(_uuid.uuid4())
+                _tool_calls_log = []
+                for m in msgs:
+                    if hasattr(m, 'tool_calls') and m.tool_calls:
+                        for tc in m.tool_calls:
+                            _tool_calls_log.append({
+                                "name": tc.name,
+                                "args": tc.arguments if isinstance(tc.arguments, dict) else {},
+                            })
+                asyncio.create_task(post_audit_log({
+                    "run_id": _run_id,
+                    "agent_role": "executor",
+                    "task": text_content[:500] if isinstance(text_content, str) else str(text_content)[:500],
+                    "content": final_text[:2000],
+                    "tool_calls": _tool_calls_log,
+                    "provider_used": result.provider if hasattr(result, 'provider') else None,
+                    "model_used": result.model if hasattr(result, 'model') else None,
+                    "input_tokens": result.usage.get("input_tokens", 0) if hasattr(result, 'usage') and result.usage else 0,
+                    "output_tokens": result.usage.get("output_tokens", 0) if hasattr(result, 'usage') and result.usage else 0,
+                    "duration_ms": 0,
+                    "severity": "info",
+                    "status": "completed",
+                    "org_id": client_id,
+                    "iterations": loop_iteration + 1,
+                }))
+
                 return final_text
                 
             return "⚠️ Agent exceeded maximum tool iterations (15)."

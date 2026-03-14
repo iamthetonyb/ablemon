@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@theme {
+  --color-gold-50: #fef9e7;
+  --color-gold-100: #fcefc3;
+  --color-gold-200: #f9df87;
+  --color-gold-300: #f5c842;
+  --color-gold-400: #eab308;
+  --color-gold-500: #ca9a06;
+  --color-gold-600: #a27c05;
+  --color-gold-700: #7a5d04;
+  --color-gold-800: #5c4603;
+  --color-gold-900: #3d2f02;
+
+  --color-surface: #0a0a0f;
+  --color-surface-elevated: #12121a;
+  --color-surface-glass: rgba(18, 18, 26, 0.6);
+  --color-border-glass: rgba(234, 179, 8, 0.15);
+  --color-border-subtle: rgba(255, 255, 255, 0.06);
+}
+
+body {
+  background: var(--color-surface);
+  color: #e2e8f0;
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+}
+
+/* Glassmorphism card */
+.glass-card {
+  background: var(--color-surface-glass);
+  backdrop-filter: blur(24px);
+  border: 1px solid var(--color-border-glass);
+  border-radius: 16px;
+}
+
+/* Gold accent glow */
+.gold-glow {
+  box-shadow: 0 0 20px rgba(234, 179, 8, 0.1), 0 0 60px rgba(234, 179, 8, 0.05);
+}
+
+/* Status indicators */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.status-dot.active { background: #22c55e; box-shadow: 0 0 8px #22c55e66; }
+.status-dot.warning { background: #eab308; box-shadow: 0 0 8px #eab30866; }
+.status-dot.error { background: #ef4444; box-shadow: 0 0 8px #ef444466; }
+.status-dot.inactive { background: #64748b; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
