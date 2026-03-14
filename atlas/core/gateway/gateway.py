@@ -58,7 +58,12 @@ You are NOT a chatbot. You are an autonomous agent with real tools.
 - Read between the lines — understand what the user REALLY wants
 
 ## Available Tools
-You have access to these functions (use them when relevant):
+You have access to these functions (use them only when relevant):
+
+## Research Protocol
+- ALWAYS use `web_search` before answering questions about current events, pricing, versions, or anything that may have changed
+- Use `deep_research` for complex questions requiring thorough analysis with citations
+- Use `web_fetch` to read the full content of a specific URL
 
 **GitHub:**
 - `github_list_repos` — List all GitHub repositories (read-only)
@@ -73,7 +78,8 @@ You have access to these functions (use them when relevant):
 
 **Deployment:**
 - `github_pages_deploy` — Deploy static HTML/CSS/JS to GitHub Pages (free, instant)
-- `vercel_deploy` — Deploy React/Next.js/frontend to Vercel (free tier, CDN)
+- `cloudflare_deploy` — Deploy React/Vite apps to Cloudflare Workers/Pages (fast, serverless)
+- `vercel_deploy` — Deploy complex React/Next.js/frontend to Vercel (free tier, CDN)
 
 **Infrastructure:**
 - `do_list_droplets` — List Digital Ocean droplets (read-only)
@@ -85,8 +91,9 @@ You have access to these functions (use them when relevant):
 - Use `web_fetch` to read the full content of a specific URL
 
 ## Hosting Decision Guide
+- React/Vite (Default) → Cloudflare Workers / Pages (fast, serverless)
+- Complex Full-Stack React → Vercel + Next.js (server components, complex routing)
 - Static HTML/CSS/JS → GitHub Pages (free, simple)
-- React/Next.js/frontend → Vercel (free tier, CDN, serverless)
 - Backend/database/long-running → Digital Ocean VPS (billable)
 - Need root access/custom env → Digital Ocean VPS
 
@@ -443,9 +450,18 @@ class ATLASGateway:
                         # Notify user on Telegram
                         if update and update.message:
                             try:
-                                await update.message.reply_text(f"⚙️ `[{tool_call.name}]`\n{tool_output}")
+                                await update.message.reply_text(f"⚙️ `[{tool_call.name}]`\n{tool_output[:2000]}")
                             except Exception:
                                 pass
+
+                        # Emit Telemetry
+                        asyncio.create_task(self._emit_telemetry(
+                            run_id=session_id,
+                            agent_role=str(self.role if hasattr(self, 'role') else "ATLAS_Core"),
+                            task=f"Tool Execution: {tool_call.name}",
+                            content=str(tool_output),
+                            metadata={"trigger": self._last_skill_trigger}
+                        ))
 
                         # Inject tool observation for next loop
                         msgs.append(Message(
@@ -457,6 +473,15 @@ class ATLASGateway:
                     continue
 
                 final_text = result.content or "⚠️ ATLAS exceeded the maximum internal thinking steps (15 turns)."
+                
+                # Emit Telemetry for final answer
+                asyncio.create_task(self._emit_telemetry(
+                    run_id=session_id,
+                    agent_role=str(self.role if hasattr(self, 'role') else "ATLAS_Core"),
+                    task="Final Response Generation",
+                    content=final_text,
+                ))
+
                 # Save to HybridMemory
                 if hasattr(self, 'memory') and self.memory:
                     try:
@@ -482,7 +507,24 @@ class ATLASGateway:
                     pass
             return f"⚠️ AI error: {e}"
 
-    # ── Skill Outcome Tracking ────────────────────────────────────────────────
+    # ── Telemetry & Skill Outcome Tracking ────────────────────────────────────
+
+    async def _emit_telemetry(self, run_id: str, agent_role: str, task: str, content: str = None, metadata: dict = None):
+        """Emit execution logs to the Next.js Mission Control dashboard."""
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                payload = {
+                    "runId": run_id,
+                    "agentRole": agent_role,
+                    "task": task,
+                    "content": content,
+                    "metadata": metadata or {}
+                }
+                # Fire and forget
+                await session.post("http://localhost:4010/api/logs", json=payload, timeout=2.0)
+        except Exception as e:
+            logger.debug(f"Telemetry emission failed (is atlas-studio running?): {e}")
 
     def _log_skill_outcome(self, skill: str, trigger: str, outcome: str, signal: str):
         """Append a skill invocation outcome to skill_outcomes.jsonl."""
