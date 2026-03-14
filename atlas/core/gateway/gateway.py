@@ -28,6 +28,7 @@ from clients.client_manager import ClientRegistry, ClientTranscriptManager
 from core.providers.nvidia_nim import NVIDIANIMProvider
 from core.providers.openrouter import OpenRouterProvider
 from core.providers.anthropic_provider import AnthropicProvider
+from core.providers.claude_code_provider import ClaudeCodeProvider
 from core.providers.ollama import OllamaProvider
 from core.providers.base import ProviderChain, ProviderConfig, Message, Role
 from core.approval.workflow import ApprovalWorkflow, ApprovalStatus
@@ -94,10 +95,22 @@ All write operations require owner approval via Telegram inline buttons.
 Read-only operations (list repos, list droplets, web search) execute immediately.
 
 ## Autonomous Tool Creation (Endless Iteration)
-If you encounter a task that requires a tool or skill you do NOT currently have:
-1. Use `deep_research` or `web_search` to understand how to build the needed logic.
-2. Formulate a plan and use `github_push_files` to write the new tool directly into your own repository (`atlas/skills/library/` or `atlas/core/gateway/tool_defs/`).
-3. Iterate and attempt fallbacks until you solve the user's root goal. Never say you can't — build the capability yourself.
+If you encounter a task that requires a tool or skill you do NOT currently have, DO NOT ABORT. Build it!
+There are two approved ways to create tools/skills to solve unfamiliar tasks:
+
+**Method 1: skills.sh Registry Check**
+Use `run_commands` to execute `npx skills search [topic]` to see if someone already built it. If so, `npx skills add [owner/repo]` and use it!
+
+**Method 2: Custom Skill Generation (The 6-Step ATLAS Process)**
+If it doesn't exist, build it locally:
+1. Use `deep_research` or `web_search` to understand how the API or logic works.
+2. Run `python atlas/skills/scripts/init_skill.py <new-skill-name> --path atlas/skills/library --resources scripts`
+3. Use `github_push_files` to write the execution script to `atlas/skills/library/<name>/scripts/implement.py`.
+4. Use `github_push_files` to write instructions to `atlas/skills/library/<name>/SKILL.md`.
+5. Run `python atlas/skills/scripts/package_skill.py atlas/skills/library/<name>` to bundle it.
+6. Trigger the new skill immediately and solve the user's task.
+
+3. Iterate and attempt fallbacks until you solve the user's root goal. Never say you can't — build the capability yourself!
 
 ## Rules
 - NEVER say "I will do [X]", "Let me create [Y]", or acknowledge a request. Do it IMMEDIATELY in the current turn.
@@ -225,15 +238,23 @@ class ATLASGateway:
                 logger.warning(f"Failed to init OpenRouter provider: {e}")
 
         anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
-        if anthropic_key:
+        use_claude_oauth = os.environ.get("USE_CLAUDE_OAUTH", "false").lower() == "true"
+        
+        if use_claude_oauth:
+            try:
+                providers.append(ClaudeCodeProvider(model="claude-opus-4-6"))
+                logger.info("Provider added: Claude Code CLI (OAuth Mode) - Opus 4.6")
+            except Exception as e:
+                logger.warning(f"Failed to init Claude CLI provider: {e}")
+        elif anthropic_key:
             try:
                 providers.append(AnthropicProvider(
                     api_key=anthropic_key,
-                    model="claude-opus-4-5",
+                    model="claude-opus-4-6",
                 ))
-                logger.info("Provider added: Anthropic")
+                logger.info("Provider added: Anthropic API - Opus 4.6")
             except Exception as e:
-                logger.warning(f"Failed to init Anthropic provider: {e}")
+                logger.warning(f"Failed to init Anthropic API provider: {e}")
 
         ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
         try:
