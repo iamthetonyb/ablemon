@@ -68,7 +68,63 @@ Example: `META_CONV_LOOKALIKE_VIDEO-A_2026Q1`
 | **AIDA** | Attention → Interest → Desire → Action | Awareness campaigns |
 | **PAS** | Problem → Agitate → Solution | Pain-driven products |
 | **BAB** | Before → After → Bridge | Transformation offers |
-| **4U** | Urgent, Unique, Ultra-specific, Useful | Headlines |
+| **FAB** | Feature → Advantage → Benefit | Technical products, SaaS, informed buyers |
+| **4U** | Urgent, Unique, Ultra-specific, Useful | Headlines & short-form hooks |
+
+### Framework Selection Guide
+
+Choose based on NLP profiling:
+- **AIDA**: Best for Toward-motivated audiences (levels 10-12 Tone_Social). Build desire progressively.
+- **PAS**: Best for Away-From audiences (levels 4-7 Tone_Chronic). Agitate the pain they already feel.
+- **BAB**: Best for transformation/lifestyle products where the audience can visualize a better state. Works strongest with Visual and Kinesthetic rep systems.
+- **FAB**: Best for Derived (WHY) decision strategy buyers who need logical reasons in a linear list. Lead with spec data, show the functional advantage, close with the emotional payoff.
+- **4U**: Best for TikTok/Reels hooks (0-3 seconds) and Google search headlines where every character counts. Apply as a checklist to any headline before publishing.
+
+### FAB Protocol (Feature → Advantage → Benefit)
+
+Use this when the audience evaluates specs before buying. Orange (Achiever) and Yellow (Systems Thinker) Spiral profiles respond strongest.
+
+1. **Feature**: State the specific, measurable capability with empirical data.
+   - Include exact specs, quantities, or technical attributes
+   - Example: "Water-resistant fabric, full-coverage flag design, 40+ countries, $44.99/ea."
+
+2. **Advantage**: Explain the functional improvement over the status quo or competitors.
+   - Use comparison anchors ("vs. stadium merch at $80-120")
+   - External frame: reference industry standard or competitor weakness
+   - Example: "Delivered before kickoff. No stadium line. No inflated event pricing."
+
+3. **Benefit**: Translate the advantage into an emotional or experiential outcome.
+   - Match to the audience's rep system (Visual: "see yourself", Auditory: "hear yourself saying", Kinesthetic: "feel the quality")
+   - Example: "You show up looking sharper than anyone who grabbed whatever was left at the gate."
+
+**When NOT to use FAB**: Red (Impulsive) profiles and high-urgency contexts — these buyers don't want a spec sheet, they want a demand. Use AIDA or PAS instead.
+
+### BAB Protocol (Before → After → Bridge)
+
+Use this for transformation offers where the gap between current state and desired state is vivid and emotional.
+
+1. **Before**: Paint the current frustrating situation in the audience's own words.
+   - Use present tense to make it feel immediate
+   - Example: "You're scrambling through search results looking for fan gear that actually represents your country."
+
+2. **After**: Show the desired outcome as if they already achieved it.
+   - Use future visualization or "picture this" language
+   - Example: "You walk into opening day, colors on, and your people spot you across the stadium in 30 seconds."
+
+3. **Bridge**: Position your product as the single connector between Before and After.
+   - Keep it tight — one sentence connecting the problem to the solution
+   - Example: "HoodieFlags gets you there. 40+ countries. Delivered before kickoff."
+
+### 4U Headline Checklist
+
+Apply to every headline before publishing. Score 1-4:
+
+1. **Urgent**: Is there a time constraint? ("Before June 11", "Limited stock")
+2. **Unique**: Is it differentiated from every other ad they scroll past? ("The first & only")
+3. **Ultra-specific**: Does it use precise numbers or details? ("42 countries", "$44.99/ea.")
+4. **Useful**: Does it promise a clear benefit or outcome? ("Half the stadium price")
+
+If any headline scores below 3/4, rewrite before publishing.
 
 ### Platform Character Limits
 

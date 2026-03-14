@@ -116,7 +116,47 @@ What do they emphasize first?
 |-----------|-----------|----------|
 | **AIDA** | Attention → Interest → Desire → Action | General conversion |
 | **PAS** | Problem → Agitate → Solution | Pain-driven audiences |
-| **FAB** | Features → Advantages → Benefits | Technical products |
+| **FAB** | Features → Advantages → Benefits | Technical products, spec-driven buyers |
+| **BAB** | Before → After → Bridge | Transformation/lifestyle offers |
+| **4U** | Urgent, Unique, Ultra-specific, Useful | Headlines, TikTok hooks, email subjects |
+
+### Framework Selection Guide (NLP-Mapped)
+
+Choose based on the audience's NLP profile:
+- **AIDA**: Toward-motivated (levels 10-12 Tone_Social), Qualified Sameness sorting. Build desire progressively through stages.
+- **PAS**: Away-From motivated (levels 4-7 Tone_Chronic), high anxiety profiles. Agitate the pain, then offer the exit.
+- **FAB**: Derived (WHY) decision strategy. Orange/Yellow Spiral profiles who evaluate specs before buying. Lead with data, close with emotional payoff.
+- **BAB**: Visual and Kinesthetic rep systems. Best when the gap between current state and desired state is vivid. Transformation/lifestyle products.
+- **4U**: Apply as a headline checklist for ALL frameworks. Especially critical for TikTok 0-3s hooks and Google search headlines where character counts are tight.
+
+### BAB Protocol (Before → After → Bridge)
+
+1. **Before**: Paint the current frustrating situation using the audience's own words.
+   - Use present tense to make the problem feel immediate and personal
+   - Match Tone_Chronic: if they're at Anxiety (5), reflect their restless search for a solution
+   - Example: "You're scrolling through pages of generic fan gear that looks like everyone else's."
+
+2. **After**: Show the desired outcome as if they've already achieved it.
+   - Use "picture this" or "imagine" language for Visual reps
+   - Use "feel" for Kinesthetic, "hear" for Auditory
+   - Example: "You walk into the watch party wearing your country's colors — and your crew spots you across the room in seconds."
+
+3. **Bridge**: Position your product as the single connector.
+   - One sentence. No fluff. The bridge must be tight.
+   - Example: "HoodieFlags gets you there. 40+ countries. Delivered before kickoff."
+
+**Best for**: Transformation offers, aspirational products, lifestyle brands, fitness/health, personal development. Green (Humanistic) and Blue (Traditionalist) profiles respond strongly.
+
+### 4U Headline Checklist
+
+Score every headline 1-4 before publishing:
+
+1. **Urgent**: Does it create time pressure? ("Before June 11", "Running out", "Last chance")
+2. **Unique**: Does it stand apart from every other ad in the feed? ("The first & only", "Unlike anything")
+3. **Ultra-specific**: Does it use precise numbers or details? ("42 countries", "$44.99/ea.", "3,847 fans already ordered")
+4. **Useful**: Does it promise a clear, tangible benefit? ("Half the stadium price", "Save 2 hours/week")
+
+**Rule**: If the score is below 3/4, rewrite before publishing. Apply this to email subject lines, TikTok text overlays, Google RSA headlines, and Meta ad headlines.
 
 ### Page Structure (Below Fold)
 1. Problem/pain agitation (1-2 paragraphs)

@@ -211,9 +211,9 @@ Stadium World Cup merch: $80–120 per item. If you can even find your country's
 
 HoodieFlags gives you a better option.
 
-Features: The first & only multipurpose country flag hoodies. Water-resistant fabric. Full-coverage flag design. 40+ countries. $44.99/ea.
+Features: The first & only multipurpose country flag hoodies! Water-resistant fabric. Full-coverage flag design. 40+ countries
 
-Advantages: Delivered to your door before kickoff. No stadium line. No inflated event pricing. First pick of the full design catalog.
+Advantages: Delivered to your door before kickoff. No stadium line. No inflated event pricing ($80-120 vs $44.99). First pick of the full design catalog.
 
 Benefit: You show up looking sharper than anyone who grabbed whatever was left at the gate — and kept an extra $40 in your pocket.
 
@@ -1349,4 +1349,133 @@ Each variant now has a **Tone_Social** (what the reader shows to the world) and 
 *Campaign version 2.4 — Budget-constrained viral optimization with Deep NLP Tone Profiling*
 *3 Meta ad sets (consolidated from 4), 2 TikTok ad groups, $1,000 validation sprint*
 *Protocols: ATLAS copywriting (Deep NLP + Seven Sweeps), claude-ads (budget-allocation, ad-copy-frameworks)*
+*Last updated: March 13, 2026*
+
+---
+
+## 14. Revision Notes — v2.5 Framework Expansion (BAB + 4U Integration)
+
+### Skills Applied
+
+**Updated copywriting/SKILL.md** (5-framework system):
+- Added BAB (Before → After → Bridge) with full NLP-mapped protocol
+- Added 4U Headline Checklist (Urgent, Unique, Ultra-specific, Useful)
+- Framework Selection Guide: AIDA/PAS/FAB/BAB/4U mapped to Tone_Social, Tone_Chronic, Spiral level, Decision Strategy, and Rep System
+
+**Updated paid-ads/SKILL.md** (enhanced):
+- Added FAB with detailed protocol (was already in the table but lacked full implementation details)
+- Added BAB + 4U protocols with examples
+- Added Framework Selection Guide linking NLP profiling to framework choice
+
+---
+
+### 14A. BAB Test Variant — V03-BAB (Communal Fan, BAB Rewrite)
+
+The existing V03 uses AIDA for the Communal Fan profile. BAB is a natural fit for this audience because the gap between "alone at a watch party" (Before) and "finding your people" (After) is vivid and emotional.
+
+**Tracking Code:** `HF-V03B-BAB-GR-TW-EXT`
+**NLP Profile:** BAB | Green (Humanistic) | Toward | External | Sameness w/ Exception | Visual
+**Platform:** Meta — Ad Set C (Community & Social)
+**Purpose:** A/B test against V03-AIDA to determine if BAB converts better for Green community profiles
+
+**Framework applied:**
+- **Before**: The lonely watch party experience — scattered fans, no crew, generic gear
+- **After**: Walking in wearing your country's colors, finding your people instantly
+- **Bridge**: HoodieFlags as the connector between isolation and belonging
+
+---
+
+**PRIMARY TEXT**
+
+Right now you're planning for the World Cup and you already know how it usually goes — you show up to the watch party and nobody's matching, nobody's coordinated, you're just another person in a random jersey.
+
+Picture this instead: you walk in wearing your country's flag hoodie and your crew spots you across the room in seconds. Same colors. Same energy. That's the whole point.
+
+REP YOUR COUNTRY WITH STYLE! HoodieFlags — the first & only multipurpose country flag hoodies. 40+ countries. Water-resistant. Discounts when your crew orders together. The bridge between showing up and belonging.
+
+ORDER NOW!!! HoodieFlags.com
+
+**HEADLINE**
+Find Your Crew. World Cup 2026.
+
+**DESCRIPTION**
+Show up together. $44.99.
+
+---
+
+### 14B. 4U Headline Audit — All 12 Existing Variants
+
+Applied the 4U checklist (Urgent + Unique + Ultra-specific + Useful, score 1-4) to every existing headline:
+
+| Variant | Current Headline | U | U | U | U | Score | Action |
+|---------|-----------------|---|---|---|---|-------|--------|
+| V01 | Lock It In. World Cup 2026. | 3 | 2 | 3 | 3 | 11/16 | ✅ Pass |
+| V02 | Carry Your Colors. World Cup 2026. | 2 | 3 | 2 | 3 | 10/16 | ⚠️ Add urgency |
+| V03 | Find Your People. World Cup 2026. | 2 | 3 | 2 | 4 | 11/16 | ✅ Pass |
+| V04 | Grab Your Flag. Don't Wait. | 4 | 3 | 2 | 3 | 12/16 | ✅ Strong |
+| V05 | Better Gear. Half the Stadium Price. | 2 | 3 | 4 | 4 | 13/16 | ✅ Strong |
+| V06 | Don't Wait Until It's Gone. | 4 | 2 | 2 | 3 | 11/16 | ✅ Pass |
+| V07 | Quality That Lasts Past the Tournament. | 2 | 3 | 2 | 4 | 11/16 | ✅ Pass |
+| V08 | Plan the Whole Picture. World Cup 2026. | 2 | 3 | 2 | 3 | 10/16 | ⚠️ Low unique |
+| V09 | Real Fans Order First. Don't Wait. | 4 | 3 | 2 | 3 | 12/16 | ✅ Strong |
+| V10 | Honor the Moment. World Cup 2026. | 2 | 3 | 2 | 3 | 10/16 | ⚠️ Add specifics |
+| V11 | This Is What Fans Are Ordering. | 3 | 2 | 2 | 3 | 10/16 | ⚠️ Add unique |
+| V12 | Run the Numbers. Order Smart. | 2 | 3 | 3 | 4 | 12/16 | ✅ Strong |
+
+**Rewrite recommendations for ⚠️ headlines (score ≤ 10/16):**
+
+| Variant | Current | Proposed | Score Change |
+|---------|---------|----------|-------------|
+| V02 | Carry Your Colors. World Cup 2026. | Your Colors. 90 Days Left. | 10→13 |
+| V08 | Plan the Whole Picture. World Cup 2026. | 16 Cities. 104 Games. Plan Now. | 10→14 |
+| V10 | Honor the Moment. World Cup 2026. | 32 Years. Your Country. Your Hoodie. | 10→13 |
+| V11 | This Is What Fans Are Ordering. | 3,000+ Fans Already Ordered This. | 10→14 |
+
+> **Note:** V11's proposed headline uses a specific number claim. Only launch with the actual number or a soft claim ("Hundreds of fans") until real data exists.
+
+---
+
+### 14C. Framework Testing Plan (Within $1,000 Budget)
+
+We can test BAB without increasing spend by swapping V03-BAB as a Phase 2 challenger for Ad Set C:
+
+**Phase 1 (no change):** Run V03-AIDA and V11-PAS as planned in Ad Set C.
+
+**Phase 2 challenger swap:** If V03-AIDA outperforms V11-PAS:
+- Keep V03-AIDA live
+- Introduce V03B-BAB as the challenger to test AIDA vs BAB on the same Green audience
+- Cost: $0 additional — this uses the existing Phase 2 challenger slot
+
+**If V11-PAS outperforms V03-AIDA:**
+- Keep V11-PAS live
+- Replace V03-AIDA with V03B-BAB to test whether BAB recovers the Communal Fan profile
+- Cost: $0 additional
+
+**Testing matrix (what v2.5 adds):**
+
+| Test | Variants | Hypothesis | Budget Impact |
+|------|----------|------------|---------------|
+| AIDA vs BAB (same audience) | V03 vs V03B | BAB creates stronger emotional gap for Green community profiles | $0 — Phase 2 swap |
+| 4U-optimized headlines | V02/V08/V10/V11 rewrites | Specific numbers + urgency in headlines lift CTR 15-25% | $0 — copy change only |
+| Framework-audience fit | V05-FAB vs V03B-BAB | Which framework better serves "value + community" on TikTok G2 | $0 — Phase 2 swap |
+
+---
+
+### 14D. Updated Coverage Matrix (Post v2.5)
+
+| Framework | Variants | Count |
+|-----------|----------|-------|
+| AIDA | V01, V03, V04, V08 | 4 |
+| PAS | V02, V06, V09, V11 | 4 |
+| FAB | V05, V07, V10, V12 | 4 |
+| BAB | V03B (Phase 2 challenger) | 1 |
+| 4U | Applied as headline checklist to all 13 variants | — |
+
+**All 5 frameworks from the updated SKILL.md are now deployed in the campaign.**
+
+---
+
+*Campaign version 2.5 — BAB + 4U framework integration, 4U headline audit, framework testing plan*
+*13 total variants (12 Phase 1 + 1 Phase 2 BAB challenger), $1,000 validation sprint*
+*Protocols: ATLAS copywriting (5-framework system + Deep NLP + Seven Sweeps), claude-ads (all references)*
 *Last updated: March 13, 2026*
