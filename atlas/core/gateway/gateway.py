@@ -93,14 +93,20 @@ You have access to these functions (use them when relevant):
 All write operations require owner approval via Telegram inline buttons.
 Read-only operations (list repos, list droplets, web search) execute immediately.
 
+## Autonomous Tool Creation (Endless Iteration)
+If you encounter a task that requires a tool or skill you do NOT currently have:
+1. Use `deep_research` or `web_search` to understand how to build the needed logic.
+2. Formulate a plan and use `github_push_files` to write the new tool directly into your own repository (`atlas/skills/library/` or `atlas/core/gateway/tool_defs/`).
+3. Iterate and attempt fallbacks until you solve the user's root goal. Never say you can't — build the capability yourself.
+
 ## Rules
 - NEVER say "I will do [X]", "Let me create [Y]", or acknowledge a request. Do it IMMEDIATELY in the current turn.
 - If asked to write code, output the ENTIRE, un-abbreviated monolithic file immediately. DO NOT leave placeholders.
-- 🚨 **CRITICAL**: OpenRouter has a strict 15,000 character limit for JSON tool arguments. If you are generating a massive web app, proactively split the code into multiple smaller files (e.g. separate `index.html`, `styles.css`, `app.js` instead of one giant file) and use multiple `github_push_files` calls. Otherwise, your tool payload will be abruptly truncated and the system will violently crash.
-- Never say "I can't" — try tools first
-- Be direct and concise
-- If unsure which tool to use, ask one focused question
-- Always show cost estimates before provisioning paid infrastructure
+- 🚨 **CRITICAL**: OpenRouter has a strict 15,000 character limit for JSON tool arguments. Break massive files up.
+- Never say "I can't" — try tools, research, or write a new skill.
+- Be direct and concise.
+- If unsure which tool to use, ask one focused question.
+- Always show cost estimates before provisioning paid infrastructure.
 """
 
 
@@ -189,6 +195,9 @@ class ATLASGateway:
 
         # Master bot
         self.master_bot: Optional[Application] = None
+        
+        # Safe word abort mechanism
+        self.abort_flag = False
 
         # Proactive Persistence Layer
         self.scheduler = CronScheduler()
@@ -357,7 +366,12 @@ class ATLASGateway:
             # Get tool definitions from registry
             tool_defs = self.tool_registry.get_definitions()
 
-            for loop_iteration in range(15):
+            for loop_iteration in range(50):  # Expanded from 15 to 50 for deep iteration
+                # Check for emergency abort
+                if getattr(self, "abort_flag", False):
+                    self.abort_flag = False
+                    return "🛑 **SYSTEM OVERRIDE**: Execution loop manually aborted by owner."
+
                 # Send typing action instead of flooding with status messages
                 if update and update.message:
                     try:
@@ -432,7 +446,7 @@ class ATLASGateway:
 
                 return final_text
 
-            return "⚠️ Agent exceeded maximum tool iterations (15)."
+            return "⚠️ Agent exceeded maximum tool iterations (50)."
 
         except Exception as e:
             logger.error(f"AI completion failed: {e}", exc_info=True)
@@ -509,6 +523,12 @@ class ATLASGateway:
             else:
                 await self.approval_workflow.deny_programmatically(latest_request_id, denied_by=int(user_id))
                 await update.message.reply_text("❌ Denied via text message.")
+            return
+            
+        # Emergency Safe Word
+        if text_lower in ["orion abort", "atlas abort", "stop system", "abort loop"]:
+            self.abort_flag = True
+            await update.message.reply_text("🛑 SYSTEM OVERRIDE ACCEPTED. Halting all active agent loops immediately.")
             return
 
         # Detect outcome signal for previous skill invocation
