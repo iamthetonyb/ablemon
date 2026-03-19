@@ -1,7 +1,9 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { streamText, type UIMessage } from 'ai';
 
-export const maxDuration = 60;
+// Edge runtime — cheapest execution, no cold start serverless overhead
+export const runtime = 'edge';
+export const maxDuration = 30;
 
 const openrouter = createOpenAI({
   baseURL: 'https://openrouter.ai/api/v1',
@@ -11,7 +13,6 @@ const openrouter = createOpenAI({
 export async function POST(req: Request) {
   const { messages } = await req.json() as { messages: UIMessage[] };
 
-  // Convert UIMessage (parts-based) to CoreMessage (content-based) for streamText
   const coreMessages = messages.map((msg) => ({
     role: msg.role as 'user' | 'assistant',
     content: msg.parts
@@ -21,6 +22,7 @@ export async function POST(req: Request) {
   }));
 
   const result = streamText({
+    // T1: GPT 5.4 Nano — $0.20/$1.25 per M, 80% quality on our benchmark
     model: openrouter('openai/gpt-5.4-nano'),
     messages: coreMessages,
     system: `You are ATLAS, an autonomous AGI system embedded in the ATLAS Studio control plane.
