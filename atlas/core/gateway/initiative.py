@@ -59,7 +59,14 @@ class InitiativeEngine:
             description="Daily learnings extraction from conversations at 3am",
             timeout=300
         )
-        logger.info("InitiativeEngine: Registered %d proactive AGI schedules.", 5)
+        scheduler.add_job(
+            "security-pentest",
+            "0 4 * * 1",
+            self._security_pentest,
+            description="Weekly self-penetration test (Monday 4am)",
+            timeout=600
+        )
+        logger.info("InitiativeEngine: Registered %d proactive AGI schedules.", 6)
 
     # ── Telegram Delivery ─────────────────────────────────────────────────
 
@@ -441,3 +448,48 @@ Output ONLY the learnings, no preamble."""
 
         except Exception as e:
             logger.error(f"Learnings extraction failed: {e}")
+
+    async def _security_pentest(self):
+        """Run weekly self-penetration test and report results."""
+        try:
+            from security.self_pentest import run_pentest
+
+            report = await run_pentest(
+                trust_gate=self.gateway.trust_gate,
+                audit_dir=str(self.gateway.audit_dir),
+            )
+
+            # Build summary for Telegram
+            status = "✅" if report.critical_failures == 0 else "🔴"
+            summary = (
+                f"{status} *Weekly Security Pentest*\n\n"
+                f"Tests: {report.total_tests} | "
+                f"Passed: {report.passed} | "
+                f"Failed: {report.failed}\n"
+                f"Pass Rate: {report.pass_rate:.1f}%\n"
+                f"Critical Failures: {report.critical_failures}\n"
+                f"Duration: {report.duration_ms:.0f}ms\n"
+            )
+
+            if report.failed > 0:
+                summary += "\n*Failures:*\n"
+                for r in report.results:
+                    if not r.passed:
+                        summary += f"  [{r.severity.upper()}] {r.test_id}: {r.attack_vector[:60]}\n"
+
+            summary += f"\nFull report: `audit/logs/{report.run_id}.md`"
+
+            await self._send_to_owner(summary)
+
+            # Log to self-improvement if there are failures
+            if report.failed > 0 and hasattr(self.gateway, 'self_improvement') and self.gateway.self_improvement:
+                await self.gateway.self_improvement.add_learning(
+                    content=f"Security pentest {report.run_id}: {report.failed} failures detected. "
+                            f"Critical: {report.critical_failures}. "
+                            f"Categories: {', '.join(set(r.category for r in report.results if not r.passed))}",
+                    category="SECURITY_PENTEST",
+                    source="security_pentest_cron"
+                )
+
+        except Exception as e:
+            logger.error(f"Security pentest failed: {e}")
