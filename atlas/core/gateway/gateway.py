@@ -708,11 +708,15 @@ class ATLASGateway:
         _msg_preview = (text_content[:80] + "...") if isinstance(text_content, str) and len(text_content) > 80 else text_content
         logger.info(f"[PIPELINE] ── START ── user={user_id} client={client_id} msg={_msg_preview!r}")
 
+        # Collect pipeline steps for dashboard
+        _pipeline_steps = []
+
         # Step 1: Scanner (read-only analysis)
         _t0 = _time.monotonic()
         scan_result = await self.scanner.process(text_content, metadata or {})
         _scan_ms = (_time.monotonic() - _t0) * 1000
         logger.info(f"[PIPELINE] Step 1 — Scanner: passed={scan_result['security_verdict']['passed']} ({_scan_ms:.0f}ms)")
+        _pipeline_steps.append({"step": "scanner", "passed": scan_result['security_verdict']['passed'], "ms": round(_scan_ms)})
 
         if not scan_result["security_verdict"]["passed"]:
             return f"⚠️ Security check failed: {scan_result['blocked_reason']}"
@@ -722,6 +726,7 @@ class ATLASGateway:
         audit_result = await self.auditor.process(scan_result)
         _audit_ms = (_time.monotonic() - _t0) * 1000
         logger.info(f"[PIPELINE] Step 2 — Auditor: approved={audit_result['approved_for_executor']} ({_audit_ms:.0f}ms)")
+        _pipeline_steps.append({"step": "auditor", "approved": audit_result['approved_for_executor'], "ms": round(_audit_ms)})
 
         if not audit_result["approved_for_executor"]:
             return f"⚠️ Audit failed: {'; '.join(audit_result['notes'])}"
@@ -747,6 +752,11 @@ class ATLASGateway:
                     f"tier={tier} domain={scoring_result.domain} "
                     f"chain={_chain_names} ({_score_ms:.0f}ms)"
                 )
+                _pipeline_steps.append({
+                    "step": "routing", "score": round(scoring_result.score, 3),
+                    "tier": tier, "domain": scoring_result.domain,
+                    "chain": _chain_names, "ms": round(_score_ms)
+                })
             except Exception as e:
                 logger.warning(f"[PIPELINE] Complexity scoring failed, using default chain: {e}")
 
@@ -779,6 +789,7 @@ class ATLASGateway:
             authorized_tools = await fetch_authorized_tools(client_id)
             _auth_ms = (_time.monotonic() - _t0) * 1000
             logger.info(f"[PIPELINE] Step 4 — Tool auth: {len(authorized_tools)} tools authorized ({_auth_ms:.0f}ms)")
+            _pipeline_steps.append({"step": "tool_auth", "tools": len(authorized_tools), "ms": round(_auth_ms)})
 
             active_system_prompt = ATLAS_SYSTEM_PROMPT
 
@@ -791,8 +802,10 @@ class ATLASGateway:
                     if recalled_context:
                         active_system_prompt += f"\n\n## Recalled Context from Hybrid Memory\n{recalled_context}"
                         logger.info(f"[PIPELINE] Step 5 — Memory recall: {len(recalled_context)} chars injected ({_mem_ms:.0f}ms)")
+                        _pipeline_steps.append({"step": "memory", "chars": len(recalled_context), "ms": round(_mem_ms)})
                     else:
                         logger.info(f"[PIPELINE] Step 5 — Memory recall: no relevant context ({_mem_ms:.0f}ms)")
+                        _pipeline_steps.append({"step": "memory", "chars": 0, "ms": round(_mem_ms)})
                 except Exception as e:
                     logger.warning(f"[PIPELINE] Memory recall failed: {e}")
 
@@ -936,6 +949,7 @@ class ATLASGateway:
                         "output_tokens": _usage.output_tokens if _usage else 0,
                         "duration_ms": getattr(result, 'latency_ms', 0),
                         "pipeline_total_ms": round(_total_ms),
+                        "pipeline_steps": _pipeline_steps,
                         "complexity_score": scoring_result.score if scoring_result else None,
                         "selected_tier": scoring_result.selected_tier if scoring_result else None,
                         "domain": scoring_result.domain if scoring_result else None,

@@ -5,6 +5,7 @@ Structured storage for memory entries with full-text search.
 
 import sqlite3
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple, Any
@@ -14,9 +15,11 @@ from contextlib import contextmanager
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+logger = logging.getLogger(__name__)
+
 
 class SQLiteStore:
-    """SQLite-based storage with FTS5 full-text search"""
+    """SQLite-based storage with FTS5 full-text search and auto-recovery"""
 
     def __init__(self, db_path: Path):
         self.db_path = Path(db_path)
@@ -24,6 +27,7 @@ class SQLiteStore:
         import zstandard as zstd
         self.compressor = zstd.ZstdCompressor(level=3)
         self.decompressor = zstd.ZstdDecompressor()
+        self._recovered = False  # Track if we already recovered this session
         self._safe_init_db()
 
     def _compress(self, text: str) -> bytes:
@@ -35,37 +39,50 @@ class SQLiteStore:
         try:
             return self.decompressor.decompress(data).decode('utf-8')
         except Exception:
-            # Fallback if somehow it's bytes but not zstd
             if isinstance(data, bytes):
                 return data.decode('utf-8', errors='replace')
             return str(data)
+
+    def _nuke_and_rebuild(self, error: Exception):
+        """Nuclear option: backup corrupted DB and recreate from scratch."""
+        if self._recovered:
+            # Already recovered once this session — don't loop
+            logger.error(f"DB corruption after recovery — giving up: {error}")
+            return
+        self._recovered = True
+        logger.warning(f"Corrupted memory DB detected during operation, rebuilding: {error}")
+        # Backup corrupted file
+        backup = self.db_path.with_suffix(f".db.corrupted.{datetime.utcnow().strftime('%Y%m%d%H%M%S')}")
+        try:
+            if self.db_path.exists():
+                self.db_path.rename(backup)
+            # Remove WAL/SHM
+            for suffix in ("-wal", "-shm"):
+                p = Path(str(self.db_path) + suffix)
+                if p.exists():
+                    p.unlink()
+        except OSError as e:
+            logger.error(f"Failed to backup corrupted DB: {e}")
+        # Recreate
+        self._init_db()
+        logger.info(f"Memory DB rebuilt successfully (backup: {backup})")
 
     def _safe_init_db(self):
         """Initialize DB with corruption recovery."""
         try:
             self._init_db()
+            # Verify the DB is actually readable (not just table creation)
+            with self._raw_connection() as conn:
+                conn.execute("SELECT COUNT(*) FROM memories")
         except sqlite3.DatabaseError as e:
-            if "malformed" in str(e) or "corrupt" in str(e):
-                import logging
-                logging.getLogger(__name__).warning(
-                    f"Corrupted memory DB detected, backing up and recreating: {e}"
-                )
-                backup = self.db_path.with_suffix(".db.corrupted")
-                if self.db_path.exists():
-                    self.db_path.rename(backup)
-                # Also remove WAL/SHM files if present
-                for ext in (".db-wal", ".db-shm"):
-                    p = self.db_path.with_name(self.db_path.name + ext.replace(".db", ""))
-                    if p.exists():
-                        p.unlink()
-                self._init_db()
+            if "malformed" in str(e) or "corrupt" in str(e) or "disk image" in str(e):
+                self._nuke_and_rebuild(e)
             else:
                 raise
 
     def _init_db(self):
         """Initialize database schema"""
-        with self._connection() as conn:
-            # Main memories table (content is BLOB for zstd)
+        with self._raw_connection() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS memories (
                     id TEXT PRIMARY KEY,
@@ -79,8 +96,6 @@ class SQLiteStore:
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-
-            # Full-text search virtual table (stores uncompressed for searching)
             conn.execute("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
                     id,
@@ -91,20 +106,14 @@ class SQLiteStore:
                     content_rowid='rowid'
                 )
             """)
-
-            # Triggers: We DO NOT auto-sync `content` in the trigger anymore because the raw table has BLOBs 
-            # and FTS5 needs TEXT. We will handle FTS insertion manually in Python.
-            
-            # Indexes
             conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_client ON memories(client_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_timestamp ON memories(timestamp)")
-
             conn.commit()
 
     @contextmanager
-    def _connection(self):
-        """Context manager for database connections"""
+    def _raw_connection(self):
+        """Raw connection without corruption recovery (used during init/rebuild)."""
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
@@ -114,11 +123,23 @@ class SQLiteStore:
         finally:
             conn.close()
 
+    # All public methods (insert, search, get, get_recent) handle corruption
+    # individually via try/except + _nuke_and_rebuild, so _raw_connection is
+    # the only connection method needed.
+
     def insert(self, entry) -> bool:
         """Insert a memory entry (compressed) and update FTS (uncompressed)"""
+        try:
+            return self._insert_impl(entry)
+        except sqlite3.DatabaseError as e:
+            if "malformed" in str(e) or "corrupt" in str(e) or "disk image" in str(e):
+                self._nuke_and_rebuild(e)
+                return self._insert_impl(entry)  # Retry on fresh DB
+            raise
+
+    def _insert_impl(self, entry) -> bool:
         compressed_content = self._compress(entry.content)
-        
-        with self._connection() as conn:
+        with self._raw_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT OR REPLACE INTO memories
@@ -135,8 +156,6 @@ class SQLiteStore:
                 entry.relevance_score
             ))
             rowid = cursor.lastrowid
-            
-            # Manually update FTS table with uncompressed text
             cursor.execute("DELETE FROM memories_fts WHERE id = ?", (entry.id,))
             cursor.execute("""
                 INSERT INTO memories_fts(rowid, id, content, memory_type, client_id)
@@ -148,21 +167,25 @@ class SQLiteStore:
                 entry.memory_type.value,
                 entry.client_id
             ))
-            
             conn.commit()
         return True
 
     def get(self, entry_id: str):
         """Get a specific memory entry"""
-        with self._connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM memories WHERE id = ?",
-                (entry_id,)
-            ).fetchone()
-
-            if row:
-                return self._row_to_entry(row)
-        return None
+        try:
+            with self._raw_connection() as conn:
+                row = conn.execute(
+                    "SELECT * FROM memories WHERE id = ?",
+                    (entry_id,)
+                ).fetchone()
+                if row:
+                    return self._row_to_entry(row)
+            return None
+        except sqlite3.DatabaseError as e:
+            if "malformed" in str(e) or "corrupt" in str(e) or "disk image" in str(e):
+                self._nuke_and_rebuild(e)
+                return None  # Data is gone after rebuild
+            raise
 
     def search(
         self,
@@ -172,12 +195,18 @@ class SQLiteStore:
         limit: int = 10
     ) -> List[Tuple[Any, float]]:
         """Full-text search using FTS5 (which holds uncompressed text)"""
+        try:
+            return self._search_impl(query, memory_types, client_id, limit)
+        except sqlite3.DatabaseError as e:
+            if "malformed" in str(e) or "corrupt" in str(e) or "disk image" in str(e):
+                self._nuke_and_rebuild(e)
+                return []  # Empty results after rebuild
+            raise
+
+    def _search_impl(self, query, memory_types, client_id, limit):
         results = []
-
-        with self._connection() as conn:
-            # Build FTS query
-            fts_query = f'"{query}"*'  # Prefix matching
-
+        with self._raw_connection() as conn:
+            fts_query = f'"{query}"*'
             sql = """
                 SELECT m.*, bm25(memories_fts) as score
                 FROM memories_fts
@@ -185,27 +214,20 @@ class SQLiteStore:
                 WHERE memories_fts MATCH ?
             """
             params = [fts_query]
-
             if memory_types:
                 placeholders = ",".join("?" * len(memory_types))
                 sql += f" AND m.memory_type IN ({placeholders})"
                 params.extend([mt.value for mt in memory_types])
-
             if client_id:
                 sql += " AND (m.client_id = ? OR m.client_id IS NULL)"
                 params.append(client_id)
-
             sql += " ORDER BY score LIMIT ?"
             params.append(limit)
-
             rows = conn.execute(sql, params).fetchall()
-
             for row in rows:
                 entry = self._row_to_entry(row)
-                # Normalize BM25 score (negative, lower is better) to 0-1 range
                 score = 1.0 / (1.0 + abs(row['score']))
                 results.append((entry, score))
-
         return results
 
     def get_recent(
@@ -215,21 +237,26 @@ class SQLiteStore:
         limit: int = 10
     ) -> List:
         """Get recent memory entries"""
-        with self._connection() as conn:
+        try:
+            return self._get_recent_impl(memory_type, client_id, limit)
+        except sqlite3.DatabaseError as e:
+            if "malformed" in str(e) or "corrupt" in str(e) or "disk image" in str(e):
+                self._nuke_and_rebuild(e)
+                return []
+            raise
+
+    def _get_recent_impl(self, memory_type, client_id, limit):
+        with self._raw_connection() as conn:
             sql = "SELECT * FROM memories WHERE 1=1"
             params = []
-
             if memory_type:
                 sql += " AND memory_type = ?"
                 params.append(memory_type.value)
-
             if client_id:
                 sql += " AND (client_id = ? OR client_id IS NULL)"
                 params.append(client_id)
-
             sql += " ORDER BY timestamp DESC LIMIT ?"
             params.append(limit)
-
             rows = conn.execute(sql, params).fetchall()
             return [self._row_to_entry(row) for row in rows]
 
@@ -250,7 +277,7 @@ class SQLiteStore:
 
     def count(self, memory_type=None, client_id: Optional[str] = None) -> int:
         """Count memory entries"""
-        with self._connection() as conn:
+        with self._raw_connection() as conn:
             sql = "SELECT COUNT(*) FROM memories WHERE 1=1"
             params = []
 
@@ -266,14 +293,14 @@ class SQLiteStore:
 
     def delete(self, entry_id: str) -> bool:
         """Delete a memory entry"""
-        with self._connection() as conn:
+        with self._raw_connection() as conn:
             conn.execute("DELETE FROM memories WHERE id = ?", (entry_id,))
             conn.commit()
             return conn.total_changes > 0
 
     def clear(self, memory_type=None, client_id: Optional[str] = None):
         """Clear memory entries (use with caution)"""
-        with self._connection() as conn:
+        with self._raw_connection() as conn:
             sql = "DELETE FROM memories WHERE 1=1"
             params = []
 
