@@ -51,7 +51,9 @@ class ComplexityScorer:
     # Feature detection patterns (compiled once)
     TOOL_PATTERNS = re.compile(
         r'\b(search|fetch|browse|deploy|push|commit|create\s+repo|open\s+pr|'
-        r'provision|invoke|call|execute|run\s+script|install|download)\b',
+        r'provision|invoke|call|execute|run\s+script|install|download|'
+        r'research|investigat\w*|look\s+up|look\s+into|find\s+out|'
+        r'scrape|crawl|scan|check\s+the|pull\s+data)\b',
         re.IGNORECASE
     )
 
@@ -63,9 +65,9 @@ class ComplexityScorer:
     )
 
     MULTI_STEP_PATTERNS = re.compile(
-        r'\b(then|after\s+that|next|finally|step\s*\d|first|second|third|'
+        r'\b(then|after\s+that|next|finally|step\s*\d|first|second|third|fourth|fifth|'
         r'subsequently|once\s+done|before\s+that|followed\s+by|'
-        r'phase\s*\d|stage\s*\d)\b',
+        r'phase\s*\d|stage\s*\d|,\s*and\s+then|,\s*then|and\s+finally)\b',
         re.IGNORECASE
     )
 
@@ -184,9 +186,10 @@ class ComplexityScorer:
         feat_cfg = self.weights.get("features", {})
 
         # ── Feature 1: Token count ─────────────────────────────────
-        # Approximate tokens as words * 1.3
+        # Approximate tokens as words * 1.3 (or chars / 4 for non-spaced content)
         word_count = len(message.split())
-        estimated_tokens = int(word_count * 1.3)
+        char_count = len(message)
+        estimated_tokens = max(int(word_count * 1.3), char_count // 4)
         threshold = feat_cfg.get("token_count_threshold", 2000)
         weight = feat_cfg.get("token_count_weight", 0.2)
 
@@ -213,13 +216,30 @@ class ComplexityScorer:
         features["multi_step"] = min(weight, step_matches * (weight / 3))
 
         # ── Feature 5: Safety-critical domain ──────────────────────
+        # Proportional: scales with keyword density
         weight = feat_cfg.get("safety_critical_weight", 0.3)
-        safety_score = 0.0
+        safety_matches = 0
         for domain_name, pattern in self.SAFETY_DOMAINS.items():
-            if pattern.search(message):
-                safety_score = weight
-                break
-        features["safety_critical"] = safety_score
+            safety_matches += len(pattern.findall(message))
+        if safety_matches >= 4:
+            features["safety_critical"] = weight * 1.5  # Dense safety = extra weight
+        elif safety_matches >= 2:
+            features["safety_critical"] = weight
+        elif safety_matches == 1:
+            features["safety_critical"] = weight * 0.5
+        else:
+            features["safety_critical"] = 0.0
+
+        # ── Feature 6: Compound complexity boost ──────────────────
+        # When multiple dimensions are active, the task is inherently harder
+        active_features = sum(1 for k, v in features.items()
+                             if k != "domain_adjustment" and v > 0)
+        compound = 0.0
+        if active_features >= 3:
+            compound = 0.15  # Multi-dimensional = complex
+        elif safety_matches >= 4:
+            compound = 0.15  # Dense safety keywords alone = inherently complex
+        features["compound_boost"] = compound
 
         # ── Base score ─────────────────────────────────────────────
         base_score = sum(features.values())
@@ -297,15 +317,27 @@ class ComplexityScorer:
         return result
 
     def _detect_domain(self, message: str) -> str:
-        """Detect the primary domain of a message."""
-        # Check safety domains first (highest priority)
+        """Detect the primary domain using weighted match counting.
+
+        Safety domains get a 1.5x multiplier so they win ties,
+        but a general domain with 3+ matches can beat a safety
+        domain with 1 match.
+        """
+        scores: Dict[str, float] = {}
+
+        # Safety domains (1.5x multiplier)
         for domain_name, pattern in self.SAFETY_DOMAINS.items():
-            if pattern.search(message):
-                return domain_name
+            matches = len(pattern.findall(message))
+            if matches > 0:
+                scores[domain_name] = matches * 1.5
 
-        # Then general domains
+        # General domains (1.0x multiplier)
         for domain_name, pattern in self.DOMAIN_PATTERNS.items():
-            if pattern.search(message):
-                return domain_name
+            matches = len(pattern.findall(message))
+            if matches > 0:
+                scores[domain_name] = scores.get(domain_name, 0) + matches
 
-        return "default"
+        if not scores:
+            return "default"
+
+        return max(scores, key=scores.get)
