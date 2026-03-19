@@ -1,7 +1,7 @@
 # ATLAS Enricher A/B — Same model, raw vs enriched prompt
 # Tests whether prompt enrichment produces measurably better outputs.
 # 5 tests × 2 prompts (baseline + enriched) × 1 model = 10 API calls
-# Graded by Sonnet 4.6 via llm-rubric.
+# Updated 2026-03-19: T1=Nano, grader=Mini (post-shootout)
 
 description: "ATLAS Enricher Quality — Baseline vs Enriched"
 
@@ -12,13 +12,12 @@ prompts:
     label: "Enriched"
 
 providers:
-  - id: openai:chat:nvidia/nemotron-3-super-120b-a12b:free
+  - id: openai:chat:openai/gpt-5.4-nano
     config:
       apiBaseUrl: https://openrouter.ai/api/v1
       apiKeyEnvar: OPENROUTER_API_KEY
       temperature: 0.7
-    transform: file://transforms/strip_thinking.js
-    label: "T1 (Nemotron 120B)"
+    label: "T1 (GPT 5.4 Nano)"
 
 defaultTest:
   options:

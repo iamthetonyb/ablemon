@@ -1,23 +1,23 @@
 # Security Skill Eval — 7 tests × 3 providers = 21 API calls
 # Run: cd atlas/evals && npx promptfoo@latest eval -c eval-security.yaml
+# Updated 2026-03-19: T1=Nano, T2=Mini, grader=Mini (post-shootout)
 
 description: "ATLAS Security Skill — T1 vs T2 vs T4"
 
 providers:
-  - id: openai:chat:nvidia/nemotron-3-super-120b-a12b:free
+  - id: openai:chat:openai/gpt-5.4-nano
     config:
       apiBaseUrl: https://openrouter.ai/api/v1
       apiKeyEnvar: OPENROUTER_API_KEY
       temperature: 0.7
-    transform: file://transforms/strip_thinking.js
-    label: "T1 (Nemotron 120B)"
+    label: "T1 (GPT 5.4 Nano)"
 
-  - id: openai:chat:xiaomi/mimo-v2-pro
+  - id: openai:chat:openai/gpt-5.4-mini
     config:
       apiBaseUrl: https://openrouter.ai/api/v1
       apiKeyEnvar: OPENROUTER_API_KEY
       temperature: 0.7
-    label: "T2 (MiMo-V2-Pro)"
+    label: "T2 (GPT 5.4 Mini)"
 
   - id: openai:chat:anthropic/claude-sonnet-4.6
     config:
@@ -26,9 +26,7 @@ providers:
       temperature: 0.7
     label: "T4 (Sonnet 4.6)"
 
-# Grading provider for llm-rubric assertions
-# Default: Sonnet 4.6 (consistent quality ranking for distillation)
-# Strict mode: swap to GPT 5.4 mini via run-evals.sh --strict
+# Grading provider: Sonnet 4.6 (Mini degrades as grader — respondent ≠ grader quality)
 defaultTest:
   options:
     provider:

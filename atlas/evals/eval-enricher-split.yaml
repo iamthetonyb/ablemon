@@ -12,13 +12,12 @@ prompts:
     label: "Enriched"
 
 providers:
-  - id: openai:chat:nvidia/nemotron-3-super-120b-a12b:free
+  - id: openai:chat:openai/gpt-5.4-nano
     config:
       apiBaseUrl: https://openrouter.ai/api/v1
       apiKeyEnvar: OPENROUTER_API_KEY
       temperature: 0.7
-    transform: file://transforms/strip_thinking.js
-    label: "T1 (Nemotron 120B)"
+    label: "T1 (GPT 5.4 Nano)"
 
 defaultTest:
   options:
