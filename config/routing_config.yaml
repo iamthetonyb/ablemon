@@ -1,0 +1,131 @@
+# ATLAS Multi-Model Routing Configuration
+# =========================================
+# 4-tier routing system with complexity-based provider selection.
+#
+# Tier 1: Default (70-80% of requests) — fast, free/cheap
+# Tier 2: Escalation — complex reasoning tasks
+# Tier 3: Background ONLY — self-evolution daemon, never user-facing
+# Tier 4: Premium — gated, budget-capped, highest capability
+#
+# Fallback: Ollama for offline/local
+# Legacy: Qwen3.5 + OpenAI OAuth as secondary fallbacks
+
+providers:
+  # ── Tier 1: Default ──────────────────────────────────────────
+  - name: "nemotron-3-super"
+    tier: 1
+    provider_type: "nvidia_nim"
+    endpoint: "https://integrate.api.nvidia.com/v1"
+    model_id: "nvidia/llama-3.3-nemotron-super-49b-v1"
+    cost_per_m_input: 0.00
+    cost_per_m_output: 0.00
+    max_context: 131072
+    supports_tools: true
+    supports_vision: false
+    throughput_tps: 80
+    enabled: true
+    fallback_to: "qwen3.5-openrouter"
+    api_key_env: "NVIDIA_API_KEY"
+
+  # ── Tier 1 Legacy Fallback ───────────────────────────────────
+  - name: "qwen3.5-openrouter"
+    tier: 1
+    provider_type: "openrouter"
+    endpoint: "https://openrouter.ai/api/v1"
+    model_id: "qwen/qwen3.5-397b-a17b"
+    cost_per_m_input: 0.60
+    cost_per_m_output: 3.00
+    max_context: 131072
+    supports_tools: true
+    supports_vision: false
+    throughput_tps: 40
+    enabled: true
+    fallback_to: "mimo-v2-pro"
+    api_key_env: "OPENROUTER_API_KEY"
+    extra:
+      timeout: 600.0
+
+  # ── Tier 2: Escalation ───────────────────────────────────────
+  - name: "mimo-v2-pro"
+    tier: 2
+    provider_type: "openrouter"
+    endpoint: "https://openrouter.ai/api/v1"
+    model_id: "xiaomi/mimo-v2-pro"
+    cost_per_m_input: 1.00
+    cost_per_m_output: 3.00
+    max_context: 131072
+    supports_tools: true
+    supports_vision: false
+    throughput_tps: 60
+    enabled: true
+    fallback_to: "claude-opus-4-6"
+    api_key_env: "OPENROUTER_API_KEY"
+    extra:
+      timeout: 600.0
+
+  # ── Tier 3: Background Only (Evolution Daemon) ──────────────
+  - name: "minimax-m2.7"
+    tier: 3
+    provider_type: "openrouter"
+    endpoint: "https://openrouter.ai/api/v1"
+    model_id: "minimax/minimax-m2.7"
+    cost_per_m_input: 0.30
+    cost_per_m_output: 1.20
+    max_context: 1048576
+    supports_tools: true
+    supports_vision: false
+    throughput_tps: 100
+    enabled: true
+    fallback_to: null
+    api_key_env: "OPENROUTER_API_KEY"
+    extra:
+      timeout: 600.0
+      background_only: true
+      description: "Self-evolution daemon ONLY. Never user-facing."
+
+  # ── Tier 4: Premium (Budget-Gated) ──────────────────────────
+  - name: "claude-opus-4-6"
+    tier: 4
+    provider_type: "anthropic"
+    endpoint: "https://api.anthropic.com"
+    model_id: "claude-opus-4-6"
+    cost_per_m_input: 15.00
+    cost_per_m_output: 75.00
+    max_context: 200000
+    supports_tools: true
+    supports_vision: true
+    throughput_tps: 30
+    enabled: true
+    fallback_to: null
+    api_key_env: "ANTHROPIC_API_KEY"
+
+  # ── Fallback: Ollama (Offline/Local) ─────────────────────────
+  - name: "ollama-local"
+    tier: 5
+    provider_type: "ollama"
+    endpoint: "http://localhost:11434"
+    model_id: "llama3.1"
+    cost_per_m_input: 0.00
+    cost_per_m_output: 0.00
+    max_context: 128000
+    supports_tools: false
+    supports_vision: false
+    throughput_tps: 20
+    enabled: true
+    fallback_to: null
+    api_key_env: ""
+
+# ── Budget Caps ────────────────────────────────────────────────
+budget:
+  opus_daily_usd: 15.00
+  opus_monthly_usd: 100.00
+  evolution_daily_usd: 5.00
+  evolution_monthly_usd: 50.00
+  total_monthly_cap_usd: 200.00
+
+# ── Tier Routing Thresholds ────────────────────────────────────
+# These map complexity scores to tiers (overridden by scorer_weights.yaml)
+routing:
+  tier_1_max_score: 0.4    # Scores below this → Tier 1
+  tier_2_max_score: 0.7    # Scores 0.4-0.7 → Tier 2
+  tier_4_min_score: 0.7    # Scores above this → Tier 4 (with budget gate)

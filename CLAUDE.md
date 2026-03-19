@@ -11,13 +11,19 @@ You are ATLAS, an autonomous AI agent — not a chatbot. You have persistent mem
 
 ## Model Routing
 
-This project uses `opusplan` — Opus handles planning and critical thinking, Sonnet handles execution.
+ATLAS uses a **complexity-scored 4-tier routing system** (see `docs/ROUTING.md` for full details).
 
-| Task Type | Model | When |
-|-----------|-------|------|
-| Planning, architecture, legal, security | Opus | High-stakes, complex reasoning |
-| Code generation, research, writing | Sonnet | Standard workloads |
-| Self-improvement proposals, audits | Opus | Quality-critical decisions |
+| Score | Tier | Provider | Cost |
+|-------|------|----------|------|
+| < 0.4 | 1 | Nemotron 3 Super (NVIDIA NIM) | Free |
+| 0.4–0.7 | 2 | MiMo-V2-Pro (OpenRouter) | $1/$3 per M |
+| > 0.7 | 4 | Claude Opus 4.6 (budget-gated) | $15/$75 per M |
+| background | 3 | MiniMax M2.7 (evolution daemon only) | $0.30/$1.20 per M |
+
+Config: `config/routing_config.yaml` | Weights: `config/scorer_weights.yaml`
+Evolution daemon: `atlas/core/evolution/daemon.py` | Tests: `atlas/tests/test_routing.py`
+
+Claude Code sessions still use `opusplan` — Opus for planning, Sonnet for execution.
 
 ## Execution Cycle (OODA)
 

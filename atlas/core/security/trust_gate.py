@@ -118,7 +118,8 @@ class TrustGate:
     def _generate_audit_id(self, content: str) -> str:
         """Generate unique audit ID for traceability"""
         timestamp = datetime.utcnow().isoformat()
-        hash_input = f"{timestamp}:{content[:100]}"
+        content_str = str(content) if not isinstance(content, str) else content
+        hash_input = f"{timestamp}:{content_str[:100]}"
         return hashlib.sha256(hash_input.encode()).hexdigest()[:16]
 
     def _detect_injection(self, text: str) -> tuple[ThreatLevel, List[str]]:

@@ -262,38 +262,79 @@ class ModelRouter:
     """
     Routes tasks to appropriate model tier based on complexity and domain.
 
-    Opus: planning, architecture, legal, security, self-improvement, audits
-    Sonnet: code generation, research synthesis, writing, standard workloads
+    Uses the ComplexityScorer from the routing module when available,
+    falls back to simple heuristics otherwise.
+
+    Tier mapping:
+        Tier 1 (score < 0.4) → Nemotron 3 Super (free, default)
+        Tier 2 (score 0.4-0.7) → MiMo-V2-Pro (escalation)
+        Tier 4 (score > 0.7) → Opus 4.6 (premium, budget-gated)
     """
 
     HIGH_STAKES_DOMAINS = {"legal", "security", "financial", "production", "deploy", "audit"}
     OPUS_INTENTS = {IntentType.PLANNING, IntentType.ANALYSIS}
 
-    @classmethod
+    # Tier-to-label mapping for backward compat
+    TIER_LABELS = {1: "default", 2: "escalation", 4: "premium"}
+
+    def __init__(self):
+        self._scorer = None
+        self._init_scorer()
+
+    def _init_scorer(self):
+        """Try to initialize the complexity scorer from config."""
+        try:
+            from core.routing.complexity_scorer import ComplexityScorer
+            from pathlib import Path
+            weights_path = Path("config/scorer_weights.yaml")
+            if weights_path.exists():
+                self._scorer = ComplexityScorer(str(weights_path))
+                logger.info("ModelRouter: using ComplexityScorer from config/scorer_weights.yaml")
+            else:
+                self._scorer = ComplexityScorer()
+                logger.info("ModelRouter: using ComplexityScorer with default weights")
+        except ImportError:
+            logger.info("ModelRouter: ComplexityScorer not available, using legacy routing")
+
     def select_model(
-        cls,
+        self,
         complexity_score: "ComplexityScore",
         intents: List["IntentMatch"],
         user_input: str,
+        budget_remaining: float = None,
     ) -> str:
         """
-        Returns 'premium' for Opus or 'default' for Sonnet.
+        Route to a model tier. Returns tier label string.
+
+        If ComplexityScorer is available, uses it for multi-tier routing.
+        Otherwise falls back to binary premium/default.
         """
-        # High complexity always gets Opus
+        if self._scorer:
+            result = self._scorer.score_and_route(
+                user_input, budget_remaining=budget_remaining
+            )
+            tier = result.selected_tier
+            label = self.TIER_LABELS.get(tier, "default")
+            return label
+
+        # Legacy fallback: binary premium/default
         if complexity_score.score >= 0.7:
             return "premium"
 
-        # High-stakes domains get Opus
         text_lower = user_input.lower()
-        if any(domain in text_lower for domain in cls.HIGH_STAKES_DOMAINS):
+        if any(domain in text_lower for domain in self.HIGH_STAKES_DOMAINS):
             return "premium"
 
-        # Planning and deep analysis intents get Opus
         for intent in intents:
-            if intent.confidence >= 0.7 and intent.intent in cls.OPUS_INTENTS:
+            if intent.confidence >= 0.7 and intent.intent in self.OPUS_INTENTS:
                 return "premium"
 
         return "default"
+
+    @property
+    def scorer(self):
+        """Access the underlying ComplexityScorer (if available)."""
+        return self._scorer
 
 
 class SkillOrchestrator:
@@ -455,7 +496,7 @@ class SkillOrchestrator:
             complexity = "moderate"
 
         # Route to appropriate model tier
-        model_tier = ModelRouter.select_model(complexity_score, intents, user_input)
+        model_tier = self.model_router.select_model(complexity_score, intents, user_input)
         if model_tier == "premium":
             logger.info(
                 f"ModelRouter → Opus (premium) for complexity={complexity_score.score:.2f}"
