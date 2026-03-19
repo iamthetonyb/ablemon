@@ -271,6 +271,7 @@ Write operations require owner approval via Telegram inline buttons. Read-only o
 - CRITICAL: OpenRouter 15K char limit on tool JSON args — split large files across multiple github_push_files calls
 - Always show cost estimates before provisioning paid infrastructure
 - When asked about capabilities: describe your FULL system — you are an AGI scaffold, not a tool-caller
+- IMPORTANT: Do NOT call tools unless the user explicitly requests an action (create repo, push code, deploy, list repos, etc.). For general questions, conversations, analysis, or brainstorming — just respond with text. Never call github_list_repos to "check" or "look at" things unless asked.
 """
 
 # ── Tool definitions (OpenAI function-calling format) ─────────────────────────
@@ -280,7 +281,7 @@ ATLAS_TOOL_DEFS: List[Dict] = [
         "type": "function",
         "function": {
             "name": "github_list_repos",
-            "description": "List all GitHub repositories for the authenticated user. Read-only, no approval needed.",
+            "description": "List GitHub repositories. ONLY call this when the user explicitly asks to see their repos, create a repo, or needs a repo name for another operation. Do NOT call this for general questions or to 'check' things.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
