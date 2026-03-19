@@ -1381,6 +1381,8 @@ class ATLASGateway:
             .token(self.bot_token)
             .concurrent_updates(True)
             .rate_limiter(AIORateLimiter(max_retries=3))
+            .connection_pool_size(32)
+            .pool_timeout(10.0)
             .build()
         )
 
@@ -1414,6 +1416,8 @@ class ATLASGateway:
             .token(client.telegram_bot_token)
             .concurrent_updates(True)
             .rate_limiter(AIORateLimiter(max_retries=3))
+            .connection_pool_size(16)
+            .pool_timeout(10.0)
             .build()
         )
 
