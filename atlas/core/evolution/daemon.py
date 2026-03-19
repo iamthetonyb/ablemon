@@ -27,6 +27,7 @@ from .analyzer import EvolutionAnalyzer, AnalysisResult
 from .improver import WeightImprover, Improvement
 from .validator import ChangeValidator, ValidationResult
 from .deployer import ChangeDeployer, DeployResult
+from .auto_improve import AutoImprover, run_from_evals
 
 logger = logging.getLogger(__name__)
 
@@ -206,6 +207,19 @@ class EvolutionDaemon:
                     f"Auto-deploy disabled. {len(improvements)} improvements "
                     f"ready for manual review."
                 )
+
+            # ── Step 6: Eval-driven auto-improvement ────────
+            try:
+                auto_report = await run_from_evals(
+                    last_n=5, auto_apply=self.config.auto_deploy
+                )
+                if auto_report.actions_proposed > 0:
+                    logger.info(
+                        f"[EVOLUTION] Auto-improve: {auto_report.actions_proposed} proposed, "
+                        f"{auto_report.actions_applied} applied from eval data"
+                    )
+            except Exception as e:
+                logger.debug(f"[EVOLUTION] Eval-driven auto-improve skipped: {e}")
 
         except Exception as e:
             result.error = str(e)

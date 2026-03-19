@@ -316,6 +316,7 @@ def main():
     parser.add_argument("--eval-id", help="Process specific eval ID")
     parser.add_argument("--dry-run", action="store_true", help="Print summary only")
     parser.add_argument("--no-distillation", action="store_true", help="Skip distillation export")
+    parser.add_argument("--auto-improve", action="store_true", help="Run auto-improvement from results")
     args = parser.parse_args()
 
     if not DB_PATH.exists():
@@ -343,6 +344,19 @@ def main():
     # Export distillation data
     if not args.no_distillation:
         export_distillation_data(all_parsed)
+
+    # Auto-improvement from eval failures
+    if args.auto_improve:
+        try:
+            from core.evolution.auto_improve import AutoImprover
+            improver = AutoImprover(auto_apply=not args.dry_run)
+            report = asyncio.run(improver.run(all_parsed))
+            print(f"\n  [AUTO-IMPROVE] {report.actions_proposed} proposed, "
+                  f"{report.actions_applied} applied")
+            for insight in report.insights[:5]:
+                print(f"    {insight}")
+        except Exception as e:
+            print(f"\n  [AUTO-IMPROVE] Skipped: {e}")
 
     print("\nDone.")
 
