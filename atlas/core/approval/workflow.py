@@ -88,14 +88,20 @@ class ApprovalResult:
 
 class ApprovalWorkflow:
     """
-    Human-in-the-loop approval workflow.
+    Human-in-the-loop approval workflow with preference learning.
 
     Features:
     - Telegram inline keyboard for quick decisions
     - Configurable timeout with escalation
     - Approval history for audit
     - Delegation rules (auto-approve low risk for trusted users)
+    - Preference learning from approval/rejection patterns
     """
+
+    # Minimum approvals before auto-approving an operation
+    AUTO_APPROVE_THRESHOLD = 5
+    # If approval rate exceeds this, consider auto-approving
+    AUTO_APPROVE_RATE = 0.95
 
     def __init__(
         self,
@@ -117,6 +123,12 @@ class ApprovalWorkflow:
 
         # Delegation rules
         self.delegation_rules: Dict[int, List[str]] = {}  # user_id -> allowed_operations
+
+        # Preference learning: tracks approval/denial history per operation
+        # { operation: { "approved": N, "denied": N, "last_denied_reason": str } }
+        self._approval_history: Dict[str, Dict[str, Any]] = {}
+        # Complete log for audit
+        self._approval_log: List[Dict] = []
 
     def set_bot(self, bot):
         """Set the Telegram bot instance"""
@@ -157,12 +169,29 @@ class ApprovalWorkflow:
         # Check auto-approve rules
         if self.auto_approve_low_risk and risk_level == "low":
             logger.info(f"Auto-approving low-risk operation: {operation}")
+            self._record_outcome(operation, ApprovalStatus.APPROVED, "auto-low-risk")
             return ApprovalResult(
                 request_id="auto",
                 status=ApprovalStatus.APPROVED,
                 approved_by=0,
                 approved_at=datetime.utcnow(),
                 reason="Auto-approved (low risk)"
+            )
+
+        # Check learned preferences: if this operation is always approved, skip the prompt
+        if risk_level in ("low", "medium") and self._should_auto_approve(operation):
+            hist = self._approval_history.get(operation, {})
+            logger.info(
+                f"Auto-approving via preference learning: {operation} "
+                f"(approved {hist.get('approved', 0)}/{hist.get('approved', 0) + hist.get('denied', 0)} times)"
+            )
+            self._record_outcome(operation, ApprovalStatus.APPROVED, "preference-learned")
+            return ApprovalResult(
+                request_id="auto-pref",
+                status=ApprovalStatus.APPROVED,
+                approved_by=0,
+                approved_at=datetime.utcnow(),
+                reason=f"Auto-approved (learned preference: {hist.get('approved', 0)} consecutive approvals)"
             )
 
         # Create request
@@ -306,6 +335,7 @@ class ApprovalWorkflow:
                 approved_at=datetime.utcnow(),
                 response_time_seconds=response_time
             )
+            self._record_outcome(request.operation, ApprovalStatus.APPROVED)
             await callback_query.answer("✅ Approved")
 
         elif action == "deny":
@@ -317,6 +347,7 @@ class ApprovalWorkflow:
                 reason="Denied by operator",
                 response_time_seconds=response_time
             )
+            self._record_outcome(request.operation, ApprovalStatus.DENIED, "operator_denied")
             await callback_query.answer("❌ Denied")
 
         elif action == "modify":
@@ -449,3 +480,54 @@ class ApprovalWorkflow:
     def get_pending_requests(self) -> List[ApprovalRequest]:
         """Get all pending approval requests"""
         return list(self.pending.values())
+
+    # ── Preference Learning ──────────────────────────────────────
+
+    def _record_outcome(self, operation: str, status: ApprovalStatus, reason: str = ""):
+        """Record an approval/denial for preference learning."""
+        if operation not in self._approval_history:
+            self._approval_history[operation] = {"approved": 0, "denied": 0, "last_denied_reason": ""}
+
+        hist = self._approval_history[operation]
+        if status == ApprovalStatus.APPROVED:
+            hist["approved"] += 1
+        elif status == ApprovalStatus.DENIED:
+            hist["denied"] += 1
+            hist["last_denied_reason"] = reason
+
+        self._approval_log.append({
+            "operation": operation,
+            "status": status.value,
+            "reason": reason,
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+        # Keep log bounded
+        if len(self._approval_log) > 500:
+            self._approval_log = self._approval_log[-250:]
+
+    def _should_auto_approve(self, operation: str) -> bool:
+        """Check if we've learned to auto-approve this operation."""
+        hist = self._approval_history.get(operation)
+        if not hist:
+            return False
+        total = hist["approved"] + hist["denied"]
+        if total < self.AUTO_APPROVE_THRESHOLD:
+            return False
+        approval_rate = hist["approved"] / total
+        return approval_rate >= self.AUTO_APPROVE_RATE
+
+    def get_preference_summary(self) -> Dict[str, Any]:
+        """Get a summary of learned approval preferences."""
+        summary = {}
+        for op, hist in self._approval_history.items():
+            total = hist["approved"] + hist["denied"]
+            rate = hist["approved"] / total if total > 0 else 0
+            summary[op] = {
+                "approved": hist["approved"],
+                "denied": hist["denied"],
+                "total": total,
+                "approval_rate": round(rate, 3),
+                "auto_approve_eligible": self._should_auto_approve(op),
+                "last_denied_reason": hist.get("last_denied_reason", ""),
+            }
+        return summary

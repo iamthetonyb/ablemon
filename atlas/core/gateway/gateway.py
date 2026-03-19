@@ -491,6 +491,11 @@ class ATLASGateway:
         # Master bot
         self.master_bot: Optional[Application] = None
 
+        # Tool failure tracker (self-healing)
+        self._tool_failures: Dict[str, List[float]] = {}  # tool_name → [timestamps]
+        self._tool_failure_threshold = 3  # failures within window → alert
+        self._tool_failure_window = 300  # 5 minute window
+
         # Voice transcription
         if _VOICE_AVAILABLE:
             self.voice_transcriber = VoiceTranscriber()
@@ -1212,7 +1217,39 @@ class ATLASGateway:
 
         except Exception as e:
             logger.error(f"Tool call {name} failed: {e}", exc_info=True)
+            self._record_tool_failure(name, str(e))
             return f"⚠️ Tool error ({name}): {e}"
+
+    def _record_tool_failure(self, tool_name: str, error: str):
+        """Track tool failures for self-healing. Alert if a tool keeps failing."""
+        import time
+        now = time.time()
+        if tool_name not in self._tool_failures:
+            self._tool_failures[tool_name] = []
+        self._tool_failures[tool_name].append(now)
+        # Prune old failures outside window
+        cutoff = now - self._tool_failure_window
+        self._tool_failures[tool_name] = [
+            t for t in self._tool_failures[tool_name] if t > cutoff
+        ]
+        recent_count = len(self._tool_failures[tool_name])
+        if recent_count >= self._tool_failure_threshold:
+            logger.error(
+                f"[SELF-HEAL] Tool '{tool_name}' failed {recent_count}x in "
+                f"{self._tool_failure_window}s — needs investigation. "
+                f"Last error: {error[:200]}"
+            )
+            # Log diagnostic to self-improvement engine
+            if hasattr(self, 'self_improvement') and self.self_improvement:
+                try:
+                    asyncio.create_task(self.self_improvement.record_failure(
+                        description=f"Tool '{tool_name}' failing repeatedly",
+                        what_failed=f"{tool_name} failed {recent_count}x in {self._tool_failure_window}s",
+                        root_cause=error[:500],
+                        prevention=f"Investigate {tool_name} dependencies, check API keys/rate limits",
+                    ))
+                except Exception:
+                    pass
 
     async def _handle_master_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle messages to master bot"""
@@ -1604,6 +1641,9 @@ class ATLASGateway:
         if self.complexity_scorer:
             tier_info = ", ".join(f"T{t}: {len(c.providers)}p" for t, c in self.tier_chains.items())
             print(f"🎯 Complexity-scored routing active (scorer v{self.complexity_scorer.version}) [{tier_info}]")
+        print(f"🛡️ Circuit breaker: 3-fail threshold, 5min cooldown (instant skip on dead providers)")
+        print(f"🧠 Approval preference learning: auto-approve after {ApprovalWorkflow.AUTO_APPROVE_THRESHOLD} consecutive approvals")
+        print(f"🔧 Tool self-healing: alert after {self._tool_failure_threshold} failures in {self._tool_failure_window}s")
 
         while True:
             await asyncio.sleep(1)

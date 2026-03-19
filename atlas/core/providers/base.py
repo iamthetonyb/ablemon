@@ -253,23 +253,99 @@ class LLMProvider(ABC):
         return result
 
 
+class CircuitBreaker:
+    """
+    Circuit breaker for provider failure detection.
+
+    States:
+      CLOSED  — healthy, requests flow normally
+      OPEN    — broken, skip this provider entirely (fast-fail)
+      HALF_OPEN — cooldown expired, allow one probe request
+
+    Transitions:
+      CLOSED → OPEN: after `failure_threshold` consecutive failures
+      OPEN → HALF_OPEN: after `cooldown_seconds` elapse
+      HALF_OPEN → CLOSED: probe succeeds
+      HALF_OPEN → OPEN: probe fails (reset cooldown)
+    """
+
+    def __init__(self, failure_threshold: int = 3, cooldown_seconds: float = 300.0):
+        self.failure_threshold = failure_threshold
+        self.cooldown_seconds = cooldown_seconds
+        self._failures: Dict[str, int] = {}          # provider_name → consecutive failures
+        self._open_since: Dict[str, float] = {}      # provider_name → timestamp when opened
+        self._total_trips: Dict[str, int] = {}        # provider_name → total times tripped
+
+    def is_available(self, provider_name: str) -> bool:
+        """Check if a provider should be tried (not in OPEN state)."""
+        if provider_name not in self._open_since:
+            return True  # CLOSED
+        # Check if cooldown has elapsed → HALF_OPEN
+        elapsed = time.time() - self._open_since[provider_name]
+        if elapsed >= self.cooldown_seconds:
+            return True  # HALF_OPEN — allow probe
+        return False  # OPEN — skip
+
+    def record_success(self, provider_name: str):
+        """Record a successful call — reset to CLOSED."""
+        self._failures.pop(provider_name, None)
+        self._open_since.pop(provider_name, None)
+
+    def record_failure(self, provider_name: str):
+        """Record a failure — may trip to OPEN."""
+        self._failures[provider_name] = self._failures.get(provider_name, 0) + 1
+        if self._failures[provider_name] >= self.failure_threshold:
+            self._open_since[provider_name] = time.time()
+            self._total_trips[provider_name] = self._total_trips.get(provider_name, 0) + 1
+            logger.warning(
+                f"Circuit breaker OPEN for {provider_name} "
+                f"({self._failures[provider_name]} consecutive failures, "
+                f"cooldown={self.cooldown_seconds}s, "
+                f"total_trips={self._total_trips[provider_name]})"
+            )
+
+    def get_status(self) -> Dict[str, str]:
+        """Get circuit breaker state for all tracked providers."""
+        status = {}
+        now = time.time()
+        for name in set(list(self._failures.keys()) + list(self._open_since.keys())):
+            if name in self._open_since:
+                elapsed = now - self._open_since[name]
+                if elapsed >= self.cooldown_seconds:
+                    status[name] = "half_open"
+                else:
+                    status[name] = f"open ({self.cooldown_seconds - elapsed:.0f}s remaining)"
+            elif self._failures.get(name, 0) > 0:
+                status[name] = f"closed ({self._failures[name]} failures)"
+            else:
+                status[name] = "closed"
+        return status
+
+
 class ProviderChain:
     """
-    Chain of providers with automatic fallback.
+    Chain of providers with automatic fallback and circuit breaker.
 
     Tries each provider in order until one succeeds.
     Tracks usage and costs across all providers.
+    Circuit breaker skips providers that have failed repeatedly.
     """
 
     def __init__(
         self,
         providers: List[LLMProvider],
-        retry_delay: float = 1.0,
-        max_retries_per_provider: int = 2
+        retry_delay: float = 0.5,
+        max_retries_per_provider: int = 1
     ):
         self.providers = providers
         self.retry_delay = retry_delay
         self.max_retries = max_retries_per_provider
+
+        # Circuit breaker: skip dead providers instantly
+        self.circuit_breaker = CircuitBreaker(
+            failure_threshold=3,   # 3 consecutive fails → open
+            cooldown_seconds=300,  # 5 minutes before retry
+        )
 
         # Usage tracking
         self.total_input_tokens = 0
@@ -284,18 +360,10 @@ class ProviderChain:
         **kwargs
     ) -> CompletionResult:
         """
-        Complete using provider chain with fallback.
+        Complete using provider chain with fallback and circuit breaker.
 
-        Args:
-            messages: Conversation history
-            prefer_provider: Try this provider first if available
-            **kwargs: Passed to provider.complete()
-
-        Returns:
-            CompletionResult from first successful provider
-
-        Raises:
-            AllProvidersFailedError: If all providers fail
+        Providers in OPEN state are skipped instantly (zero latency penalty).
+        HALF_OPEN providers get one probe attempt.
         """
         errors = []
 
@@ -303,11 +371,19 @@ class ProviderChain:
         providers = self._order_providers(prefer_provider)
 
         for provider in providers:
+            # Circuit breaker: skip providers that are known-broken
+            if not self.circuit_breaker.is_available(provider.name):
+                logger.debug(f"Skipping {provider.name} (circuit breaker OPEN)")
+                continue
+
             for attempt in range(self.max_retries + 1):
                 try:
                     start_time = time.time()
                     result = await provider.complete(messages, **kwargs)
                     result.latency_ms = (time.time() - start_time) * 1000
+
+                    # Success — reset circuit breaker
+                    self.circuit_breaker.record_success(provider.name)
 
                     # Track usage
                     self._track_usage(provider, result)
@@ -323,6 +399,7 @@ class ProviderChain:
 
                 except ProviderError as e:
                     errors.append(e)
+                    self.circuit_breaker.record_failure(provider.name)
                     logger.warning(f"Provider {provider.name} failed (attempt {attempt + 1}): {e}")
 
                     if e.retryable and attempt < self.max_retries:
@@ -335,6 +412,7 @@ class ProviderChain:
                     import traceback
                     error = ProviderError(provider.name, str(e), retryable=False)
                     errors.append(error)
+                    self.circuit_breaker.record_failure(provider.name)
                     logger.error(
                         f"Unexpected error from {provider.name} "
                         f"(model={provider.config.model}): {type(e).__name__}: {e}\n"
