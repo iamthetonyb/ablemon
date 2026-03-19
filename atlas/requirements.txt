@@ -48,3 +48,6 @@ zstandard>=0.23.0
 
 # SSL certificates (for aiohttp)
 certifi>=2024.12.14
+
+# x402 payment protocol (Coinbase SDK for USDC billing)
+x402>=2.4.0
