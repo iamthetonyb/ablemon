@@ -791,11 +791,14 @@ class ATLASGateway:
                         # Execute the tool
                         tool_output = await self._handle_tool_call(tool_call, update, user_id, msgs)
                         
-                        # Notify the user on Telegram that a tool was executed so they aren't waiting in silence
+                        # Notify the user on Telegram that a tool was executed
                         if update and update.message:
                             try:
-                                # Drop the Markdown parse mode for tool outputs to prevent unescaped char errors from code snippets
-                                await update.message.reply_text(f"⚙️ `[{tool_call.name}]`\n{tool_output}")
+                                tool_notification = f"⚙️ [{tool_call.name}]\n{tool_output}"
+                                # Truncate to Telegram's 4096 char limit
+                                if len(tool_notification) > 4000:
+                                    tool_notification = tool_notification[:4000] + "\n... (truncated)"
+                                await update.message.reply_text(tool_notification)
                             except Exception:
                                 pass
                                 
@@ -1172,18 +1175,25 @@ class ATLASGateway:
                     metadata={"source": "master_telegram", "is_owner": True},
                     update=update,
                 )
-                
+
                 # Log outbound
                 self.transcript_manager.log_message("master", {
                     "user_id": "bot",
                     "message": response,
                     "direction": "outbound"
                 })
-                
-                await update.message.reply_text(response, parse_mode="Markdown")
+
+                # Try Markdown first, fall back to plain text if Telegram can't parse it
+                try:
+                    await update.message.reply_text(response, parse_mode="Markdown")
+                except Exception:
+                    await update.message.reply_text(response)
             except Exception as e:
                 logger.error(f"Pipeline error: {e}", exc_info=True)
-                await update.message.reply_text(f"⚠️ Internal error: {e}")
+                try:
+                    await update.message.reply_text(f"⚠️ Internal error: {e}")
+                except Exception:
+                    pass
 
         asyncio.create_task(_run_pipeline())
 
