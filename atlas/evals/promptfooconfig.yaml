@@ -1,36 +1,56 @@
 # ATLAS Prompt Evaluation Suite
-# Uses promptfoo to test skill quality across models
-# Run: cd atlas/evals && npx promptfoo@latest eval
-# View: cd atlas/evals && npx promptfoo@latest view
+# Uses promptfoo to test skill quality AND routing quality across models
+#
+# Run all:     cd atlas/evals && npx promptfoo@latest eval
+# View:        cd atlas/evals && npx promptfoo@latest view
+# Run routing:  npx promptfoo@latest eval --filter-pattern "routing"
+# Run skills:   npx promptfoo@latest eval --filter-pattern "copywriting|security|refactoring"
+# Compare tiers: npx promptfoo@latest eval -p "T1 (Nemotron)" -p "T4 (Opus)"
+#
+# After eval:  python collect_results.py  (feeds results to AGI loop)
 
-description: "ATLAS Skill Evaluation Suite — Cross-Model Quality Assurance"
+description: "ATLAS Evaluation Suite — Routing Quality + Skill Quality"
 
 providers:
-  # Primary: OpenRouter (whatever model is configured)
-  - id: openai:chat:qwen/qwen3.5-397b-a17b
+  # Tier 1: Cheap/fast (what most prompts route to)
+  - id: openai:chat:nvidia/llama-3.1-nemotron-ultra-253b-v1:free
     config:
       apiBaseUrl: https://openrouter.ai/api/v1
       apiKeyEnvar: OPENROUTER_API_KEY
       temperature: 0.7
-    label: "OpenRouter (Qwen 397B)"
+    label: "T1 (Nemotron)"
 
-  # Secondary: Anthropic latest
+  # Tier 2: Balanced reasoning
+  - id: openai:chat:moonshotai/mimo-v2-pro
+    config:
+      apiBaseUrl: https://openrouter.ai/api/v1
+      apiKeyEnvar: OPENROUTER_API_KEY
+      temperature: 0.7
+    label: "T2 (MiMo-V2-Pro)"
+
+  # Tier 4: Premium (gold standard for distillation)
   - id: anthropic:messages:claude-sonnet-4-20250514
     config:
       apiKeyEnvar: ANTHROPIC_API_KEY
       temperature: 0.7
-    label: "Anthropic (Claude Sonnet 4)"
+    label: "T4 (Sonnet 4)"
 
 prompts:
+  # Skill-specific prompts
   - file://prompts/copywriting.txt
   - file://prompts/security.txt
   - file://prompts/code-refactoring.txt
+  # Routing quality prompt (tests all tiers with synthetic prompts)
+  - file://prompts/routing-quality.txt
 
 defaultTest:
   options:
     transformVars: "JSON.parse(JSON.stringify(vars))"
 
 tests:
+  # Skill quality tests
   - file://tests/copywriting-tests.yaml
   - file://tests/security-tests.yaml
   - file://tests/code-refactoring-tests.yaml
+  # Routing quality tests (auto-generated from synthetic harness)
+  - file://tests/synthetic-routing-tests.yaml
