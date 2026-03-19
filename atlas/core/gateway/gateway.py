@@ -17,7 +17,12 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 from aiohttp import web
 from telegram import Update, Bot
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes, AIORateLimiter
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+try:
+    from telegram.ext import AIORateLimiter
+    _RATE_LIMITER_AVAILABLE = True
+except (ImportError, RuntimeError):
+    _RATE_LIMITER_AVAILABLE = False
 
 from core.security.trust_gate import TrustGate, TrustTier
 from core.agents.base import ScannerAgent, AuditorAgent, ExecutorAgent, AgentContext, AgentAction, AgentRole
@@ -1376,15 +1381,16 @@ class ATLASGateway:
 
     async def start_master_bot(self):
         """Start the master Telegram bot"""
-        self.master_bot = (
+        builder = (
             Application.builder()
             .token(self.bot_token)
             .concurrent_updates(True)
-            .rate_limiter(AIORateLimiter(max_retries=3))
             .connection_pool_size(32)
             .pool_timeout(10.0)
-            .build()
         )
+        if _RATE_LIMITER_AVAILABLE:
+            builder = builder.rate_limiter(AIORateLimiter(max_retries=3))
+        self.master_bot = builder.build()
 
         # Add handlers
         self.master_bot.add_handler(CommandHandler("start", self._cmd_start))
@@ -1411,15 +1417,16 @@ class ATLASGateway:
         if not client:
             raise ValueError(f"Client {client_id} not found")
 
-        app = (
+        client_builder = (
             Application.builder()
             .token(client.telegram_bot_token)
             .concurrent_updates(True)
-            .rate_limiter(AIORateLimiter(max_retries=3))
             .connection_pool_size(16)
             .pool_timeout(10.0)
-            .build()
         )
+        if _RATE_LIMITER_AVAILABLE:
+            client_builder = client_builder.rate_limiter(AIORateLimiter(max_retries=3))
+        app = client_builder.build()
 
         async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await self._handle_client_message(client_id, update, context)

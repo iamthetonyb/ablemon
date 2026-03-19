@@ -1,27 +1,30 @@
 [Unit]
 Description=ATLAS - Autonomous Task & Learning Agent System
-After=network.target docker.service
-Wants=docker.service
-StartLimitIntervalSec=60
-StartLimitBurst=3
+After=network.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
 User=atlas
 Group=atlas
 WorkingDirectory=/home/atlas/.atlas/atlas
-Environment="PATH=/home/atlas/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PATH=/home/atlas/.atlas/venv/bin:/home/atlas/.local/bin:/usr/local/bin:/usr/bin:/bin"
 Environment="PYTHONUNBUFFERED=1"
 
-# Load environment from .env file (parent directory, not in git)
+# Load environment from .env file
 EnvironmentFile=-/home/atlas/.atlas/.env
 
-# Run the ATLAS agent using venv Python
+# Run the ATLAS agent
 ExecStart=/home/atlas/.atlas/venv/bin/python /home/atlas/.atlas/atlas/start.py
 
-# Restart on failure
+# Restart policy — back off on crashes, don't burn CPU
 Restart=on-failure
-RestartSec=10
+RestartSec=30
+
+# Memory guard — prevent OOM on 1GB VPS (leave ~256MB for OS)
+MemoryMax=768M
+MemoryHigh=640M
 
 # Logging
 StandardOutput=journal
