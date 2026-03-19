@@ -97,6 +97,7 @@ jobs:
 
             echo "=== Updating ATLAS files ==="
             rsync -av --delete /opt/atlas/AIDE/atlas/ /home/atlas/.atlas/atlas/
+            rsync -av /opt/atlas/AIDE/config/ /home/atlas/.atlas/config/
             cp /opt/atlas/AIDE/ATLAS.md /home/atlas/.atlas/ATLAS.md
             cp /opt/atlas/AIDE/SOUL.md /home/atlas/.atlas/SOUL.md
             chown -R atlas:atlas /home/atlas/.atlas/

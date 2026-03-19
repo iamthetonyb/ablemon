@@ -42,6 +42,13 @@ from memory.hybrid_memory import HybridMemory, MemoryType
 logger = logging.getLogger(__name__)
 
 try:
+    from tools.voice.transcription import VoiceTranscriber
+    _VOICE_AVAILABLE = True
+except ImportError:
+    _VOICE_AVAILABLE = False
+    VoiceTranscriber = None
+
+try:
     from core.auth.manager import AuthManager
     from core.providers.openai_oauth import OpenAIChatGPTProvider, OpenAIOAuthProvider
     _AUTH_AVAILABLE = True
@@ -466,6 +473,13 @@ class ATLASGateway:
         # Master bot
         self.master_bot: Optional[Application] = None
 
+        # Voice transcription
+        if _VOICE_AVAILABLE:
+            self.voice_transcriber = VoiceTranscriber()
+            logger.info("Voice transcription available (Whisper)")
+        else:
+            self.voice_transcriber = None
+
         # Proactive Persistence Layer
         self.scheduler = CronScheduler()
         self.initiative = InitiativeEngine(self)
@@ -562,8 +576,8 @@ class ATLASGateway:
         nvidia_key = os.environ.get("NVIDIA_API_KEY")
         if nvidia_key:
             try:
-                providers.append(NVIDIANIMProvider(api_key=nvidia_key, model="kimi-k2.5"))
-                logger.info("Provider added: NVIDIA NIM (Kimi) [legacy]")
+                providers.append(NVIDIANIMProvider(api_key=nvidia_key, model="nvidia/llama-3.3-nemotron-super-49b-v1"))
+                logger.info("Provider added: NVIDIA NIM (Nemotron Super) [legacy]")
             except Exception as e:
                 logger.warning(f"Failed to init NVIDIA NIM provider: {e}")
 
@@ -1145,8 +1159,26 @@ class ATLASGateway:
         
         # Check for media content
         message_text = update.message.text or update.message.caption or ""
+
+        # Handle voice messages — transcribe to text
+        if update.message.voice or update.message.audio:
+            if self.voice_transcriber:
+                try:
+                    voice_file = await (update.message.voice or update.message.audio).get_file()
+                    voice_bytes = await voice_file.download_as_bytearray()
+                    result = await self.voice_transcriber.transcribe(bytes(voice_bytes), filename="voice.ogg")
+                    message_text = result.text
+                    await update.message.reply_text(f"🎙️ *Transcribed:* {result.text}", parse_mode="Markdown")
+                except Exception as e:
+                    logger.error(f"Voice transcription failed: {e}")
+                    await update.message.reply_text("⚠️ Couldn't transcribe voice message")
+                    return
+            else:
+                await update.message.reply_text("⚠️ Voice transcription not available")
+                return
+
         message = message_text
-        
+
         if update.message.photo:
             photo_file = await update.message.photo[-1].get_file()
             photo_bytes = await photo_file.download_as_bytearray()
@@ -1350,7 +1382,7 @@ class ATLASGateway:
         self.master_bot.add_handler(CommandHandler("audit", self._cmd_audit))
         self.master_bot.add_handler(CallbackQueryHandler(self._handle_approval_callback))
         self.master_bot.add_handler(MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
+            (filters.TEXT | filters.VOICE | filters.AUDIO | filters.PHOTO) & ~filters.COMMAND,
             self._handle_master_message
         ))
 
