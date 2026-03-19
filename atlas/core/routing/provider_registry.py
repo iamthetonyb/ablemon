@@ -234,7 +234,7 @@ class ProviderRegistry:
                 return None
             return NVIDIANIMProvider(api_key=key, model=config.model_id)
 
-        elif ptype in ("openrouter", "dashscope"):
+        elif ptype == "openrouter":
             if not key:
                 return None
             return OpenRouterProvider(

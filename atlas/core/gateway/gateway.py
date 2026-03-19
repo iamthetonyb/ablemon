@@ -17,7 +17,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 from aiohttp import web
 from telegram import Update, Bot
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes, AIORateLimiter
 
 from core.security.trust_gate import TrustGate, TrustTier
 from core.agents.base import ScannerAgent, AuditorAgent, ExecutorAgent, AgentContext, AgentAction, AgentRole
@@ -808,9 +808,6 @@ class ATLASGateway:
                         max_tokens=16384,
                         temperature=0.60,
                         top_p=0.95,
-                        top_k=20,
-                        presence_penalty=0,
-                        repetition_penalty=1,
                     )
 
                 # Step 4: Tool dispatch if AI called a tool
@@ -1379,7 +1376,13 @@ class ATLASGateway:
 
     async def start_master_bot(self):
         """Start the master Telegram bot"""
-        self.master_bot = Application.builder().token(self.bot_token).concurrent_updates(True).build()
+        self.master_bot = (
+            Application.builder()
+            .token(self.bot_token)
+            .concurrent_updates(True)
+            .rate_limiter(AIORateLimiter(max_retries=3))
+            .build()
+        )
 
         # Add handlers
         self.master_bot.add_handler(CommandHandler("start", self._cmd_start))
@@ -1406,7 +1409,13 @@ class ATLASGateway:
         if not client:
             raise ValueError(f"Client {client_id} not found")
 
-        app = Application.builder().token(client.telegram_bot_token).concurrent_updates(True).build()
+        app = (
+            Application.builder()
+            .token(client.telegram_bot_token)
+            .concurrent_updates(True)
+            .rate_limiter(AIORateLimiter(max_retries=3))
+            .build()
+        )
 
         async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await self._handle_client_message(client_id, update, context)
