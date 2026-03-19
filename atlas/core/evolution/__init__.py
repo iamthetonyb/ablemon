@@ -1,0 +1,26 @@
+"""
+ATLAS M2.7 Self-Evolution Daemon
+
+Background-only daemon that uses MiniMax M2.7 to continuously improve
+routing accuracy, scorer weights, and domain adjustments.
+
+5-step cycle: Collect → Analyze → Improve → Validate → Deploy
+
+M2.7 is NEVER user-facing. It only runs as the evolution daemon's brain.
+"""
+
+from .daemon import EvolutionDaemon, EvolutionConfig, CycleResult
+from .collector import MetricsCollector
+from .analyzer import EvolutionAnalyzer, AnalysisResult
+from .improver import WeightImprover, Improvement
+from .validator import ChangeValidator, ValidationResult
+from .deployer import ChangeDeployer, DeployResult
+
+__all__ = [
+    "EvolutionDaemon", "EvolutionConfig", "CycleResult",
+    "MetricsCollector",
+    "EvolutionAnalyzer", "AnalysisResult",
+    "WeightImprover", "Improvement",
+    "ChangeValidator", "ValidationResult",
+    "ChangeDeployer", "DeployResult",
+]

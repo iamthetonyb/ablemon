@@ -147,6 +147,90 @@ export const auditLogs = pgTable("audit_logs", {
 ]);
 
 // ══════════════════════════════════════════════════════════════
+// CRM: CONTACTS
+// ══════════════════════════════════════════════════════════════
+
+export const contacts = pgTable("contacts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").references(() => organizations.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  email: text("email"),
+  phone: text("phone"),
+  company: text("company"),
+  stage: varchar("stage", { length: 20 }).default("lead").notNull(), // "lead" | "qualified" | "proposal" | "client" | "churned"
+  source: varchar("source", { length: 32 }), // "referral" | "inbound" | "outbound" | "organic"
+  notes: text("notes"),
+  lastContactedAt: timestamp("last_contacted_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("contacts_org_idx").on(table.organizationId),
+  index("contacts_stage_idx").on(table.stage),
+]);
+
+// ══════════════════════════════════════════════════════════════
+// CRM: DEALS
+// ══════════════════════════════════════════════════════════════
+
+export const deals = pgTable("deals", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").references(() => organizations.id, { onDelete: "cascade" }),
+  contactId: uuid("contact_id").references(() => contacts.id, { onDelete: "set null" }),
+  title: text("title").notNull(),
+  valueCents: integer("value_cents").default(0).notNull(),
+  stage: varchar("stage", { length: 20 }).default("discovery").notNull(), // "discovery" | "proposal" | "negotiation" | "closed_won" | "closed_lost"
+  probability: integer("probability").default(10), // 0-100
+  expectedCloseDate: timestamp("expected_close_date"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("deals_org_idx").on(table.organizationId),
+  index("deals_stage_idx").on(table.stage),
+]);
+
+// ══════════════════════════════════════════════════════════════
+// NOTES & MEMORY
+// ══════════════════════════════════════════════════════════════
+
+export const notes = pgTable("notes", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").references(() => organizations.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  category: varchar("category", { length: 20 }).default("note").notNull(), // "note" | "memory" | "learning" | "insight" | "briefing"
+  pinned: boolean("pinned").default(false).notNull(),
+  source: varchar("source", { length: 32 }).default("manual"), // "manual" | "atlas" | "briefing" | "audit"
+  tags: jsonb("tags").$type<string[]>(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("notes_org_idx").on(table.organizationId),
+  index("notes_category_idx").on(table.category),
+]);
+
+// ══════════════════════════════════════════════════════════════
+// PROJECT MANAGEMENT: TASKS
+// ══════════════════════════════════════════════════════════════
+
+export const tasks = pgTable("tasks", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").references(() => organizations.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  description: text("description"),
+  status: varchar("status", { length: 20 }).default("backlog").notNull(), // "backlog" | "in_progress" | "review" | "done"
+  priority: varchar("priority", { length: 10 }).default("medium").notNull(), // "low" | "medium" | "high" | "urgent"
+  assignee: text("assignee"), // "atlas" | "user" | custom name
+  dueDate: timestamp("due_date"),
+  tags: jsonb("tags").$type<string[]>(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("tasks_org_idx").on(table.organizationId),
+  index("tasks_status_idx").on(table.status),
+]);
+
+// ══════════════════════════════════════════════════════════════
 // TYPE EXPORTS
 // ══════════════════════════════════════════════════════════════
 
@@ -155,3 +239,7 @@ export type Organization = typeof organizations.$inferSelect;
 export type ClientSetting = typeof clientSettings.$inferSelect;
 export type FeatureFlag = typeof featureFlags.$inferSelect;
 export type AuditLog = typeof auditLogs.$inferSelect;
+export type Contact = typeof contacts.$inferSelect;
+export type Deal = typeof deals.$inferSelect;
+export type Note = typeof notes.$inferSelect;
+export type Task = typeof tasks.$inferSelect;

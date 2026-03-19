@@ -36,21 +36,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "name and slug required" }, { status: 400 });
   }
 
-  const [org] = await db
-    .insert(organizations)
-    .values({
-      name: body.name,
-      slug: body.slug.toLowerCase().replace(/[^a-z0-9-]/g, ""),
-      plan: body.plan || "free",
-    })
-    .returning();
+  try {
+    const [org] = await db
+      .insert(organizations)
+      .values({
+        name: body.name,
+        slug: body.slug.toLowerCase().replace(/[^a-z0-9-]/g, ""),
+        plan: body.plan || "free",
+      })
+      .returning();
 
-  // Create default client settings
-  await db.insert(clientSettings).values({
-    organizationId: org.id,
-  });
+    // Create default client settings
+    await db.insert(clientSettings).values({
+      organizationId: org.id,
+    });
 
-  return NextResponse.json({ success: true, organization: org });
+    return NextResponse.json({ success: true, organization: org });
+  } catch (e: any) {
+    const message = e?.message?.includes("unique") ? "Organization slug already exists" : e?.message || "Failed to create organization";
+    return NextResponse.json({ success: false, error: message }, { status: 400 });
+  }
 }
 
 /**

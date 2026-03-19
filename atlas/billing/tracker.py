@@ -111,11 +111,19 @@ class BillingTracker:
     """
 
     # Default provider costs ($ per million tokens)
+    # These are overridden when a ProviderRegistry is available.
     DEFAULT_COSTS = {
         "nvidia_nim": {"input": 0.0, "output": 0.0},
         "openrouter": {"input": 0.60, "output": 3.00},
         "anthropic": {"input": 3.00, "output": 15.00},
         "ollama": {"input": 0.0, "output": 0.0},
+        # Registry-based provider names
+        "nemotron-3-super": {"input": 0.0, "output": 0.0},
+        "qwen3.5-openrouter": {"input": 0.60, "output": 3.00},
+        "mimo-v2-pro": {"input": 1.00, "output": 3.00},
+        "minimax-m2.7": {"input": 0.30, "output": 1.20},
+        "claude-opus-4-6": {"input": 15.00, "output": 75.00},
+        "ollama-local": {"input": 0.0, "output": 0.0},
     }
 
     # Client billing rates (can be higher than cost)
@@ -137,6 +145,12 @@ class BillingTracker:
 
         self.provider_costs = provider_costs or self.DEFAULT_COSTS
         self.client_rates = client_rates or self.DEFAULT_RATES
+
+    @classmethod
+    def from_registry(cls, data_path: Path, registry, **kwargs) -> "BillingTracker":
+        """Create a BillingTracker with costs populated from a ProviderRegistry."""
+        costs = registry.get_all_costs() if registry else cls.DEFAULT_COSTS
+        return cls(data_path=data_path, provider_costs=costs, **kwargs)
 
         # Active sessions
         self.sessions: Dict[str, BillingSession] = {}

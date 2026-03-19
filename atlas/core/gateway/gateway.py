@@ -12,6 +12,9 @@ from datetime import datetime
 from typing import Dict, List, Optional, Union
 from pathlib import Path
 
+# Project root is 4 levels up from this file (atlas/core/gateway/gateway.py → ATLAS/)
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+
 from aiohttp import web
 from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
@@ -25,6 +28,9 @@ from core.providers.openrouter import OpenRouterProvider
 from core.providers.anthropic_provider import AnthropicProvider
 from core.providers.ollama import OllamaProvider
 from core.providers.base import ProviderChain, ProviderConfig, Message, Role
+from core.routing.provider_registry import ProviderRegistry, ProviderTierConfig
+from core.routing.complexity_scorer import ComplexityScorer, ScoringResult
+from core.routing.interaction_log import InteractionLogger, InteractionRecord
 from core.approval.workflow import ApprovalWorkflow, ApprovalStatus
 from tools.github.client import GitHubClient
 from tools.digitalocean.client import DigitalOceanClient
@@ -32,6 +38,8 @@ from tools.vercel.client import VercelClient
 from scheduler.cron import CronScheduler
 from core.gateway.initiative import InitiativeEngine
 from memory.hybrid_memory import HybridMemory, MemoryType
+from core.auth.manager import AuthManager
+from core.providers.openai_oauth import OpenAIChatGPTProvider, OpenAIOAuthProvider
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +47,16 @@ logger = logging.getLogger(__name__)
 
 STUDIO_BASE_URL = os.environ.get("ATLAS_STUDIO_URL", "http://localhost:3000")
 ATLAS_SERVICE_TOKEN = os.environ.get("ATLAS_SERVICE_TOKEN", "")
+
+# ── Model short names for response tags ──────────────────────────────────────
+MODEL_SHORT_NAMES = {
+    "nvidia/llama-3.3-nemotron-super-49b-v1": "Nemotron 3 Super",
+    "qwen/qwen3.5-397b-a17b": "Qwen 3.5",
+    "xiaomi/mimo-v2-pro": "MiMo-V2-Pro",
+    "minimax/minimax-m2.7": "MiniMax M2.7",
+    "claude-opus-4-6": "Claude Opus",
+    "llama3.1": "Llama 3.1 (local)",
+}
 
 
 async def fetch_authorized_tools(org_id: str = None) -> List[Dict]:
@@ -368,6 +386,9 @@ class ATLASGateway:
 
         # Initialize agents
         self._init_agents()
+        
+        # Initialize Auth Manager
+        self.auth_manager = AuthManager()
 
         # Initialize approval workflow
         self.approval_workflow = ApprovalWorkflow(
@@ -395,48 +416,130 @@ class ATLASGateway:
             logger.warning(f"HybridMemory failed to initialize (continuing without it): {e}")
             self.memory = None
 
+        # Self-Improvement Engine
+        from core.agi.self_improvement import SelfImprovementEngine
+        try:
+            self.self_improvement = SelfImprovementEngine(
+                v2_path=Path("."),
+                approval_workflow=self.approval_workflow,
+            )
+        except Exception as e:
+            logger.warning(f"SelfImprovementEngine failed to initialize: {e}")
+            self.self_improvement = None
+
+        # ── Intelligent Routing Layer ─────────────────────────────
+        # Complexity scorer for tier-based routing
+        try:
+            self.complexity_scorer = ComplexityScorer(str(_PROJECT_ROOT / "config" / "scorer_weights.yaml"))
+            logger.info(f"ComplexityScorer loaded (v{self.complexity_scorer.version})")
+        except Exception as e:
+            logger.warning(f"ComplexityScorer failed to init: {e}")
+            self.complexity_scorer = None
+
+        # Interaction logger for evolution daemon feedback
+        try:
+            (_PROJECT_ROOT / "data").mkdir(parents=True, exist_ok=True)
+            self.interaction_logger = InteractionLogger(str(_PROJECT_ROOT / "data" / "interaction_log.db"))
+            logger.info("InteractionLogger initialized")
+        except Exception as e:
+            logger.warning(f"InteractionLogger failed to init: {e}")
+            self.interaction_logger = None
+
+        # Pre-build tier-specific chains for scored routing
+        self.tier_chains = {}
+        if hasattr(self, 'provider_registry') and self.provider_registry:
+            for tier in [1, 2, 4]:
+                try:
+                    self.tier_chains[tier] = self.provider_registry.build_chain_for_tier(tier)
+                except Exception as e:
+                    logger.warning(f"Failed to build chain for tier {tier}: {e}")
+
+        # Evolution daemon (started in _start_background_tasks)
+        self.evolution_daemon = None
+
     def _init_providers(self) -> ProviderChain:
-        """Build ProviderChain, skipping any provider whose env var is missing."""
+        """
+        Build ProviderChain from the routing config registry.
+
+        Uses config/routing_config.yaml for provider definitions.
+        Falls back to legacy hardcoded chain if config is missing.
+        """
+        # Try registry-based initialization first
+        config_path = _PROJECT_ROOT / "config" / "routing_config.yaml"
+        if config_path.exists():
+            self.provider_registry = ProviderRegistry.from_yaml(config_path)
+            chain = self.provider_registry.build_provider_chain()
+
+            # Also inject OpenAI OAuth if authenticated (not in registry — BYOK)
+            if hasattr(self, 'auth_manager') and self.auth_manager.is_authenticated('openai_oauth'):
+                try:
+                    oauth_provider = OpenAIChatGPTProvider(
+                        config=ProviderConfig(model="gpt-5.4"),
+                        auth_manager=self.auth_manager
+                    )
+                    # Insert after tier 1 providers
+                    chain.providers.insert(1, oauth_provider)
+                    logger.info("Provider added: OpenAI OAuth (BYOK) via registry")
+                except Exception as e:
+                    logger.warning(f"Failed to init OpenAI OAuth provider: {e}")
+
+            return chain
+
+        # Legacy fallback — hardcoded chain (backward compat)
+        logger.warning("No routing config found, using legacy provider chain")
+        return self._init_providers_legacy()
+
+    def _init_providers_legacy(self) -> ProviderChain:
+        """Legacy hardcoded provider chain (backward compatibility)."""
         providers = []
+
+        nvidia_key = os.environ.get("NVIDIA_API_KEY")
+        if nvidia_key:
+            try:
+                providers.append(NVIDIANIMProvider(api_key=nvidia_key, model="kimi-k2.5"))
+                logger.info("Provider added: NVIDIA NIM (Kimi) [legacy]")
+            except Exception as e:
+                logger.warning(f"Failed to init NVIDIA NIM provider: {e}")
+
+        if hasattr(self, 'auth_manager') and self.auth_manager.is_authenticated('openai_oauth'):
+            try:
+                providers.append(OpenAIChatGPTProvider(
+                    config=ProviderConfig(model="gpt-5.4"),
+                    auth_manager=self.auth_manager
+                ))
+                logger.info("Provider added: OpenAI OAuth (BYOK) [legacy]")
+            except Exception as e:
+                logger.warning(f"Failed to init OpenAI OAuth provider: {e}")
 
         openrouter_key = os.environ.get("OPENROUTER_API_KEY")
         if openrouter_key:
             try:
-                # Primary Provider: Qwen 3.5 397B (via OpenRouter FP8)
                 providers.append(OpenRouterProvider(
-                    api_key=openrouter_key,
-                    model="qwen/qwen3.5-397b-a17b",
-                    timeout=600.0
+                    api_key=openrouter_key, model="qwen/qwen3.5-397b-a17b", timeout=600.0
                 ))
-                logger.info("Provider added: OpenRouter (Qwen 397B)")
+                logger.info("Provider added: OpenRouter (Qwen 397B) [legacy]")
             except Exception as e:
                 logger.warning(f"Failed to init OpenRouter provider: {e}")
 
-        # (OpenRouter block is now earlier, so we can remove the old Claude logic or keep it as fallback)
         anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
         if anthropic_key:
             try:
-                providers.append(AnthropicProvider(
-                    api_key=anthropic_key,
-                    model="claude-opus-4-5",
-                ))
-                logger.info("Provider added: Anthropic")
+                providers.append(AnthropicProvider(api_key=anthropic_key, model="claude-opus-4-5"))
+                logger.info("Provider added: Anthropic [legacy]")
             except Exception as e:
                 logger.warning(f"Failed to init Anthropic provider: {e}")
 
         ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
         try:
-            providers.append(OllamaProvider(
-                model="llama3.1",
-                base_url=ollama_url,
-            ))
-            logger.info("Provider added: Ollama (local fallback)")
+            providers.append(OllamaProvider(model="llama3.1", base_url=ollama_url))
+            logger.info("Provider added: Ollama (local fallback) [legacy]")
         except Exception as e:
             logger.warning(f"Failed to init Ollama provider: {e}")
 
         if not providers:
             logger.error("No AI providers configured — ATLAS will not respond to messages!")
 
+        self.provider_registry = None
         return ProviderChain(providers)
 
     def _init_vision_providers(self) -> ProviderChain:
@@ -508,9 +611,48 @@ class ATLASGateway:
         if not audit_result["approved_for_executor"]:
             return f"⚠️ Audit failed: {'; '.join(audit_result['notes'])}"
 
-        # Step 3: AI response via ProviderChain
+        # Step 3: AI response via complexity-scored routing
         if not self.provider_chain.providers:
             return "⚠️ No AI providers configured. Set NVIDIA_API_KEY, OPENROUTER_API_KEY, or ANTHROPIC_API_KEY."
+
+        # ── Score complexity and select tier ──────────────────────
+        scoring_result = None
+        selected_chain = self.provider_chain  # default fallback
+        if self.complexity_scorer and isinstance(text_content, str):
+            try:
+                scoring_result = self.complexity_scorer.score_and_route(text_content)
+                tier = scoring_result.selected_tier
+                if tier in self.tier_chains and self.tier_chains[tier].providers:
+                    selected_chain = self.tier_chains[tier]
+                    logger.info(
+                        f"Routed to tier {tier} (score={scoring_result.score:.3f}, "
+                        f"domain={scoring_result.domain})"
+                    )
+            except Exception as e:
+                logger.warning(f"Complexity scoring failed, using default chain: {e}")
+
+        # ── Pre-log interaction record (fill result after completion) ──
+        interaction_id = None
+        if self.interaction_logger and scoring_result:
+            import json as _json
+            try:
+                record = InteractionRecord(
+                    message_preview=text_content[:200] if isinstance(text_content, str) else "",
+                    complexity_score=scoring_result.score,
+                    selected_tier=scoring_result.selected_tier,
+                    selected_provider=scoring_result.selected_provider or (
+                        selected_chain.providers[0].name if selected_chain.providers else ""
+                    ),
+                    domain=scoring_result.domain,
+                    features=_json.dumps(scoring_result.features),
+                    scorer_version=scoring_result.scorer_version,
+                    budget_gated=scoring_result.budget_gated,
+                    channel="telegram" if update else "api",
+                    session_id=user_id,
+                )
+                interaction_id = self.interaction_logger.log(record)
+            except Exception as e:
+                logger.warning(f"Interaction logging failed: {e}")
 
         try:
             # ── Dashboard-driven tool authorization ──
@@ -581,22 +723,15 @@ class ATLASGateway:
                         else:
                             text_only_msgs.append(msg)
                             
-                    result = await self.provider_chain.complete(
+                    result = await selected_chain.complete(
                         text_only_msgs,
                         tools=authorized_tools,
-                        max_tokens=16384, # Reduced to prevent OpenRouter from reserving massive account balances and triggering 429
+                        max_tokens=16384,
                         temperature=0.60,
                         top_p=0.95,
                         top_k=20,
                         presence_penalty=0,
                         repetition_penalty=1,
-                        # Target atlas-cloud specifically, enabling up to 1M YaRN context expansion
-                        provider={
-                            "order": ["AtlasCloud"],
-                            "allow_fallbacks": True,
-                            "data_collection": "deny"
-                        },
-                        models=["qwen/qwen3.5-397b-a17b"]
                     )
 
                 # Step 4: Tool dispatch if AI called a tool
@@ -639,50 +774,94 @@ class ATLASGateway:
                         logger.error(f"Failed to store memory: {e}")
 
                 # ── Post audit log to dashboard ──
-                import uuid as _uuid
-                _run_id = str(_uuid.uuid4())
-                _tool_calls_log = []
-                for m in msgs:
-                    if hasattr(m, 'tool_calls') and m.tool_calls:
-                        for tc in m.tool_calls:
-                            _tool_calls_log.append({
-                                "name": tc.name,
-                                "args": tc.arguments if isinstance(tc.arguments, dict) else {},
-                            })
-                asyncio.create_task(post_audit_log({
-                    "run_id": _run_id,
-                    "agent_role": "executor",
-                    "task": text_content[:500] if isinstance(text_content, str) else str(text_content)[:500],
-                    "content": final_text[:2000],
-                    "tool_calls": _tool_calls_log,
-                    "provider_used": result.provider if hasattr(result, 'provider') else None,
-                    "model_used": result.model if hasattr(result, 'model') else None,
-                    "input_tokens": result.usage.get("input_tokens", 0) if hasattr(result, 'usage') and result.usage else 0,
-                    "output_tokens": result.usage.get("output_tokens", 0) if hasattr(result, 'usage') and result.usage else 0,
-                    "duration_ms": 0,
-                    "severity": "info",
-                    "status": "completed",
-                    "org_id": client_id,
-                    "iterations": loop_iteration + 1,
-                }))
+                try:
+                    import uuid as _uuid
+                    _run_id = str(_uuid.uuid4())
+                    _tool_calls_log = []
+                    for m in msgs:
+                        if hasattr(m, 'tool_calls') and m.tool_calls:
+                            for tc in m.tool_calls:
+                                _tool_calls_log.append({
+                                    "name": tc.name,
+                                    "args": tc.arguments if isinstance(tc.arguments, dict) else {},
+                                })
+                    _usage = result.usage if hasattr(result, 'usage') and result.usage else None
+                    asyncio.create_task(post_audit_log({
+                        "run_id": _run_id,
+                        "agent_role": "executor",
+                        "task": str(text_content)[:500],
+                        "content": str(final_text)[:2000],
+                        "tool_calls": _tool_calls_log,
+                        "provider_used": getattr(result, 'provider', None),
+                        "model_used": getattr(result, 'model', None),
+                        "input_tokens": _usage.input_tokens if _usage else 0,
+                        "output_tokens": _usage.output_tokens if _usage else 0,
+                        "duration_ms": getattr(result, 'latency_ms', 0),
+                        "severity": "info",
+                        "status": "completed",
+                        "org_id": client_id,
+                        "iterations": loop_iteration + 1,
+                    }))
+                except Exception as audit_e:
+                    logger.warning(f"Failed to post audit log: {audit_e}")
+
+                # ── Update interaction log with result ──
+                if self.interaction_logger and interaction_id:
+                    try:
+                        _usage = result.usage if hasattr(result, 'usage') else None
+                        self.interaction_logger.update_result(
+                            interaction_id,
+                            actual_provider=result.provider if hasattr(result, 'provider') else "",
+                            fallback_used=(
+                                hasattr(result, 'provider') and scoring_result and
+                                result.provider != (scoring_result.selected_provider or "")
+                            ),
+                            latency_ms=result.latency_ms if hasattr(result, 'latency_ms') else 0,
+                            input_tokens=_usage.input_tokens if _usage else 0,
+                            output_tokens=_usage.output_tokens if _usage else 0,
+                            cost_usd=result.cost if hasattr(result, 'cost') else 0,
+                            success=True,
+                        )
+                    except Exception as log_e:
+                        logger.warning(f"Failed to update interaction log: {log_e}")
+
+                # ── Append model identifier tag ──
+                _raw_model = result.model if hasattr(result, 'model') and result.model else ""
+                _short = MODEL_SHORT_NAMES.get(_raw_model, _raw_model or (result.provider if hasattr(result, 'provider') else ""))
+                _tier_label = f"T{scoring_result.selected_tier}" if scoring_result else ""
+                _model_tag = f"\n\n`⚡ {_short} [{_tier_label}]`" if _short else ""
+                final_text += _model_tag
 
                 return final_text
-                
+
             return "⚠️ Agent exceeded maximum tool iterations (15)."
 
         except Exception as e:
-            logger.error(f"AI completion failed: {e}", exc_info=True)
+            import traceback
+            tb = traceback.format_exc()
+            logger.error(f"AI completion failed: {e}\n{tb}")
+            # Log failure to interaction log
+            if self.interaction_logger and interaction_id:
+                try:
+                    self.interaction_logger.update_result(
+                        interaction_id,
+                        success=False,
+                        error_type=type(e).__name__,
+                    )
+                except Exception:
+                    pass
             if update and update.message:
                 try:
                     import json
                     import io
-                    dump = json.dumps([m.__dict__ for m in msgs], default=str, indent=2)
-                    dump_bytes = io.BytesIO(dump.encode('utf-8'))
-                    dump_bytes.name = "payload_dump.json"
-                    await update.message.reply_document(document=dump_bytes, caption=f"⚠️ Exception Trace:\n{str(e)[:1000]}")
+                    # Send full traceback as a document so we can diagnose
+                    trace_text = f"Exception: {type(e).__name__}: {e}\n\n{tb}"
+                    trace_bytes = io.BytesIO(trace_text.encode('utf-8'))
+                    trace_bytes.name = "error_trace.txt"
+                    await update.message.reply_document(document=trace_bytes, caption=f"⚠️ {type(e).__name__}: {str(e)[:500]}")
                 except Exception as dump_e:
                     pass
-            return f"⚠️ AI error: {e}"
+            return f"⚠️ AI error ({type(e).__name__}): {e}"
 
     async def _handle_tool_call(self, tool_call, update: Optional[Update], user_id: str, msgs: List["Message"] = None) -> str:
         """Dispatch a tool call from the AI to the correct client, with approval for writes."""
@@ -1180,6 +1359,37 @@ class ATLASGateway:
         self.initiative.register_jobs(self.scheduler)
         print(f"🕰️ ATLAS Persistent Scheduler started with {len(self.scheduler.jobs)} autonomous missions")
         asyncio.create_task(self.scheduler.run_forever(poll_interval=30.0))
+
+        # Start the Evolution Daemon (M2.7 background self-improvement)
+        try:
+            from core.evolution.daemon import EvolutionDaemon, EvolutionConfig
+            evo_config = EvolutionConfig(
+                weights_path=str(_PROJECT_ROOT / "config" / "scorer_weights.yaml"),
+                interaction_db=str(_PROJECT_ROOT / "data" / "interaction_log.db"),
+                cycle_log_dir=str(_PROJECT_ROOT / "data" / "evolution_cycles"),
+                cycle_interval_hours=6,
+                min_interactions_for_cycle=20,
+                auto_deploy=True,
+            )
+            # Wire M2.7 provider if available from registry
+            m27_provider = None
+            if hasattr(self, 'provider_registry') and self.provider_registry:
+                m27_config = self.provider_registry.get_provider_config("minimax-m2.7")
+                if m27_config and m27_config.is_available:
+                    m27_provider = self.provider_registry._instantiate_provider(m27_config)
+                    logger.info("Evolution daemon connected to MiniMax M2.7")
+
+            self.evolution_daemon = EvolutionDaemon(config=evo_config, m27_provider=m27_provider)
+            asyncio.create_task(self.evolution_daemon.run_continuous())
+            print(f"🧬 Evolution Daemon started (6h cycle, M2.7 {'connected' if m27_provider else 'rule-based fallback'})")
+        except Exception as e:
+            logger.warning(f"Evolution daemon failed to start: {e}")
+            print(f"⚠️ Evolution daemon not started: {e}")
+
+        # Report routing status
+        if self.complexity_scorer:
+            tier_info = ", ".join(f"T{t}: {len(c.providers)}p" for t, c in self.tier_chains.items())
+            print(f"🎯 Complexity-scored routing active (scorer v{self.complexity_scorer.version}) [{tier_info}]")
 
         while True:
             await asyncio.sleep(1)

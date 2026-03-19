@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Awaitable
+from typing import Any, Callable, Dict, List, Optional, Awaitable, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -591,7 +591,7 @@ class SelfImprovementEngine:
             raise ValueError(f"Invalid skill name: {name}")
 
         # Create skill directory
-        skill_dir = self.atlas_home / "atlas-v2" / "skills" / "library" / name
+        skill_dir = self.v2_path / "atlas" / "skills" / "library" / name
         if skill_dir.exists():
             raise ValueError(f"Skill {name} already exists")
 
@@ -780,7 +780,7 @@ if __name__ == "__main__":
         """Update SKILL_INDEX.yaml with new skill"""
         import yaml
 
-        index_path = self.atlas_home / "atlas-v2" / "skills" / "SKILL_INDEX.yaml"
+        index_path = self.v2_path / "atlas" / "skills" / "SKILL_INDEX.yaml"
 
         if index_path.exists():
             with open(index_path) as f:

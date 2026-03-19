@@ -1,0 +1,43 @@
+# ATLAS Complexity Scorer Weights
+# ================================
+# Rule-based complexity scoring for multi-tier routing.
+# These weights are tunable by the M2.7 evolution daemon.
+#
+# Score mapping:
+#   < 0.4  → Tier 1 (Nemotron 3 Super)
+#   0.4-0.7 → Tier 2 (MiMo-V2-Pro)
+#   > 0.7  → Tier 4 (Opus 4.6, with budget gating)
+
+features:
+  token_count_threshold: 2000
+  token_count_weight: 0.20
+  requires_tools_weight: 0.15
+  requires_code_weight: 0.15
+  multi_step_weight: 0.20
+  safety_critical_weight: 0.30
+
+# Per-domain adjustments (added to base score)
+domain_adjustments:
+  default: 0.0
+  coding: 0.05
+  security: 0.15
+  financial: 0.10
+  legal: 0.15
+  production: 0.10
+  creative: -0.05
+  research: 0.0
+  planning: 0.05
+
+# Tier thresholds
+tier_thresholds:
+  tier_1_max: 0.4
+  tier_2_max: 0.7
+
+# Budget gating for Opus (Tier 4)
+opus_daily_budget_usd: 15.00
+opus_monthly_budget_usd: 100.00
+
+# Version tracking (M2.7 increments on each update)
+version: 1
+last_updated: null
+updated_by: "initial"

@@ -31,7 +31,7 @@ export default function ClientsPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(newOrg),
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({ success: false, error: "Invalid response" }));
     if (data.success) {
       setOrgs((prev) => [...prev, data.organization]);
       setShowCreate(false);

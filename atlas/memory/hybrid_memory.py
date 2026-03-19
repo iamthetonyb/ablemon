@@ -72,7 +72,8 @@ class HybridMemory:
     def _generate_id(self, content: str, memory_type: MemoryType) -> str:
         """Generate unique ID for memory entry"""
         timestamp = datetime.utcnow().isoformat()
-        hash_input = f"{timestamp}:{memory_type.value}:{content[:100]}"
+        content_str = str(content) if not isinstance(content, str) else content
+        hash_input = f"{timestamp}:{memory_type.value}:{content_str[:100]}"
         return hashlib.sha256(hash_input.encode()).hexdigest()[:16]
 
     def store(

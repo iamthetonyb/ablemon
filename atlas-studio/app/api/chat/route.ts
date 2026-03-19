@@ -1,0 +1,34 @@
+import { createOpenAI } from '@ai-sdk/openai';
+import { streamText, type UIMessage } from 'ai';
+
+export const maxDuration = 60;
+
+const openrouter = createOpenAI({
+  baseURL: 'https://openrouter.ai/api/v1',
+  apiKey: process.env.OPENROUTER_API_KEY,
+});
+
+export async function POST(req: Request) {
+  const { messages } = await req.json() as { messages: UIMessage[] };
+
+  // Convert UIMessage (parts-based) to CoreMessage (content-based) for streamText
+  const coreMessages = messages.map((msg) => ({
+    role: msg.role as 'user' | 'assistant',
+    content: msg.parts
+      ?.filter((p: any) => p.type === 'text')
+      .map((p: any) => p.text)
+      .join('') || '',
+  }));
+
+  const result = streamText({
+    model: openrouter('anthropic/claude-sonnet-4-6'),
+    messages: coreMessages,
+    system: `You are ATLAS, an autonomous AGI system embedded in the ATLAS Studio control plane.
+You assist the operator with business strategy, code, deployments, and task execution.
+Be direct, concise, no fluff. You have access to the full ATLAS system context.
+When asked about system status, reference real data from the dashboard.
+Format responses with Markdown when helpful.`,
+  });
+
+  return result.toUIMessageStreamResponse();
+}

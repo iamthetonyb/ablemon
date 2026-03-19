@@ -15,6 +15,13 @@ os.chdir(Path(__file__).parent)
 # Add to path
 sys.path.insert(0, str(Path(__file__).parent))
 
+# Load .env for local runs (Docker/CI set env vars directly)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent / ".env")
+except ImportError:
+    pass
+
 from core.gateway.gateway import ATLASGateway
 
 async def main():

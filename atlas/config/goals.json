@@ -1,0 +1,24 @@
+{
+  "master_goal": {
+    "id": "master_goal",
+    "title": "$100k/m by 2/11/2028",
+    "target_revenue_mrr": 100000,
+    "current_revenue_mrr": 0,
+    "deadline": "2028-02-11",
+    "kpis": [
+      {
+        "name": "Active Clients",
+        "value": 0
+      },
+      {
+        "name": "Total Deployments",
+        "value": 0
+      },
+      {
+        "name": "Lead Pipeline",
+        "value": 0
+      }
+    ],
+    "last_updated": "2026-03-14T12:44:50.201258"
+  }
+}
