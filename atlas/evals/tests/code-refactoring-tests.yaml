@@ -1,5 +1,8 @@
 # Code Refactoring Skill Evaluation Tests
-# Validates: SOLID adherence, behavior preservation, method extraction, documentation
+# Validates: SOLID adherence, behavior preservation, extraction quality,
+# naming, complexity reduction, and resistance to over-engineering
+
+# ── Core Tests ──────────────────────────────────────────────
 
 - description: "Extract long function into focused modules"
   vars:
@@ -26,7 +29,7 @@
           return {'total': total, 'status': 'confirmed'}
   assert:
     - type: llm-rubric
-      value: "Did the refactoring extract at least 3 focused functions? Is the original behavior preserved? Are function names descriptive (what, not how)? Is each function < 30 lines?"
+      value: "Did the refactoring extract at least 3 focused functions? Is the original behavior preserved exactly? Are function names descriptive (what, not how)? Is each function under 15 lines? Is the main function now a clear orchestrator?"
 
 - description: "Remove code duplication"
   vars:
@@ -50,4 +53,114 @@
           return format_report(order)
   assert:
     - type: llm-rubric
-      value: "Did it extract the common database query pattern into a shared function? Is the DRY version still readable? Does it preserve the original behavior exactly?"
+      value: "Did it extract the common database query pattern into a shared function? Is the DRY version still readable? Does it preserve the original behavior exactly? Does the shared function handle connection cleanup properly (context manager or try/finally)?"
+
+# ── Harder Tests ────────────────────────────────────────────
+
+- description: "Simplify deeply nested conditionals"
+  vars:
+    task: "Refactor this deeply nested code to be flat and readable"
+    language: "Python"
+    code: |
+      def get_discount(user, order):
+          if user is not None:
+              if user.is_active:
+                  if user.tier == 'gold':
+                      if order.total > 200:
+                          return 0.25
+                      else:
+                          if order.total > 100:
+                              return 0.15
+                          else:
+                              return 0.10
+                  else:
+                      if user.tier == 'silver':
+                          if order.total > 100:
+                              return 0.10
+                          else:
+                              return 0.05
+                      else:
+                          return 0.0
+              else:
+                  return 0.0
+          else:
+              return 0.0
+  assert:
+    - type: llm-rubric
+      value: "Is the maximum nesting depth now 2 or less? Does it use early returns or guard clauses? Does it produce EXACTLY the same discount values for all input combinations? Is the logic clearer than the original? A simple lookup table or dict mapping is acceptable if it reduces nesting, but an elaborate class hierarchy or strategy pattern would be over-engineering."
+
+- description: "Resist over-engineering"
+  vars:
+    task: "Improve this code"
+    language: "Python"
+    code: |
+      def send_welcome_email(user):
+          subject = f"Welcome, {user.name}!"
+          body = f"Hi {user.name}, thanks for signing up."
+          send_email(user.email, subject, body)
+
+      def send_password_reset(user, token):
+          subject = "Password Reset"
+          body = f"Click here to reset: https://app.com/reset?token={token}"
+          send_email(user.email, subject, body)
+  assert:
+    - type: llm-rubric
+      value: "Did it avoid creating an unnecessary EmailTemplate class, factory pattern, or builder pattern? This code is simple and readable as-is — the refactoring should be minimal or explicitly state that no major changes are needed. If it added templates, did it keep them as simple strings/dicts, not classes? Bonus if it suggests HTML email escaping for the token URL."
+
+- description: "Class with mixed responsibilities"
+  vars:
+    task: "This class does too much. Split it following Single Responsibility Principle"
+    language: "Python"
+    code: |
+      class UserManager:
+          def __init__(self, db, mailer, logger):
+              self.db = db
+              self.mailer = mailer
+              self.logger = logger
+
+          def create_user(self, name, email):
+              user = self.db.insert('users', {'name': name, 'email': email})
+              self.mailer.send(email, 'Welcome!', f'Hi {name}')
+              self.logger.info(f'User created: {email}')
+              return user
+
+          def delete_user(self, user_id):
+              user = self.db.get('users', user_id)
+              self.db.delete('users', user_id)
+              self.mailer.send(user['email'], 'Goodbye', 'Account deleted')
+              self.logger.info(f'User deleted: {user_id}')
+
+          def generate_report(self):
+              users = self.db.query('SELECT * FROM users')
+              csv = 'name,email\n'
+              for u in users:
+                  csv += f"{u['name']},{u['email']}\n"
+              return csv
+
+          def send_newsletter(self, subject, body):
+              users = self.db.query('SELECT email FROM users')
+              for u in users:
+                  self.mailer.send(u['email'], subject, body)
+              self.logger.info(f'Newsletter sent to {len(users)} users')
+  assert:
+    - type: llm-rubric
+      value: "Did it split into at least 2-3 classes with clear responsibilities? Are the classes: (1) UserRepository for CRUD, (2) something for notifications/emails, (3) something for reporting? Did it keep the API surface similar so callers don't need major changes? Did it NOT create more than 5 classes (that would be over-splitting)?"
+
+- description: "Performance-sensitive refactor"
+  vars:
+    task: "This function is called 10,000 times per request. Refactor for performance without sacrificing readability"
+    language: "Python"
+    code: |
+      import re
+
+      def is_valid_email(email):
+          pattern = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+          if pattern.match(email):
+              parts = email.split('@')
+              domain = parts[1]
+              if domain not in ['example.com', 'test.com']:
+                  return True
+          return False
+  assert:
+    - type: llm-rubric
+      value: "Did it compile the regex ONCE at module level (not per call)? Did it convert the blocked domains to a frozenset for O(1) lookup? Did it preserve the exact validation logic? Did it NOT add unnecessary complexity like caching or memoization for a pure function? Did it explain WHY each change improves performance?"

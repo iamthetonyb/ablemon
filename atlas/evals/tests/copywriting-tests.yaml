@@ -1,5 +1,8 @@
 # Copywriting Skill Evaluation Tests
-# Validates: forbidden lexicon avoidance, CTA presence, framework usage, human tone
+# Validates: forbidden lexicon, CTA presence, framework usage, human tone,
+# audience matching, persuasion quality, and edge cases
+
+# ── Core Tests ──────────────────────────────────────────────
 
 - description: "SaaS demo booking"
   vars:
@@ -8,7 +11,6 @@
     tone: "casual but confident"
     context: "They've been browsing the pricing page"
   assert:
-    # Forbidden lexicon checks
     - type: not-icontains
       value: "delve"
     - type: not-icontains
@@ -23,9 +25,8 @@
       value: "robust"
     - type: not-icontains
       value: "seamless"
-    # Must include a CTA
     - type: llm-rubric
-      value: "Does the copy include a clear call-to-action? Is it direct and concise? Does it reference the demo/call specifically?"
+      value: "Does the copy include a clear call-to-action for booking a demo? Is it under 150 words? Does it feel casual and human, not corporate?"
 
 - description: "E-commerce landing page"
   vars:
@@ -41,7 +42,7 @@
     - type: not-icontains
       value: "paramount"
     - type: llm-rubric
-      value: "Does the copy follow a clear framework (AIDA/PAS/FAB)? Does it include specific proof points? Is the CTA visible and action-oriented?"
+      value: "Does the copy follow AIDA/PAS/FAB framework? Does it include specific proof points about the product? Is the CTA action-oriented with urgency? Does it reference sustainability or the World Cup?"
 
 - description: "B2B email follow-up"
   vars:
@@ -57,4 +58,66 @@
     - type: not-icontains
       value: "transformative"
     - type: llm-rubric
-      value: "Is the email concise (< 150 words)? Does it reference the webinar specifically? Does it propose a concrete next step?"
+      value: "Is the email under 120 words? Does it reference the webinar specifically? Does it propose a concrete next step with a time suggestion? Does it sound like a peer, not a salesperson?"
+
+# ── Harder Tests ────────────────────────────────────────────
+
+- description: "Cold DM to a skeptical prospect"
+  vars:
+    audience: "Agency owner who has publicly said they don't trust AI tools"
+    objective: "Get them to try a free pilot project"
+    tone: "direct, zero-hype, evidence-based"
+    context: "They tweeted 'another AI tool promising the moon' last week"
+  assert:
+    - type: not-icontains
+      value: "revolutionary"
+    - type: not-icontains
+      value: "game-changing"
+    - type: not-icontains
+      value: "cutting-edge"
+    - type: not-icontains
+      value: "AI-powered"
+    - type: llm-rubric
+      value: "Does it acknowledge their skepticism directly rather than ignoring it? Does it offer proof (case study, numbers, guarantee) rather than claims? Is it under 120 words? Does it avoid ALL hype language?"
+
+- description: "Win-back email for churned customer"
+  vars:
+    audience: "Former customer who cancelled 3 months ago citing price"
+    objective: "Get them to reactivate with a limited discount"
+    tone: "honest, no guilt-tripping"
+    context: "They used the product for 8 months and were active until the price increase"
+  assert:
+    - type: not-icontains
+      value: "We miss you"
+    - type: not-icontains
+      value: "limited time"
+    - type: llm-rubric
+      value: "Does it acknowledge the price concern honestly? Does it present a specific offer (not vague)? Does it avoid emotional manipulation or FOMO tactics? Is there a clear CTA with the discount terms?"
+
+- description: "Technical product announcement"
+  vars:
+    audience: "Developers who use our open-source library"
+    objective: "Get them to upgrade to v3 which has breaking changes"
+    tone: "technical, respectful of their time"
+    context: "v3 rewrites the query engine for 10x performance but changes the API surface"
+  assert:
+    - type: not-icontains
+      value: "exciting"
+    - type: not-icontains
+      value: "thrilled"
+    - type: llm-rubric
+      value: "Does it lead with the concrete benefit (10x perf) not hype? Does it honestly list the breaking changes? Does it include a migration path or link? Is it structured with clear sections (What Changed, Why, How to Migrate)?"
+
+- description: "Crisis comms - service outage"
+  vars:
+    audience: "Paying customers affected by a 4-hour production outage"
+    objective: "Communicate what happened and restore trust"
+    tone: "transparent, accountable, no corporate speak"
+    context: "Database corruption caused data loss for 2% of accounts. RCA is complete."
+  assert:
+    - type: not-icontains
+      value: "We take security seriously"
+    - type: not-icontains
+      value: "We apologize for any inconvenience"
+    - type: llm-rubric
+      value: "Does it state what happened in plain language (not vague)? Does it specify who was affected (2%)? Does it explain what they're doing to prevent recurrence? Does it avoid corporate non-apologies? Is there a concrete remediation offer?"

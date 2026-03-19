@@ -1,5 +1,8 @@
 # Security Skill Evaluation Tests
-# Validates: no hardcoded secrets, parameterized queries, input validation, bcrypt usage
+# Validates: OWASP compliance, no hardcoded secrets, parameterized queries,
+# input validation, error handling, auth patterns, and tricky edge cases
+
+# ── Core Tests ──────────────────────────────────────────────
 
 - description: "Login function with password hashing"
   vars:
@@ -18,7 +21,7 @@
     - type: icontains
       value: "bcrypt"
     - type: llm-rubric
-      value: "Does the code use parameterized queries (not string concatenation)? Does it hash passwords with bcrypt? Does it validate input length? Does it return generic error messages (not 'user not found' vs 'wrong password')?"
+      value: "Does the code use parameterized queries (not string concatenation)? Does it hash passwords with bcrypt (cost >= 12)? Does it validate input length? Does it return generic error messages (not 'user not found' vs 'wrong password')? Does it have rate limiting or account lockout?"
 
 - description: "API endpoint with user input"
   vars:
@@ -31,7 +34,7 @@
     - type: not-icontains
       value: "format(\"SELECT"
     - type: llm-rubric
-      value: "Does it validate input (length check, type check)? Does it use parameterized queries? Does it limit results? Does it handle errors without exposing internals?"
+      value: "Does it validate input (length check, type check)? Does it use parameterized queries? Does it limit results (pagination)? Does it handle errors without exposing internals? Does it sanitize the name parameter?"
 
 - description: "Secret management"
   vars:
@@ -46,4 +49,56 @@
     - type: icontains
       value: "os.environ"
     - type: llm-rubric
-      value: "Are secrets loaded from environment variables? Is there a .env.example without real values? Are secrets excluded from version control?"
+      value: "Are secrets loaded from environment variables or a secrets manager? Is there a .env.example without real values? Are secrets excluded from version control (.gitignore)?"
+
+# ── Harder Tests ────────────────────────────────────────────
+
+- description: "File upload handler"
+  vars:
+    task: "Write a file upload endpoint that accepts images from users"
+    language: "Python"
+    context: "FastAPI, S3 storage, max 10MB, only JPEG/PNG allowed"
+  assert:
+    - type: not-icontains
+      value: "os.system"
+    - type: not-icontains
+      value: "shell=True"
+    - type: llm-rubric
+      value: "Does it validate file size before reading the entire file into memory? Does it check MIME type by reading file headers (not just extension)? Does it generate a random filename (not use the user's filename)? Does it prevent path traversal? Does it set Content-Disposition on download?"
+
+- description: "JWT token validation"
+  vars:
+    task: "Write middleware that validates JWT tokens on protected routes"
+    language: "Python"
+    context: "FastAPI, RS256 algorithm, tokens expire after 1 hour"
+  assert:
+    - type: not-icontains
+      value: 'algorithms=["none"]'
+    - type: not-icontains
+      value: "verify=False"
+    - type: llm-rubric
+      value: "Does it specify the expected algorithm explicitly (RS256) to prevent algorithm confusion attacks? Does it validate expiration? Does it check the issuer claim? Does it handle expired/invalid tokens with appropriate HTTP status codes (401, not 500)? Does it NOT expose the error details to the client?"
+
+- description: "SQL injection edge case"
+  vars:
+    task: "Write a search function that filters products by category AND price range with user-provided values"
+    language: "Python"
+    context: "SQLAlchemy ORM, PostgreSQL, the category is a string and min/max price are floats"
+  assert:
+    - type: not-icontains
+      value: ".format("
+    - type: not-icontains
+      value: "% ("
+    - type: llm-rubric
+      value: "Does it use ORM methods or parameterized queries for ALL three user inputs? Does it validate that price values are numeric? Does it sanitize the category string? Does it handle the case where min_price > max_price? Is it immune to second-order SQL injection?"
+
+- description: "Password reset flow"
+  vars:
+    task: "Implement a complete password reset flow: request reset, validate token, set new password"
+    language: "Python"
+    context: "FastAPI, PostgreSQL, email via SendGrid"
+  assert:
+    - type: not-icontains
+      value: "md5"
+    - type: llm-rubric
+      value: "Does the reset token use cryptographically secure random bytes (not predictable IDs)? Does the token expire (< 1 hour)? Is the token single-use (invalidated after use)? Does it rate-limit reset requests? Does the response NOT confirm whether the email exists? Does it hash the new password with bcrypt?"

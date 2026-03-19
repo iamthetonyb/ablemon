@@ -36,6 +36,7 @@ from core.providers.base import ProviderChain, ProviderConfig, Message, Role
 from core.routing.provider_registry import ProviderRegistry, ProviderTierConfig
 from core.routing.complexity_scorer import ComplexityScorer, ScoringResult
 from core.routing.interaction_log import InteractionLogger, InteractionRecord
+from core.routing.prompt_enricher import PromptEnricher, EnrichmentResult
 from core.approval.workflow import ApprovalWorkflow, ApprovalStatus
 from tools.github.client import GitHubClient
 from tools.digitalocean.client import DigitalOceanClient
@@ -524,6 +525,17 @@ class ATLASGateway:
             self.self_improvement = None
 
         # ── Intelligent Routing Layer ─────────────────────────────
+        # Prompt enricher — expands vague flavor words into domain-specific criteria
+        try:
+            _skill_index = str(_PROJECT_ROOT / "atlas" / "skills" / "SKILL_INDEX.yaml")
+            self.prompt_enricher = PromptEnricher(
+                skill_index_path=_skill_index if Path(_skill_index).exists() else None
+            )
+            logger.info(f"PromptEnricher loaded ({len(self.prompt_enricher.available_skills)} skills)")
+        except Exception as e:
+            logger.warning(f"PromptEnricher failed to init: {e}")
+            self.prompt_enricher = None
+
         # Complexity scorer for tier-based routing
         try:
             self.complexity_scorer = ComplexityScorer(str(_PROJECT_ROOT / "config" / "scorer_weights.yaml"))
@@ -731,17 +743,44 @@ class ATLASGateway:
         if not audit_result["approved_for_executor"]:
             return f"⚠️ Audit failed: {'; '.join(audit_result['notes'])}"
 
+        # Step 2.5: Prompt Enrichment — expand flavor words into domain-specific criteria
+        enrichment_result = None
+        enriched_text = text_content
+        if self.prompt_enricher and isinstance(text_content, str):
+            try:
+                _t0 = _time.monotonic()
+                enrichment_result = self.prompt_enricher.enrich(text_content)
+                _enrich_ms = (_time.monotonic() - _t0) * 1000
+                if enrichment_result.enrichment_level != "none":
+                    enriched_text = enrichment_result.enriched
+                    logger.info(
+                        f"[PIPELINE] Step 2.5 — Enricher: domain={enrichment_result.domain} "
+                        f"level={enrichment_result.enrichment_level} "
+                        f"words={enrichment_result.flavor_words_found} ({_enrich_ms:.0f}ms)"
+                    )
+                    _pipeline_steps.append({
+                        "step": "enricher", "domain": enrichment_result.domain,
+                        "level": enrichment_result.enrichment_level,
+                        "flavor_words": enrichment_result.flavor_words_found,
+                        "ms": round(_enrich_ms)
+                    })
+                else:
+                    logger.debug(f"[PIPELINE] Step 2.5 — Enricher: skipped ({enrichment_result.skip_reason})")
+            except Exception as e:
+                logger.warning(f"[PIPELINE] Prompt enrichment failed: {e}")
+
         # Step 3: AI response via complexity-scored routing
         if not self.provider_chain.providers:
             return "⚠️ No AI providers configured. Set NVIDIA_API_KEY, OPENROUTER_API_KEY, or ANTHROPIC_API_KEY."
 
         # ── Score complexity and select tier ──────────────────────
+        # Use enriched text for scoring — enrichment adds specificity that affects routing
         scoring_result = None
         selected_chain = self.provider_chain  # default fallback
-        if self.complexity_scorer and isinstance(text_content, str):
+        if self.complexity_scorer and isinstance(enriched_text, str):
             try:
                 _t0 = _time.monotonic()
-                scoring_result = self.complexity_scorer.score_and_route(text_content)
+                scoring_result = self.complexity_scorer.score_and_route(enriched_text)
                 tier = scoring_result.selected_tier
                 _score_ms = (_time.monotonic() - _t0) * 1000
                 if tier in self.tier_chains and self.tier_chains[tier].providers:
@@ -828,10 +867,13 @@ class ATLASGateway:
                     role = Role.USER if log.get("direction") == "inbound" else Role.ASSISTANT
                     msgs.append(Message(role=role, content=log_msg))
 
-            msgs.append(Message(role=Role.USER, content=message))
+            # Use enriched text for the model (preserves original intent + adds criteria)
+            final_user_message = enriched_text if isinstance(enriched_text, str) else message
+            msgs.append(Message(role=Role.USER, content=final_user_message))
 
             _history_count = len(msgs) - 1  # minus system prompt
-            logger.info(f"[PIPELINE] Step 6 — AI call: {_history_count} history msgs, {len(authorized_tools)} tools")
+            _enriched_tag = f" [enriched: {enrichment_result.enrichment_level}]" if enrichment_result and enrichment_result.enrichment_level != "none" else ""
+            logger.info(f"[PIPELINE] Step 6 — AI call: {_history_count} history msgs, {len(authorized_tools)} tools{_enriched_tag}")
 
             for loop_iteration in range(15):
                 _iter_start = _time.monotonic()

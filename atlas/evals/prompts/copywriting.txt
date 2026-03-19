@@ -6,6 +6,8 @@ RULES:
 - Apply NLP meta-programs matched to the audience
 - Use AIDA, PAS, or FAB framework as appropriate
 - Include a clear CTA
+- CRITICAL: Stay within the word count specified. If no count is given, keep it under 150 words. Brevity is power — cut ruthlessly.
+- Output ONLY the final copy. No thinking, planning, or meta-commentary.
 
 Write copy for the following:
 

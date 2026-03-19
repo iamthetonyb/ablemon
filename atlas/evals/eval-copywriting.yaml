@@ -1,0 +1,43 @@
+# Copywriting Skill Eval — 7 tests × 3 providers = 21 API calls
+# Run: cd atlas/evals && npx promptfoo@latest eval -c eval-copywriting.yaml
+
+description: "ATLAS Copywriting Skill — T1 vs T2 vs T4"
+
+providers:
+  - id: openai:chat:nvidia/nemotron-3-super-120b-a12b:free
+    config:
+      apiBaseUrl: https://openrouter.ai/api/v1
+      apiKeyEnvar: OPENROUTER_API_KEY
+      temperature: 0.7
+    label: "T1 (Nemotron 120B)"
+
+  - id: openai:chat:xiaomi/mimo-v2-pro
+    config:
+      apiBaseUrl: https://openrouter.ai/api/v1
+      apiKeyEnvar: OPENROUTER_API_KEY
+      temperature: 0.7
+    label: "T2 (MiMo-V2-Pro)"
+
+  - id: openai:chat:anthropic/claude-sonnet-4.6
+    config:
+      apiBaseUrl: https://openrouter.ai/api/v1
+      apiKeyEnvar: OPENROUTER_API_KEY
+      temperature: 0.7
+    label: "T4 (Sonnet 4.6)"
+
+# Grading provider for llm-rubric assertions
+# Default: Sonnet 4.6 (consistent quality ranking for distillation)
+# Strict mode: swap to GPT 5.4 mini via run-evals.sh --strict
+defaultTest:
+  options:
+    provider:
+      id: openai:chat:anthropic/claude-sonnet-4.6
+      config:
+        apiBaseUrl: https://openrouter.ai/api/v1
+        apiKeyEnvar: OPENROUTER_API_KEY
+
+prompts:
+  - file://prompts/copywriting.txt
+
+tests:
+  - file://tests/copywriting-tests.yaml
