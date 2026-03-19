@@ -11,8 +11,8 @@
 # Legacy: Qwen3.5 + OpenAI OAuth as secondary fallbacks
 
 providers:
-  # ── Tier 1: Default ──────────────────────────────────────────
-  - name: "nemotron-3-super"
+  # ── Tier 1: Primary — NVIDIA NIM (free, unlogged) ─────────────
+  - name: "nemotron-3-super-nim"
     tier: 1
     provider_type: "nvidia_nim"
     endpoint: "https://integrate.api.nvidia.com/v1"
@@ -24,10 +24,30 @@ providers:
     supports_vision: false
     throughput_tps: 80
     enabled: true
-    fallback_to: "qwen3.5-openrouter"
+    fallback_to: "nemotron-120b-openrouter"
     api_key_env: "NVIDIA_API_KEY"
 
-  # ── Tier 1 Legacy Fallback ───────────────────────────────────
+  # ── Tier 1: Fallback — Nemotron 120B via OpenRouter (free) ────
+  # 120B total / 12B active MoE — Mamba-Transformer hybrid
+  # Free tier logs prompts; don't use for sensitive client work
+  - name: "nemotron-120b-openrouter"
+    tier: 1
+    provider_type: "openrouter"
+    endpoint: "https://openrouter.ai/api/v1"
+    model_id: "nvidia/nemotron-3-super-120b-a12b:free"
+    cost_per_m_input: 0.00
+    cost_per_m_output: 0.00
+    max_context: 262144
+    supports_tools: true
+    supports_vision: false
+    throughput_tps: 60
+    enabled: true
+    fallback_to: "qwen3.5-openrouter"
+    api_key_env: "OPENROUTER_API_KEY"
+    extra:
+      timeout: 600.0
+
+  # ── Tier 1: Second Fallback — Qwen 3.5 (paid) ────────────────
   - name: "qwen3.5-openrouter"
     tier: 1
     provider_type: "openrouter"

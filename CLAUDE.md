@@ -15,7 +15,7 @@ ATLAS uses a **complexity-scored 4-tier routing system** (see `docs/ROUTING.md` 
 
 | Score | Tier | Provider | Cost |
 |-------|------|----------|------|
-| < 0.4 | 1 | Nemotron 3 Super (NVIDIA NIM) | Free |
+| < 0.4 | 1 | Nemotron 49B (NIM) → 120B (OpenRouter) → Qwen 3.5 | Free → Free → $0.60/$3 |
 | 0.4–0.7 | 2 | MiMo-V2-Pro (OpenRouter) | $1/$3 per M |
 | > 0.7 | 4 | Claude Opus 4.6 (budget-gated) | $15/$75 per M |
 | background | 3 | MiniMax M2.7 (evolution daemon only) | $0.30/$1.20 per M |
