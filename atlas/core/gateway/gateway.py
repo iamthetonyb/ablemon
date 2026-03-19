@@ -38,10 +38,17 @@ from tools.vercel.client import VercelClient
 from scheduler.cron import CronScheduler
 from core.gateway.initiative import InitiativeEngine
 from memory.hybrid_memory import HybridMemory, MemoryType
-from core.auth.manager import AuthManager
-from core.providers.openai_oauth import OpenAIChatGPTProvider, OpenAIOAuthProvider
 
 logger = logging.getLogger(__name__)
+
+try:
+    from core.auth.manager import AuthManager
+    from core.providers.openai_oauth import OpenAIChatGPTProvider, OpenAIOAuthProvider
+    _AUTH_AVAILABLE = True
+except ImportError as _auth_err:
+    _AUTH_AVAILABLE = False
+    AuthManager = None
+    logger.warning(f"Auth module unavailable (missing dependency: {_auth_err}). OAuth features disabled.")
 
 # ── Studio Dashboard Integration ──────────────────────────────────────────────
 
@@ -387,8 +394,11 @@ class ATLASGateway:
         # Initialize agents
         self._init_agents()
         
-        # Initialize Auth Manager
-        self.auth_manager = AuthManager()
+        # Initialize Auth Manager (optional — depends on cryptography package)
+        if _AUTH_AVAILABLE:
+            self.auth_manager = AuthManager()
+        else:
+            self.auth_manager = None
 
         # Initialize approval workflow
         self.approval_workflow = ApprovalWorkflow(
@@ -471,7 +481,7 @@ class ATLASGateway:
             chain = self.provider_registry.build_provider_chain()
 
             # Also inject OpenAI OAuth if authenticated (not in registry — BYOK)
-            if hasattr(self, 'auth_manager') and self.auth_manager.is_authenticated('openai_oauth'):
+            if _AUTH_AVAILABLE and self.auth_manager and self.auth_manager.is_authenticated('openai_oauth'):
                 try:
                     oauth_provider = OpenAIChatGPTProvider(
                         config=ProviderConfig(model="gpt-5.4"),
@@ -501,7 +511,7 @@ class ATLASGateway:
             except Exception as e:
                 logger.warning(f"Failed to init NVIDIA NIM provider: {e}")
 
-        if hasattr(self, 'auth_manager') and self.auth_manager.is_authenticated('openai_oauth'):
+        if _AUTH_AVAILABLE and self.auth_manager and self.auth_manager.is_authenticated('openai_oauth'):
             try:
                 providers.append(OpenAIChatGPTProvider(
                     config=ProviderConfig(model="gpt-5.4"),

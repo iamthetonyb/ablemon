@@ -36,3 +36,9 @@ croniter>=2.0.0
 
 # Anthropic SDK (for claude provider)
 anthropic>=0.18.0
+
+# Encryption (for OAuth token storage)
+cryptography>=42.0.0
+
+# Environment variable loading
+python-dotenv>=1.0.0
