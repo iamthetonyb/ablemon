@@ -454,18 +454,18 @@ class ATLASGateway:
         self.client_registry = ClientRegistry()
         self.transcript_manager = ClientTranscriptManager()
 
-        # Setup core
-        self.provider_chain = self._init_providers()
-        self.vision_chain = self._init_vision_providers()
-
-        # Initialize agents
-        self._init_agents()
-        
         # Initialize Auth Manager (optional — depends on cryptography package)
         if _AUTH_AVAILABLE:
             self.auth_manager = AuthManager()
         else:
             self.auth_manager = None
+
+        # Setup core (after auth_manager — providers may check OAuth)
+        self.provider_chain = self._init_providers()
+        self.vision_chain = self._init_vision_providers()
+
+        # Initialize agents
+        self._init_agents()
 
         # Initialize approval workflow
         self.approval_workflow = ApprovalWorkflow(
