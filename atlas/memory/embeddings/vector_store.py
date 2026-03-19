@@ -151,12 +151,15 @@ class VectorStore:
             print(f"OpenAI embedding error: {e}")
             return self._simple_embedding(text)
 
+    _st_model = None  # Class-level cache for SentenceTransformer
+
     def _local_embedding(self, text: str) -> Optional[List[float]]:
         """Get embedding from local model (e.g., sentence-transformers)"""
         try:
-            from sentence_transformers import SentenceTransformer
-            model = SentenceTransformer('all-MiniLM-L6-v2')
-            embedding = model.encode(text, convert_to_numpy=True).tolist()
+            if VectorStore._st_model is None:
+                from sentence_transformers import SentenceTransformer
+                VectorStore._st_model = SentenceTransformer('all-MiniLM-L6-v2')
+            embedding = VectorStore._st_model.encode(text, convert_to_numpy=True).tolist()
             return embedding
         except ImportError:
             return self._simple_embedding(text)

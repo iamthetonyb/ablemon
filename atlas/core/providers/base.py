@@ -332,9 +332,14 @@ class ProviderChain:
                         break  # Try next provider
 
                 except Exception as e:
+                    import traceback
                     error = ProviderError(provider.name, str(e), retryable=False)
                     errors.append(error)
-                    logger.error(f"Unexpected error from {provider.name}: {e}")
+                    logger.error(
+                        f"Unexpected error from {provider.name} "
+                        f"(model={provider.config.model}): {type(e).__name__}: {e}\n"
+                        f"{traceback.format_exc()}"
+                    )
                     break  # Try next provider
 
         raise AllProvidersFailedError(errors)

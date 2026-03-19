@@ -24,7 +24,7 @@ class SQLiteStore:
         import zstandard as zstd
         self.compressor = zstd.ZstdCompressor(level=3)
         self.decompressor = zstd.ZstdDecompressor()
-        self._init_db()
+        self._safe_init_db()
 
     def _compress(self, text: str) -> bytes:
         return self.compressor.compress(text.encode('utf-8'))
@@ -39,6 +39,28 @@ class SQLiteStore:
             if isinstance(data, bytes):
                 return data.decode('utf-8', errors='replace')
             return str(data)
+
+    def _safe_init_db(self):
+        """Initialize DB with corruption recovery."""
+        try:
+            self._init_db()
+        except sqlite3.DatabaseError as e:
+            if "malformed" in str(e) or "corrupt" in str(e):
+                import logging
+                logging.getLogger(__name__).warning(
+                    f"Corrupted memory DB detected, backing up and recreating: {e}"
+                )
+                backup = self.db_path.with_suffix(".db.corrupted")
+                if self.db_path.exists():
+                    self.db_path.rename(backup)
+                # Also remove WAL/SHM files if present
+                for ext in (".db-wal", ".db-shm"):
+                    p = self.db_path.with_name(self.db_path.name + ext.replace(".db", ""))
+                    if p.exists():
+                        p.unlink()
+                self._init_db()
+            else:
+                raise
 
     def _init_db(self):
         """Initialize database schema"""
@@ -85,6 +107,8 @@ class SQLiteStore:
         """Context manager for database connections"""
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
         try:
             yield conn
         finally:

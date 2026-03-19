@@ -67,10 +67,23 @@ except ImportError as _auth_err:
 STUDIO_BASE_URL = os.environ.get("ATLAS_STUDIO_URL", "http://localhost:3000")
 ATLAS_SERVICE_TOKEN = os.environ.get("ATLAS_SERVICE_TOKEN", "")
 
+# Shared session for dashboard API calls (avoids creating a new TCP connection per call)
+_studio_session: Optional["aiohttp.ClientSession"] = None
+
+async def _get_studio_session() -> "aiohttp.ClientSession":
+    """Get or create a shared aiohttp session for dashboard API calls."""
+    import aiohttp
+    global _studio_session
+    if _studio_session is None or _studio_session.closed:
+        _studio_session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5))
+    return _studio_session
+
 # ── Model short names for response tags ──────────────────────────────────────
 MODEL_SHORT_NAMES = {
-    "nvidia/llama-3.3-nemotron-super-49b-v1": "Nemotron 3 Super",
+    "nvidia/nemotron-3-super-120b-a12b": "Nemotron 120B",
+    "nvidia/llama-3.3-nemotron-super-49b-v1": "Nemotron 49B",
     "qwen/qwen3.5-397b-a17b": "Qwen 3.5",
+    "nvidia/nemotron-3-super-120b-a12b:free": "Nemotron 120B (OR)",
     "xiaomi/mimo-v2-pro": "MiMo-V2-Pro",
     "minimax/minimax-m2.7": "MiniMax M2.7",
     "claude-opus-4-6": "Claude Opus",
@@ -88,40 +101,37 @@ async def fetch_authorized_tools(org_id: str = None) -> List[Dict]:
 
     Falls back to full ATLAS_TOOL_DEFS if dashboard is unreachable.
     """
-    import aiohttp
-
     try:
         url = f"{STUDIO_BASE_URL}/api/settings"
         if org_id:
             url += f"?org_id={org_id}"
 
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
-            async with session.get(url) as resp:
-                if resp.status != 200:
-                    logger.warning(f"Studio settings endpoint returned {resp.status}, using all tools")
-                    return ATLAS_TOOL_DEFS
+        session = await _get_studio_session()
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                logger.warning(f"Studio settings endpoint returned {resp.status}, using all tools")
+                return ATLAS_TOOL_DEFS
 
-                data = await resp.json()
-                tool_settings = data.get("tools", {})
+            data = await resp.json()
+            tool_settings = data.get("tools", {})
 
-                if not tool_settings:
-                    return ATLAS_TOOL_DEFS
+            if not tool_settings:
+                return ATLAS_TOOL_DEFS
 
-                # Filter: only include tools that are enabled in the dashboard
-                authorized = []
-                for tool_def in ATLAS_TOOL_DEFS:
-                    tool_name = tool_def["function"]["name"]
-                    setting = tool_settings.get(tool_name)
+            # Filter: only include tools that are enabled in the dashboard
+            authorized = []
+            for tool_def in ATLAS_TOOL_DEFS:
+                tool_name = tool_def["function"]["name"]
+                setting = tool_settings.get(tool_name)
 
-                    if setting is None:
-                        # Tool not in dashboard — include by default
-                        authorized.append(tool_def)
-                    elif setting.get("enabled", True):
-                        authorized.append(tool_def)
-                    else:
-                        logger.info(f"Tool '{tool_name}' disabled via dashboard — removed from agent")
+                if setting is None:
+                    authorized.append(tool_def)
+                elif setting.get("enabled", True):
+                    authorized.append(tool_def)
+                else:
+                    logger.info(f"Tool '{tool_name}' disabled via dashboard — removed from agent")
 
-                return authorized
+            return authorized
 
     except Exception as e:
         logger.debug(f"Could not reach Studio dashboard ({e}), using all tools")
@@ -137,19 +147,17 @@ async def fetch_client_keys(org_id: str) -> dict:
 
     Returns: { anthropic_api_key, openrouter_api_key, config: { ... } }
     """
-    import aiohttp
-
     try:
         url = f"{STUDIO_BASE_URL}/api/clients/keys?org_id={org_id}"
         headers = {}
         if ATLAS_SERVICE_TOKEN:
             headers["x-atlas-service-token"] = ATLAS_SERVICE_TOKEN
 
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
-            async with session.get(url, headers=headers) as resp:
-                if resp.status != 200:
-                    return {}
-                return await resp.json()
+        session = await _get_studio_session()
+        async with session.get(url, headers=headers) as resp:
+            if resp.status != 200:
+                return {}
+            return await resp.json()
 
     except Exception as e:
         logger.debug(f"Could not fetch client keys ({e})")
@@ -161,12 +169,10 @@ async def post_audit_log(entry: dict):
     Post an audit log entry to the dashboard for the semantic viewer.
     Non-blocking — failures are logged but don't break the pipeline.
     """
-    import aiohttp
-
     try:
         url = f"{STUDIO_BASE_URL}/api/audit"
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
-            await session.post(url, json=entry)
+        session = await _get_studio_session()
+        await session.post(url, json=entry)
     except Exception:
         pass  # Dashboard logging is best-effort
 
@@ -686,19 +692,31 @@ class ATLASGateway:
         Input → Scanner → Auditor → Trust Gate → AI (ProviderChain) → Tool dispatch
         """
 
+        import time as _time
+        _pipeline_start = _time.monotonic()
+
         # Extract textual content from multimodal list for security scanning
         text_content = message
         if isinstance(message, list):
             text_content = next((item.get("text", "") for item in message if item.get("type") == "text"), "")
 
+        _msg_preview = (text_content[:80] + "...") if isinstance(text_content, str) and len(text_content) > 80 else text_content
+        logger.info(f"[PIPELINE] ── START ── user={user_id} client={client_id} msg={_msg_preview!r}")
+
         # Step 1: Scanner (read-only analysis)
+        _t0 = _time.monotonic()
         scan_result = await self.scanner.process(text_content, metadata or {})
+        _scan_ms = (_time.monotonic() - _t0) * 1000
+        logger.info(f"[PIPELINE] Step 1 — Scanner: passed={scan_result['security_verdict']['passed']} ({_scan_ms:.0f}ms)")
 
         if not scan_result["security_verdict"]["passed"]:
             return f"⚠️ Security check failed: {scan_result['blocked_reason']}"
 
         # Step 2: Auditor (validation)
+        _t0 = _time.monotonic()
         audit_result = await self.auditor.process(scan_result)
+        _audit_ms = (_time.monotonic() - _t0) * 1000
+        logger.info(f"[PIPELINE] Step 2 — Auditor: approved={audit_result['approved_for_executor']} ({_audit_ms:.0f}ms)")
 
         if not audit_result["approved_for_executor"]:
             return f"⚠️ Audit failed: {'; '.join(audit_result['notes'])}"
@@ -712,16 +730,20 @@ class ATLASGateway:
         selected_chain = self.provider_chain  # default fallback
         if self.complexity_scorer and isinstance(text_content, str):
             try:
+                _t0 = _time.monotonic()
                 scoring_result = self.complexity_scorer.score_and_route(text_content)
                 tier = scoring_result.selected_tier
+                _score_ms = (_time.monotonic() - _t0) * 1000
                 if tier in self.tier_chains and self.tier_chains[tier].providers:
                     selected_chain = self.tier_chains[tier]
-                    logger.info(
-                        f"Routed to tier {tier} (score={scoring_result.score:.3f}, "
-                        f"domain={scoring_result.domain})"
-                    )
+                _chain_names = [p.name for p in selected_chain.providers[:4]]
+                logger.info(
+                    f"[PIPELINE] Step 3 — Routing: score={scoring_result.score:.3f} "
+                    f"tier={tier} domain={scoring_result.domain} "
+                    f"chain={_chain_names} ({_score_ms:.0f}ms)"
+                )
             except Exception as e:
-                logger.warning(f"Complexity scoring failed, using default chain: {e}")
+                logger.warning(f"[PIPELINE] Complexity scoring failed, using default chain: {e}")
 
         # ── Pre-log interaction record (fill result after completion) ──
         interaction_id = None
@@ -748,19 +770,26 @@ class ATLASGateway:
 
         try:
             # ── Dashboard-driven tool authorization ──
-            # Fetch which tools are enabled from atlas-studio dashboard
+            _t0 = _time.monotonic()
             authorized_tools = await fetch_authorized_tools(client_id)
+            _auth_ms = (_time.monotonic() - _t0) * 1000
+            logger.info(f"[PIPELINE] Step 4 — Tool auth: {len(authorized_tools)} tools authorized ({_auth_ms:.0f}ms)")
 
             active_system_prompt = ATLAS_SYSTEM_PROMPT
 
             # Inject memory context if available
             if hasattr(self, 'memory') and self.memory:
                 try:
+                    _t0 = _time.monotonic()
                     recalled_context = self.memory.get_context_for_agent(objective=text_content, client_id=client_id)
+                    _mem_ms = (_time.monotonic() - _t0) * 1000
                     if recalled_context:
                         active_system_prompt += f"\n\n## Recalled Context from Hybrid Memory\n{recalled_context}"
+                        logger.info(f"[PIPELINE] Step 5 — Memory recall: {len(recalled_context)} chars injected ({_mem_ms:.0f}ms)")
+                    else:
+                        logger.info(f"[PIPELINE] Step 5 — Memory recall: no relevant context ({_mem_ms:.0f}ms)")
                 except Exception as e:
-                    logger.warning(f"Failed to fetch memory context: {e}")
+                    logger.warning(f"[PIPELINE] Memory recall failed: {e}")
 
             msgs = [Message(role=Role.SYSTEM, content=active_system_prompt)]
             
@@ -783,7 +812,11 @@ class ATLASGateway:
 
             msgs.append(Message(role=Role.USER, content=message))
 
+            _history_count = len(msgs) - 1  # minus system prompt
+            logger.info(f"[PIPELINE] Step 6 — AI call: {_history_count} history msgs, {len(authorized_tools)} tools")
+
             for loop_iteration in range(15):
+                _iter_start = _time.monotonic()
                 # Route to a vision-capable provider if message is multimodal (only needed for first pass)
                 if isinstance(message, list) and loop_iteration == 0:
                     result = await self.vision_chain.complete(
@@ -815,6 +848,16 @@ class ATLASGateway:
                         temperature=0.60,
                         top_p=0.95,
                     )
+
+                _iter_ms = (_time.monotonic() - _iter_start) * 1000
+                _provider_name = getattr(result, 'provider', '?')
+                _model_name = getattr(result, 'model', '?')
+                _tok = result.usage.total_tokens if hasattr(result, 'usage') and result.usage else 0
+                _tool_names = [tc.name for tc in result.tool_calls] if result.tool_calls else []
+                logger.info(
+                    f"[PIPELINE] Iter {loop_iteration} — provider={_provider_name} model={_model_name} "
+                    f"tokens={_tok} tools={_tool_names} ({_iter_ms:.0f}ms)"
+                )
 
                 # Step 4: Tool dispatch if AI called a tool
                 if result.tool_calls:
@@ -849,7 +892,12 @@ class ATLASGateway:
                         ))
                     continue
 
+                _total_ms = (_time.monotonic() - _pipeline_start) * 1000
                 final_text = result.content or "⚠️ ATLAS exceeded the maximum internal thinking steps (15 turns)."
+                logger.info(
+                    f"[PIPELINE] ── DONE ── provider={_provider_name} iterations={loop_iteration + 1} "
+                    f"total={_total_ms:.0f}ms"
+                )
                 # Save to HybridMemory
                 if hasattr(self, 'memory') and self.memory:
                     try:
@@ -882,6 +930,10 @@ class ATLASGateway:
                         "input_tokens": _usage.input_tokens if _usage else 0,
                         "output_tokens": _usage.output_tokens if _usage else 0,
                         "duration_ms": getattr(result, 'latency_ms', 0),
+                        "pipeline_total_ms": round(_total_ms),
+                        "complexity_score": scoring_result.score if scoring_result else None,
+                        "selected_tier": scoring_result.selected_tier if scoring_result else None,
+                        "domain": scoring_result.domain if scoring_result else None,
                         "severity": "info",
                         "status": "completed",
                         "org_id": client_id,
