@@ -15,7 +15,7 @@ Design principles:
 import re
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,8 @@ class EnrichmentResult:
     flavor_words_found: List[str]
     criteria_added: List[str]
     enrichment_level: str  # "none", "light", "standard", "deep"
+    output_spec: Optional[Dict] = None  # token budget, format, structure
+    memory_applied: List[str] = field(default_factory=list)
     skip_reason: Optional[str] = None
 
 
@@ -366,6 +368,166 @@ FLAVOR_EXPANSIONS: Dict[str, Dict[str, str]] = {
     },
 }
 
+# ── Output Steering (token budget, format, structure per domain) ──
+
+OUTPUT_SPECS: Dict[str, Dict] = {
+    "code": {
+        "token_budget": "800-2000",
+        "format": "fenced code blocks with language tags",
+        "structure": [
+            "Brief explanation of approach (2-3 sentences max)",
+            "Complete implementation code",
+            "Usage example if non-obvious",
+        ],
+        "anti_laziness": [
+            "Write the COMPLETE implementation — no placeholder comments like '# TODO' or '# add logic here'",
+            "Include all imports and type annotations",
+            "Handle the primary error cases, not just the happy path",
+        ],
+        "output_constraints": [
+            "If a function exceeds 30 lines, extract helpers",
+            "Every public function gets a one-line docstring",
+        ],
+    },
+    "security": {
+        "token_budget": "1000-2500",
+        "format": "code with inline security comments explaining WHY each measure exists",
+        "structure": [
+            "Threat model summary (what we're defending against)",
+            "Implementation with security annotations",
+            "Configuration notes (env vars, headers, settings)",
+        ],
+        "anti_laziness": [
+            "Show ACTUAL bcrypt/hashing code, not 'hash_password(pw)' stubs",
+            "Include the REAL parameterized query syntax, not pseudo-code",
+            "Write the actual validation logic, not 'validate(input)' placeholders",
+            "Specify exact header values (e.g., 'Strict-Transport-Security: max-age=63072000')",
+        ],
+        "output_constraints": [
+            "Never output example secrets, tokens, or keys — use environment variables",
+            "Include .env.example with placeholder values if config is involved",
+        ],
+    },
+    "copywriting": {
+        "token_budget": "150-500",
+        "format": "ready-to-send copy with clear sections (subject, body, CTA)",
+        "structure": [
+            "Hook / opening line",
+            "Value proposition / body",
+            "Call to action with specific next step",
+        ],
+        "anti_laziness": [
+            "Write the ACTUAL copy, not a description of what the copy should say",
+            "Include specific numbers, proof points, or examples — not '[insert stat here]'",
+            "The CTA must be a concrete action ('Book a 15-min call' not 'reach out')",
+            "Match the exact word count constraint if one is given",
+        ],
+        "output_constraints": [
+            "No meta-commentary ('Here's a draft...' or 'This copy uses AIDA...')",
+            "Output ONLY the final deliverable text",
+            "If word count specified, stay within ±10%",
+        ],
+    },
+    "content": {
+        "token_budget": "800-2000",
+        "format": "structured production brief or content plan",
+        "structure": [
+            "Content concept / hook",
+            "Production specifications (resolution, audio, format)",
+            "Platform-specific deliverables with aspect ratios",
+            "Distribution / SEO notes",
+        ],
+        "anti_laziness": [
+            "Specify EXACT settings (e.g., '1080p60 H.264, -14 LUFS audio') not 'high quality video'",
+            "Include actual equipment recommendations if relevant, not 'professional camera'",
+            "Platform specs must be exact (1080x1920 for Reels, 1920x1080 for YouTube)",
+        ],
+        "output_constraints": [],
+    },
+    "design": {
+        "token_budget": "500-1500",
+        "format": "component code or design specification with exact values",
+        "structure": [
+            "Design decisions and rationale",
+            "Implementation with exact values (colors, spacing, fonts)",
+            "Responsive behavior across breakpoints",
+            "Accessibility notes",
+        ],
+        "anti_laziness": [
+            "Use exact hex colors (#D4AF37) not 'gold'",
+            "Specify exact spacing in px/rem (padding: 1.5rem) not 'add spacing'",
+            "Include actual font-family stacks with fallbacks",
+            "Define all interactive states (hover, focus, active, disabled)",
+        ],
+        "output_constraints": [
+            "All colors must be defined as variables/tokens",
+            "Spacing uses consistent scale (4/8/12/16/24/32/48px)",
+        ],
+    },
+    "data": {
+        "token_budget": "500-1500",
+        "format": "SQL/code with schema definitions and sample queries",
+        "structure": [
+            "Schema design with types and constraints",
+            "Query implementation",
+            "Index recommendations",
+            "Sample data or test cases",
+        ],
+        "anti_laziness": [
+            "Include actual column types and constraints (NOT NULL, UNIQUE, CHECK)",
+            "Write complete SQL — not 'SELECT relevant columns FROM table'",
+            "Include EXPLAIN ANALYZE notes for performance-critical queries",
+        ],
+        "output_constraints": [],
+    },
+    "research": {
+        "token_budget": "1000-3000",
+        "format": "structured report with citations and confidence levels",
+        "structure": [
+            "Executive summary (3-5 bullet points)",
+            "Findings organized by theme",
+            "Evidence quality assessment",
+            "Actionable recommendations ranked by impact",
+        ],
+        "anti_laziness": [
+            "Cite specific sources, not 'studies show' or 'experts say'",
+            "Quantify findings where possible — percentages, dollar amounts, timelines",
+            "Distinguish between verified facts and inferences",
+            "Flag low-confidence claims explicitly",
+        ],
+        "output_constraints": [
+            "Each claim needs a source or confidence qualifier",
+            "Recommendations must be actionable, not 'consider exploring'",
+        ],
+    },
+    "strategy": {
+        "token_budget": "1000-2500",
+        "format": "structured plan with phases, owners, and success metrics",
+        "structure": [
+            "Objective and success criteria (measurable)",
+            "Phased implementation plan",
+            "Resource requirements and dependencies",
+            "Risk matrix (probability × impact)",
+            "Decision points and go/no-go criteria",
+        ],
+        "anti_laziness": [
+            "Success metrics must be measurable ('reduce churn by 15%' not 'improve retention')",
+            "Timelines need actual durations ('2 weeks' not 'soon')",
+            "Risks must include specific mitigation actions, not just identification",
+            "Each phase needs a concrete deliverable, not just a description",
+        ],
+        "output_constraints": [],
+    },
+}
+
+# ── General anti-laziness directives (applied to all enriched prompts) ──
+
+UNIVERSAL_DIRECTIVES = [
+    "Deliver the COMPLETE output — do not truncate, summarize prematurely, or use '...' to skip content",
+    "If you reference something, include the actual content — not '[insert X here]' placeholders",
+    "Prefer concrete specifics over abstract generalities in every section",
+]
+
 # ── Skip Patterns (don't enrich these) ───────────────────────────
 
 SKIP_PATTERNS = [
@@ -425,11 +587,21 @@ class PromptEnricher:
         except Exception as e:
             logger.warning(f"[ENRICHER] Could not load skill index: {e}")
 
-    def enrich(self, message: str) -> EnrichmentResult:
+    def enrich(self, message: str, memory_context: Optional[Dict] = None) -> EnrichmentResult:
         """
         Main enrichment entry point.
 
-        Returns EnrichmentResult with the enriched prompt and metadata.
+        Applies layered enrichment that complements (not competes with) skills/tools:
+          1. Flavor word expansion — what vague quality words mean concretely
+          2. Output steering — compact format/budget/anti-laziness hints
+          3. Memory context — user prefs, project context, patterns
+          4. Skill hints — which ATLAS skills are available
+
+        Args:
+            message: The user's prompt text.
+            memory_context: Optional dict with keys:
+                user_preferences (list[str]), project_context (str),
+                known_patterns (list[str]), people (dict)
         """
         # Check if we should skip enrichment
         skip = self._should_skip(message)
@@ -450,7 +622,8 @@ class PromptEnricher:
         # Find flavor words
         flavor_words = self._find_flavor_words(message)
 
-        if not flavor_words:
+        # Early exit: nothing to enrich
+        if not flavor_words and not memory_context:
             return EnrichmentResult(
                 original=message,
                 enriched=message,
@@ -461,14 +634,47 @@ class PromptEnricher:
                 skip_reason="no flavor words detected",
             )
 
-        # Expand flavor words into domain-specific criteria
-        enriched, criteria = self._expand_flavor_words(message, flavor_words, domain)
+        enriched = message
+        criteria = []
+        output_spec = None
+        memory_applied = []
+
+        # Phase 1: Expand flavor words into domain-specific criteria
+        if flavor_words:
+            enriched, criteria = self._expand_flavor_words(enriched, flavor_words, domain)
+
+            # Phase 2: Compact output steering (format + budget + top anti-laziness rules)
+            # Kept light so skills/tools remain the primary execution driver
+            enriched, output_spec = self._build_output_steering(enriched, domain)
+
+        # Phase 3: Memory/pattern personalization (1-2 lines, not a biography)
+        if memory_context:
+            enriched, memory_applied = self._apply_memory_context(
+                enriched, domain, memory_context
+            )
+
+        # Edge case: memory provided but nothing relevant applied
+        if enriched == message:
+            return EnrichmentResult(
+                original=message,
+                enriched=message,
+                domain=domain,
+                flavor_words_found=[],
+                criteria_added=[],
+                enrichment_level="none",
+                skip_reason="no enrichment applicable",
+            )
 
         # Add skill/tool references if relevant
         enriched = self._add_skill_hints(enriched, domain)
 
-        # Determine enrichment level
-        level = "light" if len(criteria) <= 1 else "standard" if len(criteria) <= 3 else "deep"
+        # Determine enrichment level based on what was applied
+        if len(criteria) >= 3:
+            level = "deep"
+        elif len(criteria) >= 2 or (criteria and output_spec):
+            level = "standard"
+        else:
+            level = "light"
 
         result = EnrichmentResult(
             original=message,
@@ -477,12 +683,14 @@ class PromptEnricher:
             flavor_words_found=flavor_words,
             criteria_added=criteria,
             enrichment_level=level,
+            output_spec=output_spec,
+            memory_applied=memory_applied,
         )
 
         logger.info(
             f"[ENRICHER] domain={domain} words={flavor_words} "
-            f"level={level} criteria={len(criteria)} "
-            f"len_delta=+{len(enriched) - len(message)} chars"
+            f"level={level} criteria={len(criteria)} steering={output_spec is not None} "
+            f"memory={len(memory_applied)} len_delta=+{len(enriched) - len(message)} chars"
         )
 
         return result
@@ -560,6 +768,74 @@ class PromptEnricher:
 
         return enriched, [f"{w} → {domain}" for w in flavor_words]
 
+    def _build_output_steering(
+        self, message: str, domain: str
+    ) -> Tuple[str, Optional[Dict]]:
+        """
+        Add compact output steering: format hint, token budget, top anti-laziness rules.
+
+        Intentionally lightweight — skills/tools own methodology and structure.
+        This just sets quality floor expectations for the model's output.
+        """
+        spec = OUTPUT_SPECS.get(domain)
+        if not spec:
+            return message, None
+
+        # One-line format + budget header
+        parts = [f"[Output: {spec['format']} | Budget: {spec['token_budget']} tokens]"]
+
+        # Top 2 anti-laziness directives (domain's most impactful rules)
+        for rule in spec.get("anti_laziness", [])[:2]:
+            parts.append(f"- {rule}")
+
+        # Top constraint if any
+        constraints = spec.get("output_constraints", [])
+        if constraints:
+            parts.append(f"- {constraints[0]}")
+
+        # Single universal directive (the most important one)
+        parts.append(f"- {UNIVERSAL_DIRECTIVES[0]}")
+
+        steering_block = "\n".join(parts)
+        return f"{message}\n{steering_block}", spec
+
+    def _apply_memory_context(
+        self, message: str, domain: str, memory_context: Dict
+    ) -> Tuple[str, List[str]]:
+        """
+        Add 1-2 lines of relevant memory context for personalization.
+
+        Kept minimal — the model should focus on the task, not the user's life story.
+        Project context and top preferences only.
+        """
+        applied = []
+        parts = []
+
+        # Project context — most useful for steering (one line)
+        project = memory_context.get("project_context")
+        if project:
+            parts.append(f"[Context: {project}]")
+            applied.append(f"project: {project[:60]}")
+
+        # Top 2 relevant preferences
+        prefs = memory_context.get("user_preferences", [])
+        if prefs:
+            pref_str = "; ".join(prefs[:2])
+            parts.append(f"[Prefs: {pref_str}]")
+            applied.extend(f"pref: {p[:60]}" for p in prefs[:2])
+
+        # Known patterns (1 line max)
+        patterns = memory_context.get("known_patterns", [])
+        if patterns:
+            parts.append(f"[Pattern: {patterns[0]}]")
+            applied.append(f"pattern: {patterns[0][:60]}")
+
+        if not parts:
+            return message, []
+
+        memory_block = "\n".join(parts)
+        return f"{message}\n{memory_block}", applied
+
     def _add_skill_hints(self, message: str, domain: str) -> str:
         """Add references to available skills/tools relevant to the domain."""
         if not self.available_skills:
@@ -587,6 +863,73 @@ class PromptEnricher:
         return message
 
 
+# ── Model-assisted deep enrichment (GPT 5.4 nano fallback) ────────
+
+DEEP_ENRICHMENT_SYSTEM = """You are a prompt optimization specialist. Enhance the user's prompt so the AI produces maximum quality output.
+
+Given the original prompt and its detected domain, add SPECIFIC quality requirements that are missing.
+
+Rules:
+- Output ONLY the additional enrichment text to append (under 150 tokens)
+- Be concrete: exact values, specific standards, measurable criteria
+- Don't repeat what's already present
+- Focus on what moves the quality needle most for this domain
+- No explanation, no meta-commentary — just the enhancement text"""
+
+
+class DeepEnricher:
+    """
+    Model-assisted enrichment for high-stakes prompts.
+
+    Called when rule-based enrichment is insufficient:
+      - Complexity score > 0.7
+      - Domain detection ambiguous
+      - Explicit user request for deep quality
+
+    Uses GPT 5.4 nano with high reasoning effort — cheap but thorough.
+    """
+
+    @staticmethod
+    async def refine(
+        result: EnrichmentResult,
+        model_call: Callable[[str, str], Awaitable[str]],
+    ) -> EnrichmentResult:
+        """
+        Refine rule-based enrichment with model intelligence.
+
+        Args:
+            result: The rule-based EnrichmentResult to refine.
+            model_call: async callable(system_prompt, user_prompt) -> str
+                        Provided by the gateway using its existing provider chain.
+        """
+        user_prompt = (
+            f"Domain: {result.domain}\n"
+            f"Original prompt: {result.original}\n"
+            f"Flavor words detected: {', '.join(result.flavor_words_found) or 'none'}\n"
+            f"Current enrichment level: {result.enrichment_level}\n\n"
+            f"Add missing quality requirements for this domain."
+        )
+
+        try:
+            model_output = await model_call(DEEP_ENRICHMENT_SYSTEM, user_prompt)
+            if model_output and model_output.strip():
+                refined = f"{result.enriched}\n[Deep enrichment:]\n{model_output.strip()}"
+                return EnrichmentResult(
+                    original=result.original,
+                    enriched=refined,
+                    domain=result.domain,
+                    flavor_words_found=result.flavor_words_found,
+                    criteria_added=result.criteria_added + ["model_refined"],
+                    enrichment_level="deep",
+                    output_spec=result.output_spec,
+                    memory_applied=result.memory_applied,
+                )
+        except Exception as e:
+            logger.warning(f"[DEEP_ENRICHER] Model refinement failed: {e}")
+
+        return result  # Fallback: return rule-based result unchanged
+
+
 # ── Convenience function for pipeline integration ─────────────────
 
 _enricher_instance: Optional[PromptEnricher] = None
@@ -600,6 +943,10 @@ def get_enricher(skill_index_path: str = None) -> PromptEnricher:
     return _enricher_instance
 
 
-def enrich_prompt(message: str, skill_index_path: str = None) -> EnrichmentResult:
+def enrich_prompt(
+    message: str,
+    skill_index_path: str = None,
+    memory_context: Optional[Dict] = None,
+) -> EnrichmentResult:
     """One-liner for pipeline integration."""
-    return get_enricher(skill_index_path).enrich(message)
+    return get_enricher(skill_index_path).enrich(message, memory_context=memory_context)

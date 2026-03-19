@@ -1,0 +1,30 @@
+# ATLAS Enricher Split Test — Diverse prompt complexity
+# Tests: simple (no enrichment), medium (1 flavor word), already-robust (skip),
+#        and multi-flavor (deep enrichment) — all compared baseline vs enriched.
+# 8 tests × 2 prompts × 1 model = 16 API calls
+
+description: "ATLAS Enricher Split — Simple/Medium/Robust/Multi-flavor"
+
+prompts:
+  - id: file://prompts/enricher-baseline.txt
+    label: "Baseline (raw)"
+  - id: file://prompts/enricher-enhanced.txt
+    label: "Enriched"
+
+providers:
+  - id: openai:chat:nvidia/nemotron-3-super-120b-a12b:free
+    config:
+      apiBaseUrl: https://openrouter.ai/api/v1
+      apiKeyEnvar: OPENROUTER_API_KEY
+      temperature: 0.7
+    label: "T1 (Nemotron 120B)"
+
+defaultTest:
+  options:
+    provider:
+      id: openai:chat:anthropic/claude-sonnet-4.6
+      config:
+        apiBaseUrl: https://openrouter.ai/api/v1
+        apiKeyEnvar: OPENROUTER_API_KEY
+
+tests: file://tests/enricher-split-tests.yaml

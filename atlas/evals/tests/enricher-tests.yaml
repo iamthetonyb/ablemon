@@ -1,0 +1,123 @@
+- assert:
+  - type: llm-rubric
+    value: Response provides COMPLETE, runnable code (not pseudocode). Includes actual password hashing implementation, parameterized queries or ORM usage, proper error handling with status codes, and no
+      TODO/placeholder comments.
+  description: 'Code: robust API with auth'
+  vars:
+    enriched_task: 'Build a robust REST API with user authentication and rate limiting
+
+
+      [Quality criteria — expand "robust" into these specifics:]
+
+      - "robust" means: with defense-in-depth architecture, OWASP Top 10 coverage, zero-trust principles, secrets rotation, rate limiting, audit trail, encryption at rest and in transit, and incident response
+      hooks
+
+      [Output: code with inline security comments explaining WHY each measure exists | Budget: 1000-2500 tokens]
+
+      - Show ACTUAL bcrypt/hashing code, not ''hash_password(pw)'' stubs
+
+      - Include the REAL parameterized query syntax, not pseudo-code
+
+      - Never output example secrets, tokens, or keys — use environment variables
+
+      - Deliver the COMPLETE output — do not truncate, summarize prematurely, or use ''...'' to skip content'
+    task: Build a robust REST API with user authentication and rate limiting
+- assert:
+  - type: llm-rubric
+    value: Response covers at least 5 OWASP Top 10 categories with specific findings. Includes concrete remediation steps (not just "fix this"). References specific technologies (bcrypt, CSP headers, etc.)
+      not just concepts.
+  description: 'Security: thorough audit'
+  vars:
+    enriched_task: 'Do a thorough security audit of our authentication system
+
+
+      [Quality criteria — expand "thorough" into these specifics:]
+
+      - "thorough" means: with full OWASP Top 10 assessment, dependency vulnerability scan, secrets detection, infrastructure review, access control audit, logging verification, incident response readiness
+      check, and compliance gap analysis
+
+      [Output: code with inline security comments explaining WHY each measure exists | Budget: 1000-2500 tokens]
+
+      - Show ACTUAL bcrypt/hashing code, not ''hash_password(pw)'' stubs
+
+      - Include the REAL parameterized query syntax, not pseudo-code
+
+      - Never output example secrets, tokens, or keys — use environment variables
+
+      - Deliver the COMPLETE output — do not truncate, summarize prematurely, or use ''...'' to skip content'
+    task: Do a thorough security audit of our authentication system
+- assert:
+  - type: llm-rubric
+    value: Response is ACTUAL ready-to-send copy, not a description of what to write. Has a subject line, opening hook, value proposition, and specific CTA. No meta-commentary like "Here is a draft" or
+      "This uses AIDA framework".
+  description: 'Copywriting: professional pitch'
+  vars:
+    enriched_task: 'Write a professional email pitch for our SaaS product launch
+
+
+      [Quality criteria — expand "professional" into these specifics:]
+
+      - "professional" means: with proper formatting (headers, bullets, whitespace), brand voice consistency, legally reviewed claims, accessibility-friendly language, and mobile-optimized structure (front-loaded
+      value, scannable)
+
+      [Output: ready-to-send copy with clear sections (subject, body, CTA) | Budget: 150-500 tokens]
+
+      - Write the ACTUAL copy, not a description of what the copy should say
+
+      - Include specific numbers, proof points, or examples — not ''[insert stat here]''
+
+      - No meta-commentary (''Here''s a draft...'' or ''This copy uses AIDA...'')
+
+      - Deliver the COMPLETE output — do not truncate, summarize prematurely, or use ''...'' to skip content'
+    task: Write a professional email pitch for our SaaS product launch
+- assert:
+  - type: llm-rubric
+    value: 'Response includes specific design values: exact colors (hex), spacing (px/rem), font families, breakpoints. Defines interactive states (hover, active). Not vague descriptions like "use modern
+      colors".'
+  description: 'Design: elegant dashboard'
+  vars:
+    enriched_task: 'Create an elegant analytics dashboard with modern UI components
+
+
+      [Quality criteria — expand "elegant, modern" into these specifics:]
+
+      - "elegant" means: with consistent 8px spacing grid, thoughtful micro-interactions, refined shadows and depth, cohesive design tokens, smooth 200-300ms transitions, and visual hierarchy that guides
+      the eye naturally
+
+      - "modern" means: with glassmorphism or subtle depth effects, variable fonts, micro-interactions, dark mode support, fluid typography (clamp-based), container queries, and motion design that enhances
+      rather than distracts
+
+      [Output: component code or design specification with exact values | Budget: 500-1500 tokens]
+
+      - Use exact hex colors (#D4AF37) not ''gold''
+
+      - Specify exact spacing in px/rem (padding: 1.5rem) not ''add spacing''
+
+      - All colors must be defined as variables/tokens
+
+      - Deliver the COMPLETE output — do not truncate, summarize prematurely, or use ''...'' to skip content'
+    task: Create an elegant analytics dashboard with modern UI components
+- assert:
+  - type: llm-rubric
+    value: Response has structured sections with specific findings. Quantifies where possible (percentages, dollar ranges). Distinguishes facts from inferences. Ends with ranked actionable recommendations,
+      not just summaries.
+  description: 'Research: comprehensive competitor analysis'
+  vars:
+    enriched_task: 'Do a comprehensive research analysis on competitor pricing strategies
+
+
+      [Quality criteria — expand "comprehensive" into these specifics:]
+
+      - "comprehensive" means: covering all major perspectives, primary and secondary sources, quantitative and qualitative data, historical context, current state, future projections, and a clear executive
+      summary with ranked recommendations
+
+      [Output: structured report with citations and confidence levels | Budget: 1000-3000 tokens]
+
+      - Cite specific sources, not ''studies show'' or ''experts say''
+
+      - Quantify findings where possible — percentages, dollar amounts, timelines
+
+      - Each claim needs a source or confidence qualifier
+
+      - Deliver the COMPLETE output — do not truncate, summarize prematurely, or use ''...'' to skip content'
+    task: Do a comprehensive research analysis on competitor pricing strategies

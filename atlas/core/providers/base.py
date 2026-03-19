@@ -10,9 +10,48 @@ from typing import List, Dict, Any, Optional, AsyncIterator, Union
 from enum import Enum
 import asyncio
 import logging
+import re
 import time
 
 logger = logging.getLogger(__name__)
+
+# ── Thinking token stripping ─────────────────────────────────────
+# Models like Nemotron, Qwen, DeepSeek emit <think>...</think> blocks
+# that contaminate the output. Strip them before returning to users.
+
+_THINK_PATTERN = re.compile(
+    r'<think>.*?</think>\s*',
+    re.DOTALL | re.IGNORECASE
+)
+_THINK_UNCLOSED = re.compile(
+    r'^(?:Thinking:?\s*|<think>).*?\n\n',
+    re.DOTALL | re.IGNORECASE
+)
+
+
+def strip_thinking_tokens(text: str) -> str:
+    """
+    Remove thinking/reasoning tokens from model output.
+
+    Handles:
+      - <think>...</think> blocks (Qwen, DeepSeek)
+      - "Thinking: ..." preambles (Nemotron)
+      - Unclosed <think> tags
+    """
+    if not text:
+        return text
+
+    # Strip closed <think>...</think> blocks
+    cleaned = _THINK_PATTERN.sub('', text)
+
+    # Strip "Thinking: ..." preamble (Nemotron pattern)
+    if cleaned.lstrip().startswith(('Thinking:', 'Thinking\n', '<think>')):
+        cleaned = _THINK_UNCLOSED.sub('', cleaned, count=1)
+
+    # Strip any remaining unclosed <think> tag at start
+    cleaned = re.sub(r'^<think>\s*', '', cleaned.strip())
+
+    return cleaned.strip()
 
 
 class ProviderError(Exception):
@@ -89,6 +128,11 @@ class CompletionResult:
             content=self.content,
             tool_calls=self.tool_calls
         )
+
+    def strip_thinking(self) -> "CompletionResult":
+        """Strip <think>...</think> tokens from model output (Nemotron, Qwen, etc.)."""
+        self.content = strip_thinking_tokens(self.content)
+        return self
 
 
 @dataclass

@@ -1,0 +1,129 @@
+- assert:
+  - type: llm-rubric
+    value: Response identifies the specific connection pool issue and provides a targeted fix. Does not over-engineer or add unnecessary abstractions.
+  description: 'Simple: fix bug (no enrichment expected)'
+  vars:
+    enriched_task: Fix the bug in server.py line 42 where the connection pool exhausts under load
+    task: Fix the bug in server.py line 42 where the connection pool exhausts under load
+- assert:
+  - type: llm-rubric
+    value: Response clearly explains the middleware flow with specific references to auth concepts (JWT, session, token validation). Structured and easy to follow.
+  description: 'Simple: explain code (no enrichment expected)'
+  vars:
+    enriched_task: Explain how the authentication middleware works in our Express app
+    task: Explain how the authentication middleware works in our Express app
+- assert:
+  - type: llm-rubric
+    value: Response provides COMPLETE runnable code with input validation, edge case handling (unicode, plus addressing, subdomains), proper error messages, and type annotations. No TODO stubs.
+  description: 'Medium: robust function (code enrichment)'
+  vars:
+    enriched_task: 'Write a robust Python function to validate and normalize email addresses
+
+
+      [Quality criteria — expand "robust" into these specifics:]
+
+      - "robust" means: using psychological profiling (NLP meta-programs), framework-driven structure (AIDA/PAS/FAB selected per context), forbidden lexicon applied, specific social proof and metrics, objection
+      handling, clear CTA with urgency mechanism, and A/B testable variants
+
+      [Output: ready-to-send copy with clear sections (subject, body, CTA) | Budget: 150-500 tokens]
+
+      - Write the ACTUAL copy, not a description of what the copy should say
+
+      - Include specific numbers, proof points, or examples — not ''[insert stat here]''
+
+      - No meta-commentary (''Here''s a draft...'' or ''This copy uses AIDA...'')
+
+      - Deliver the COMPLETE output — do not truncate, summarize prematurely, or use ''...'' to skip content'
+    task: Write a robust Python function to validate and normalize email addresses
+- assert:
+  - type: llm-rubric
+    value: Response is ACTUAL ready-to-use copy with a headline, subheadline, value props, social proof section, and specific CTA. No meta-commentary or framework labels.
+  description: 'Medium: professional landing page (copywriting enrichment)'
+  vars:
+    enriched_task: 'Write professional copy for a SaaS landing page that converts free trial signups
+
+
+      [Quality criteria — expand "professional" into these specifics:]
+
+      - "professional" means: with proper formatting (headers, bullets, whitespace), brand voice consistency, legally reviewed claims, accessibility-friendly language, and mobile-optimized structure (front-loaded
+      value, scannable)
+
+      [Output: ready-to-send copy with clear sections (subject, body, CTA) | Budget: 150-500 tokens]
+
+      - Write the ACTUAL copy, not a description of what the copy should say
+
+      - Include specific numbers, proof points, or examples — not ''[insert stat here]''
+
+      - No meta-commentary (''Here''s a draft...'' or ''This copy uses AIDA...'')
+
+      - Deliver the COMPLETE output — do not truncate, summarize prematurely, or use ''...'' to skip content'
+    task: Write professional copy for a SaaS landing page that converts free trial signups
+- assert:
+  - type: llm-rubric
+    value: 'Response includes specific design values: colors (hex codes), spacing (px/rem), font choices, layout grid. Defines component structure with concrete values, not vague descriptions.'
+  description: 'Medium: clean dashboard (design enrichment)'
+  vars:
+    enriched_task: 'Design a clean analytics dashboard showing key SaaS metrics
+
+
+      [Quality criteria — expand "clean" into these specifics:]
+
+      - "clean" means: with clear structure, no unnecessary complexity, and everything in its place
+
+      [Output: SQL/code with schema definitions and sample queries | Budget: 500-1500 tokens]
+
+      - Include actual column types and constraints (NOT NULL, UNIQUE, CHECK)
+
+      - Write complete SQL — not ''SELECT relevant columns FROM table''
+
+      - Deliver the COMPLETE output — do not truncate, summarize prematurely, or use ''...'' to skip content'
+    task: Design a clean analytics dashboard showing key SaaS metrics
+- assert:
+  - type: llm-rubric
+    value: 'Response implements the exact spec: FastAPI POST endpoint, Pydantic model with validators, SQLAlchemy async, correct status codes, UUID generation. Follows the explicit requirements without
+      deviating.'
+  description: 'Already robust: detailed API spec (no enrichment expected)'
+  vars:
+    enriched_task: 'Build a FastAPI endpoint POST /api/v1/users that accepts JSON with name (str, required, 2-100 chars), email (str, valid format), role (enum: admin|user|viewer). Return 201 with user
+      object including UUID. Use SQLAlchemy async with PostgreSQL. Include Pydantic model with field validators.'
+    task: 'Build a FastAPI endpoint POST /api/v1/users that accepts JSON with name (str, required, 2-100 chars), email (str, valid format), role (enum: admin|user|viewer). Return 201 with user object including
+      UUID. Use SQLAlchemy async with PostgreSQL. Include Pydantic model with field validators.'
+- assert:
+  - type: llm-rubric
+    value: 'Response follows the exact brief: 3 paragraphs, under 120 words, references funding, mentions 40%% improvement, includes specific demo booking CTA. Direct tone with no filler.'
+  description: 'Already robust: detailed email brief (no enrichment expected)'
+  vars:
+    enriched_task: 'Write a 3-paragraph cold email (under 120 words) to VP of Engineering at Series B startups. Hook: reference their recent funding round. Value prop: our CI/CD tool cuts deploy time 40%%.
+      CTA: book a 15-min demo this week. Tone: direct, no fluff.'
+    task: 'Write a 3-paragraph cold email (under 120 words) to VP of Engineering at Series B startups. Hook: reference their recent funding round. Value prop: our CI/CD tool cuts deploy time 40%%. CTA:
+      book a 15-min demo this week. Tone: direct, no fluff.'
+- assert:
+  - type: llm-rubric
+    value: 'Response includes: complete implementation code, authentication/authorization, input validation, error handling with retry logic, rate limiting, parameterized queries, and scaling considerations
+      (stateless design, connection pooling). No placeholder stubs.'
+  description: 'Multi-flavor: robust scalable secure API (deep enrichment)'
+  vars:
+    enriched_task: 'Build a robust, scalable, and secure microservice for payment processing
+
+
+      [Quality criteria — expand "robust, scalable, secure" into these specifics:]
+
+      - "robust" means: with comprehensive error handling, input validation, type safety, edge case coverage, retry logic with exponential backoff, graceful degradation, structured logging, and defensive
+      programming patterns
+
+      - "scalable" means: with horizontal scaling capability, stateless design, connection pooling, caching strategy (Redis/CDN), async processing for heavy operations, database query optimization, and
+      load testing benchmarks
+
+      - "secure" means: with parameterized queries, bcrypt password hashing (cost ≥ 12), HTTPS enforced, CORS properly configured, security headers (CSP, HSTS, X-Frame-Options), input sanitization, output
+      encoding, and secrets in environment variables
+
+      [Output: fenced code blocks with language tags | Budget: 800-2000 tokens]
+
+      - Write the COMPLETE implementation — no placeholder comments like ''# TODO'' or ''# add logic here''
+
+      - Include all imports and type annotations
+
+      - If a function exceeds 30 lines, extract helpers
+
+      - Deliver the COMPLETE output — do not truncate, summarize prematurely, or use ''...'' to skip content'
+    task: Build a robust, scalable, and secure microservice for payment processing

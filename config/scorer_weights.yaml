@@ -10,22 +10,24 @@
 
 features:
   token_count_threshold: 2000
-  token_count_weight: 0.20
+  token_count_weight: 0.15
   requires_tools_weight: 0.15
-  requires_code_weight: 0.15
+  requires_code_weight: 0.20
   multi_step_weight: 0.20
   safety_critical_weight: 0.30
 
 # Per-domain adjustments (added to base score)
+# Tuned 2026-03-19 based on eval data: 7 under-routes on security/code prompts.
+# Security/code/financial bumped to push more complex prompts to T2.
 domain_adjustments:
   default: 0.0
-  coding: 0.05
-  security: 0.15
-  financial: 0.10
+  coding: 0.10
+  security: 0.20
+  financial: 0.15
   legal: 0.15
   production: 0.10
   creative: -0.05
-  research: 0.0
+  research: 0.05
   planning: 0.05
 
 # Tier thresholds
@@ -38,6 +40,6 @@ opus_daily_budget_usd: 15.00
 opus_monthly_budget_usd: 100.00
 
 # Version tracking (M2.7 increments on each update)
-version: 1
-last_updated: null
-updated_by: "initial"
+version: 2
+last_updated: "2026-03-19"
+updated_by: "eval-data-7-underroutes"

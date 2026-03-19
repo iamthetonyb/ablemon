@@ -151,6 +151,86 @@ def test_enrichment_convenience_function():
     print(f"  [PASS] Convenience function works")
 
 
+def test_output_steering():
+    """Enriched prompts include output steering (format, budget, anti-laziness)."""
+    enricher = PromptEnricher()
+
+    # Code domain should get code-specific steering
+    result = enricher.enrich("Build a robust REST API with authentication")
+    enriched_lower = result.enriched.lower()
+    assert "output:" in enriched_lower or "budget:" in enriched_lower
+    assert "complete" in enriched_lower  # anti-laziness directive
+    assert result.output_spec is not None
+    assert "token_budget" in result.output_spec
+    assert "anti_laziness" in result.output_spec
+    print(f"  [PASS] Code steering: budget={result.output_spec['token_budget']}")
+
+    # Security domain should get security-specific steering
+    result = enricher.enrich("Do a thorough security audit of our login system")
+    assert result.output_spec is not None
+    enriched_lower = result.enriched.lower()
+    assert "bcrypt" in enriched_lower or "parameterized" in enriched_lower
+    print(f"  [PASS] Security steering: budget={result.output_spec['token_budget']}")
+
+    # Copywriting should get copy-specific steering
+    result = enricher.enrich("Write a professional email pitch for our product launch")
+    assert result.output_spec is not None
+    enriched_lower = result.enriched.lower()
+    assert "actual copy" in enriched_lower or "meta-commentary" in enriched_lower
+    print(f"  [PASS] Copywriting steering: compact, no meta-commentary")
+
+
+def test_memory_context():
+    """Memory context gets applied for personalization."""
+    enricher = PromptEnricher()
+
+    memory = {
+        "user_preferences": ["prefers functional programming style", "uses dark mode"],
+        "project_context": "Building a SaaS for real estate agents",
+        "known_patterns": ["user typically uses Python with FastAPI"],
+    }
+
+    # Flavor words + memory = both applied
+    result = enricher.enrich("Build a robust REST API", memory_context=memory)
+    assert result.enrichment_level != "none"
+    assert len(result.memory_applied) > 0
+    assert "real estate" in result.enriched.lower() or "saas" in result.enriched.lower()
+    assert "functional" in result.enriched.lower() or "prefs:" in result.enriched.lower()
+    print(f"  [PASS] Flavor + memory: applied={len(result.memory_applied)} memories")
+
+    # Memory-only (no flavor words) — still enriches with context
+    result = enricher.enrich(
+        "Build a REST API with FastAPI endpoints for property listings",
+        memory_context=memory,
+    )
+    assert len(result.memory_applied) > 0
+    enriched_lower = result.enriched.lower()
+    assert "real estate" in enriched_lower or "saas" in enriched_lower
+    print(f"  [PASS] Memory-only: {len(result.memory_applied)} memories applied")
+
+    # No memory = no memory_applied
+    result = enricher.enrich("Build a robust REST API")
+    assert len(result.memory_applied) == 0
+    print(f"  [PASS] No memory: memory_applied is empty")
+
+
+def test_steering_stays_compact():
+    """Output steering doesn't overwhelm the original prompt."""
+    enricher = PromptEnricher()
+
+    original = "Build a robust microservice for user management"
+    result = enricher.enrich(original)
+
+    # Original preserved
+    assert original in result.enriched
+
+    # Enrichment adds reasonable overhead, not a novel
+    added_chars = len(result.enriched) - len(original)
+    assert added_chars < 1500, f"Enrichment too verbose: +{added_chars} chars"
+    assert added_chars > 50, f"Enrichment too thin: +{added_chars} chars"
+    print(f"  [PASS] Compact steering: +{added_chars} chars ({added_chars / len(original):.0%} overhead)")
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("PromptEnricher Tests")
@@ -166,6 +246,9 @@ if __name__ == "__main__":
         test_design_domain,
         test_copywriting_domain,
         test_enrichment_convenience_function,
+        test_output_steering,
+        test_memory_context,
+        test_steering_stays_compact,
     ]
 
     passed = 0

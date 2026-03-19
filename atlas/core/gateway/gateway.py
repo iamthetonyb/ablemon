@@ -36,7 +36,7 @@ from core.providers.base import ProviderChain, ProviderConfig, Message, Role
 from core.routing.provider_registry import ProviderRegistry, ProviderTierConfig
 from core.routing.complexity_scorer import ComplexityScorer, ScoringResult
 from core.routing.interaction_log import InteractionLogger, InteractionRecord
-from core.routing.prompt_enricher import PromptEnricher, EnrichmentResult
+from core.routing.prompt_enricher import PromptEnricher, EnrichmentResult, DeepEnricher
 from core.approval.workflow import ApprovalWorkflow, ApprovalStatus
 from tools.github.client import GitHubClient
 from tools.digitalocean.client import DigitalOceanClient
@@ -532,6 +532,20 @@ class ATLASGateway:
                 skill_index_path=_skill_index if Path(_skill_index).exists() else None
             )
             logger.info(f"PromptEnricher loaded ({len(self.prompt_enricher.available_skills)} skills)")
+            # Cache lightweight memory context for enricher (refreshed at init, not per-request)
+            self._enricher_memory_cache = None
+            if hasattr(self, 'memory') and self.memory:
+                try:
+                    prefs = self.memory.search("user preferences", limit=3) if hasattr(self.memory, 'search') else []
+                    project = self.memory.search("current project", limit=1) if hasattr(self.memory, 'search') else []
+                    if prefs or project:
+                        self._enricher_memory_cache = {
+                            "user_preferences": [str(p) for p in prefs[:3]] if prefs else [],
+                            "project_context": str(project[0]) if project else None,
+                        }
+                        logger.info(f"Enricher memory cache: {len(prefs)} prefs, {'yes' if project else 'no'} project")
+                except Exception as e:
+                    logger.debug(f"Enricher memory cache build failed (non-critical): {e}")
         except Exception as e:
             logger.warning(f"PromptEnricher failed to init: {e}")
             self.prompt_enricher = None
@@ -749,7 +763,11 @@ class ATLASGateway:
         if self.prompt_enricher and isinstance(text_content, str):
             try:
                 _t0 = _time.monotonic()
-                enrichment_result = self.prompt_enricher.enrich(text_content)
+                # Build lightweight memory context from cached data (no DB query per request)
+                _memory_ctx = None
+                if hasattr(self, 'memory') and self.memory and hasattr(self, '_enricher_memory_cache'):
+                    _memory_ctx = self._enricher_memory_cache
+                enrichment_result = self.prompt_enricher.enrich(text_content, memory_context=_memory_ctx)
                 _enrich_ms = (_time.monotonic() - _t0) * 1000
                 if enrichment_result.enrichment_level != "none":
                     enriched_text = enrichment_result.enriched
@@ -798,6 +816,30 @@ class ATLASGateway:
                 })
             except Exception as e:
                 logger.warning(f"[PIPELINE] Complexity scoring failed, using default chain: {e}")
+
+        # Step 3.5: Deep enrichment — model-assisted refinement for high-complexity prompts
+        # Triggers when complexity > 0.7 and rule-based enrichment was applied
+        if (scoring_result and scoring_result.score > 0.7
+                and enrichment_result and enrichment_result.enrichment_level != "none"):
+            try:
+                async def _nano_call(system: str, user: str) -> str:
+                    """Quick model call via the T4 chain for deep enrichment."""
+                    from core.providers.base import Message, Role
+                    _msgs = [Message(role=Role.SYSTEM, content=system),
+                             Message(role=Role.USER, content=user)]
+                    # Use T2 chain (cheap but capable) for enrichment refinement
+                    _chain = self.tier_chains.get(2, selected_chain)
+                    _result = await _chain.chat(_msgs)
+                    return _result.content if _result else ""
+
+                _t0 = _time.monotonic()
+                enrichment_result = await DeepEnricher.refine(enrichment_result, _nano_call)
+                enriched_text = enrichment_result.enriched
+                _deep_ms = (_time.monotonic() - _t0) * 1000
+                logger.info(f"[PIPELINE] Step 3.5 — Deep enrichment: refined via model ({_deep_ms:.0f}ms)")
+                _pipeline_steps.append({"step": "deep_enrichment", "ms": round(_deep_ms)})
+            except Exception as e:
+                logger.debug(f"[PIPELINE] Deep enrichment skipped: {e}")
 
         # ── Pre-log interaction record (fill result after completion) ──
         interaction_id = None
@@ -953,6 +995,8 @@ class ATLASGateway:
                     continue
 
                 _total_ms = (_time.monotonic() - _pipeline_start) * 1000
+                # Strip thinking tokens (<think>, "Thinking:") from model output
+                result.strip_thinking()
                 final_text = result.content or "⚠️ ATLAS exceeded the maximum internal thinking steps (15 turns)."
                 logger.info(
                     f"[PIPELINE] ── DONE ── provider={_provider_name} iterations={loop_iteration + 1} "

@@ -1,0 +1,261 @@
+- assert:
+  - type: llm-rubric
+    value: Response provides COMPLETE runnable code with actual password hashing (bcrypt), parameterized queries, proper error handling with status codes, rate limiting implementation, and no TODO/placeholder
+      comments.
+  description: 'Code: robust API'
+  vars:
+    deep_enriched_task: 'Build a robust REST API with user authentication and rate limiting
+
+
+      [Quality criteria — expand "robust" into these specifics:]
+
+      - "robust" means: with defense-in-depth architecture, OWASP Top 10 coverage, zero-trust principles, secrets rotation, rate limiting, audit trail, encryption at rest and in transit, and incident response
+      hooks
+
+      [Output: code with inline security comments explaining WHY each measure exists | Budget: 1000-2500 tokens]
+
+      - Show ACTUAL bcrypt/hashing code, not ''hash_password(pw)'' stubs
+
+      - Include the REAL parameterized query syntax, not pseudo-code
+
+      - Never output example secrets, tokens, or keys — use environment variables
+
+      - Deliver the COMPLETE output — do not truncate, summarize prematurely, or use ''...'' to skip content
+
+      [Deep enrichment:]
+
+      Specify security and testing requirements: Use HTTPS-only, JWT access+refresh tokens with rotation, short access TTL (≤15 min) and refresh TTL (≤7 days), secure cookie flags (HttpOnly, Secure, SameSite=Strict)
+      if cookies used. Implement password hashing with Argon2id (t=3, m=65536KB, parallelism=1) and unique per-user salts. Enforce RBAC/least privilege on all endpoints, validate authorization server-side
+      for every request. Add input validation with allowlists, strict schema (e.g., OpenAPI), and CSRF protection if using cookies. Mitigate common vulns: SQLi-safe parameterization, XSS encoding, no sensitive
+      data in logs; implement request/response size limits (e.g., max body 1MB). Rate limiting: per-IP and per-user, sliding window or token bucket, define quotas (e.g., 100 req/15 min per IP, 20 req/15
+      min per account) and safe 429 responses with Retry-After. Include security headers (CSP, HSTS, X-Content-Type-Options, X-Frame-Options). Provide threat model + checklist, OWASP ASVS coverage,'
+    enriched_task: 'Build a robust REST API with user authentication and rate limiting
+
+
+      [Quality criteria — expand "robust" into these specifics:]
+
+      - "robust" means: with defense-in-depth architecture, OWASP Top 10 coverage, zero-trust principles, secrets rotation, rate limiting, audit trail, encryption at rest and in transit, and incident response
+      hooks
+
+      [Output: code with inline security comments explaining WHY each measure exists | Budget: 1000-2500 tokens]
+
+      - Show ACTUAL bcrypt/hashing code, not ''hash_password(pw)'' stubs
+
+      - Include the REAL parameterized query syntax, not pseudo-code
+
+      - Never output example secrets, tokens, or keys — use environment variables
+
+      - Deliver the COMPLETE output — do not truncate, summarize prematurely, or use ''...'' to skip content'
+    task: Build a robust REST API with user authentication and rate limiting
+- assert:
+  - type: llm-rubric
+    value: Response is ACTUAL ready-to-send copy with subject line, hook, value prop, and specific CTA. No meta-commentary or framework labels. Under 200 words.
+  description: 'Copywriting: professional pitch'
+  vars:
+    deep_enriched_task: 'Write a professional email pitch for our SaaS product launch
+
+
+      [Quality criteria — expand "professional" into these specifics:]
+
+      - "professional" means: with proper formatting (headers, bullets, whitespace), brand voice consistency, legally reviewed claims, accessibility-friendly language, and mobile-optimized structure (front-loaded
+      value, scannable)
+
+      [Output: ready-to-send copy with clear sections (subject, body, CTA) | Budget: 150-500 tokens]
+
+      - Write the ACTUAL copy, not a description of what the copy should say
+
+      - Include specific numbers, proof points, or examples — not ''[insert stat here]''
+
+      - No meta-commentary (''Here''s a draft...'' or ''This copy uses AIDA...'')
+
+      - Deliver the COMPLETE output — do not truncate, summarize prematurely, or use ''...'' to skip content
+
+      [Deep enrichment:]
+
+      Include: target audience, primary pain point, desired call-to-action, and 1–2 relevant differentiators. Use clear subject line + 80–120 word email body. Use persuasive copy structure: hook (1 sentence),
+      problem (2–3 sentences), solution (2–3 sentences), proof (1 short metric/case or credible claim), offer (specific free trial/demo details), low-friction CTA (one question). Tone: confident, concise,
+      non-salesy; avoid hype words. Add personalization placeholders: {{FirstName}}, {{Company}}, {{Role}}. Include compliance: no misleading guarantees; include opt-out line. Provide two subject line options
+      and 3 alternative CTAs.'
+    enriched_task: 'Write a professional email pitch for our SaaS product launch
+
+
+      [Quality criteria — expand "professional" into these specifics:]
+
+      - "professional" means: with proper formatting (headers, bullets, whitespace), brand voice consistency, legally reviewed claims, accessibility-friendly language, and mobile-optimized structure (front-loaded
+      value, scannable)
+
+      [Output: ready-to-send copy with clear sections (subject, body, CTA) | Budget: 150-500 tokens]
+
+      - Write the ACTUAL copy, not a description of what the copy should say
+
+      - Include specific numbers, proof points, or examples — not ''[insert stat here]''
+
+      - No meta-commentary (''Here''s a draft...'' or ''This copy uses AIDA...'')
+
+      - Deliver the COMPLETE output — do not truncate, summarize prematurely, or use ''...'' to skip content'
+    task: Write a professional email pitch for our SaaS product launch
+- assert:
+  - type: llm-rubric
+    value: 'Response includes specific design values: exact colors (hex), spacing (px/rem), font families, breakpoints. Defines interactive states. Not vague like "use modern colors".'
+  description: 'Design: elegant dashboard'
+  vars:
+    deep_enriched_task: 'Create an elegant analytics dashboard with modern UI components
+
+
+      [Quality criteria — expand "elegant, modern" into these specifics:]
+
+      - "elegant" means: with consistent 8px spacing grid, thoughtful micro-interactions, refined shadows and depth, cohesive design tokens, smooth 200-300ms transitions, and visual hierarchy that guides
+      the eye naturally
+
+      - "modern" means: with glassmorphism or subtle depth effects, variable fonts, micro-interactions, dark mode support, fluid typography (clamp-based), container queries, and motion design that enhances
+      rather than distracts
+
+      [Output: component code or design specification with exact values | Budget: 500-1500 tokens]
+
+      - Use exact hex colors (#D4AF37) not ''gold''
+
+      - Specify exact spacing in px/rem (padding: 1.5rem) not ''add spacing''
+
+      - All colors must be defined as variables/tokens
+
+      - Deliver the COMPLETE output — do not truncate, summarize prematurely, or use ''...'' to skip content
+
+      [Deep enrichment:]
+
+      Use a modern dashboard design system with a consistent 8px grid, 2px border radii, and a defined spacing scale (8/16/24/32). Ensure color accessibility: meet WCAG 2.1 AA contrast for all text and
+      chart labels; no red/green-only status indicators—use icons/patterns and redundant labels. Provide a clear information hierarchy: primary KPIs at top (max 3), secondary trends below, detailed tables
+      last. Include responsive behavior for 320px, 768px, and 1440px widths with no horizontal scrolling. Specify typography (font pairing, sizes, line-heights) and consistent iconography. Add chart best
+      practices (max 5 legend items, readable axis ticks, tooltips for exact values, distinct series colors). Output should include a labeled component map (header, filters, KPIs, charts, table, footer)
+      with brief rationale for each.'
+    enriched_task: 'Create an elegant analytics dashboard with modern UI components
+
+
+      [Quality criteria — expand "elegant, modern" into these specifics:]
+
+      - "elegant" means: with consistent 8px spacing grid, thoughtful micro-interactions, refined shadows and depth, cohesive design tokens, smooth 200-300ms transitions, and visual hierarchy that guides
+      the eye naturally
+
+      - "modern" means: with glassmorphism or subtle depth effects, variable fonts, micro-interactions, dark mode support, fluid typography (clamp-based), container queries, and motion design that enhances
+      rather than distracts
+
+      [Output: component code or design specification with exact values | Budget: 500-1500 tokens]
+
+      - Use exact hex colors (#D4AF37) not ''gold''
+
+      - Specify exact spacing in px/rem (padding: 1.5rem) not ''add spacing''
+
+      - All colors must be defined as variables/tokens
+
+      - Deliver the COMPLETE output — do not truncate, summarize prematurely, or use ''...'' to skip content'
+    task: Create an elegant analytics dashboard with modern UI components
+- assert:
+  - type: llm-rubric
+    value: Structured report with specific findings, quantified data (percentages, ranges), source citations or confidence qualifiers, and ranked actionable recommendations.
+  description: 'Research: comprehensive pricing'
+  vars:
+    deep_enriched_task: 'Do a comprehensive research analysis on competitor pricing strategies
+
+
+      [Quality criteria — expand "comprehensive" into these specifics:]
+
+      - "comprehensive" means: covering all major perspectives, primary and secondary sources, quantitative and qualitative data, historical context, current state, future projections, and a clear executive
+      summary with ranked recommendations
+
+      [Output: structured report with citations and confidence levels | Budget: 1000-3000 tokens]
+
+      - Cite specific sources, not ''studies show'' or ''experts say''
+
+      - Quantify findings where possible — percentages, dollar amounts, timelines
+
+      - Each claim needs a source or confidence qualifier
+
+      - Deliver the COMPLETE output — do not truncate, summarize prematurely, or use ''...'' to skip content
+
+      [Deep enrichment:]
+
+      Include: (1) Define the target market and time horizon; (2) Identify 8–12 direct competitors and classify by business model (SaaS, marketplace, subscription, usage-based, freemium); (3) Collect pricing
+      data from at least 3 independent sources per competitor (official site, pricing pages, third-party benchmarks, product docs) and cite URLs; (4) Extract plan-level price points, packaging rules, discounts,
+      promotional periods, contract terms, and any add-ons; (5) Normalize prices into comparable metrics (e.g., $/user/month, $/seat, $/GB, effective annual price with discount assumptions); (6) Analyze
+      positioning vs value metrics using a matrix (price percentile vs features/tiers); (7) Detect patterns in discounting (bundles, annual vs monthly, volume tiers) and infer likely cost-to-serve or margin
+      constraints with explicit assumptions; (8) Provide findings with a ranked list of 5 actionable insights for pricing strategy and 2 testable hypotheses; (9) Include limitations, data gaps, and confidence
+      scores (0–1) for each major claim.'
+    enriched_task: 'Do a comprehensive research analysis on competitor pricing strategies
+
+
+      [Quality criteria — expand "comprehensive" into these specifics:]
+
+      - "comprehensive" means: covering all major perspectives, primary and secondary sources, quantitative and qualitative data, historical context, current state, future projections, and a clear executive
+      summary with ranked recommendations
+
+      [Output: structured report with citations and confidence levels | Budget: 1000-3000 tokens]
+
+      - Cite specific sources, not ''studies show'' or ''experts say''
+
+      - Quantify findings where possible — percentages, dollar amounts, timelines
+
+      - Each claim needs a source or confidence qualifier
+
+      - Deliver the COMPLETE output — do not truncate, summarize prematurely, or use ''...'' to skip content'
+    task: Do a comprehensive research analysis on competitor pricing strategies
+- assert:
+  - type: llm-rubric
+    value: Complete implementation with auth, input validation, error handling with retries, rate limiting, parameterized queries, encryption for sensitive data, and scaling design (stateless, connection
+      pool). No stubs.
+  description: 'Multi: robust scalable secure payment'
+  vars:
+    deep_enriched_task: 'Build a robust, scalable, and secure microservice for payment processing
+
+
+      [Quality criteria — expand "robust, scalable, secure" into these specifics:]
+
+      - "robust" means: with comprehensive error handling, input validation, type safety, edge case coverage, retry logic with exponential backoff, graceful degradation, structured logging, and defensive
+      programming patterns
+
+      - "scalable" means: with horizontal scaling capability, stateless design, connection pooling, caching strategy (Redis/CDN), async processing for heavy operations, database query optimization, and
+      load testing benchmarks
+
+      - "secure" means: with parameterized queries, bcrypt password hashing (cost ≥ 12), HTTPS enforced, CORS properly configured, security headers (CSP, HSTS, X-Frame-Options), input sanitization, output
+      encoding, and secrets in environment variables
+
+      [Output: fenced code blocks with language tags | Budget: 800-2000 tokens]
+
+      - Write the COMPLETE implementation — no placeholder comments like ''# TODO'' or ''# add logic here''
+
+      - Include all imports and type annotations
+
+      - If a function exceeds 30 lines, extract helpers
+
+      - Deliver the COMPLETE output — do not truncate, summarize prematurely, or use ''...'' to skip content
+
+      [Deep enrichment:]
+
+      Include: explicit tech stack constraints (e.g., Java/Spring Boot or Node/Nest; PostgreSQL; Redis; Kafka), REST/gRPC API spec with OpenAPI 3.1, idempotency keys for all payment-creation endpoints,
+      ACID transaction boundaries and exactly-once/at-least-once event semantics, and a detailed error model (HTTP codes + machine-readable error codes). Security: OWASP ASVS L2+ alignment, TLS 1.2+, OAuth2/JWT
+      w/ short-lived tokens, RBAC, secret management via Vault/KMS, input validation, SQL injection/XSS protections, CSRF strategy, secure logging (no PAN/PII). Reliability: rate limiting, circuit breakers,
+      timeouts, retries with exponential backoff + jitter, bulkheads, health/readiness endpoints, SLA targets (p95 latency <200ms for charge lookup; error rate <0.1%). Observability: structured logs, distributed
+      tracing (OpenTelemetry), metrics (Prometheus). Compliance: PCI DSS considerations and data minimization/tokenization. Provide CI/CD with security scans (SAST Snyk/Semgrep, SCA), IaC (Terraform), and
+      reproducible load/perf tests'
+    enriched_task: 'Build a robust, scalable, and secure microservice for payment processing
+
+
+      [Quality criteria — expand "robust, scalable, secure" into these specifics:]
+
+      - "robust" means: with comprehensive error handling, input validation, type safety, edge case coverage, retry logic with exponential backoff, graceful degradation, structured logging, and defensive
+      programming patterns
+
+      - "scalable" means: with horizontal scaling capability, stateless design, connection pooling, caching strategy (Redis/CDN), async processing for heavy operations, database query optimization, and
+      load testing benchmarks
+
+      - "secure" means: with parameterized queries, bcrypt password hashing (cost ≥ 12), HTTPS enforced, CORS properly configured, security headers (CSP, HSTS, X-Frame-Options), input sanitization, output
+      encoding, and secrets in environment variables
+
+      [Output: fenced code blocks with language tags | Budget: 800-2000 tokens]
+
+      - Write the COMPLETE implementation — no placeholder comments like ''# TODO'' or ''# add logic here''
+
+      - Include all imports and type annotations
+
+      - If a function exceeds 30 lines, extract helpers
+
+      - Deliver the COMPLETE output — do not truncate, summarize prematurely, or use ''...'' to skip content'
+    task: Build a robust, scalable, and secure microservice for payment processing

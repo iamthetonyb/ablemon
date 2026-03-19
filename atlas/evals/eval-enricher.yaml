@@ -1,0 +1,30 @@
+# ATLAS Enricher A/B — Same model, raw vs enriched prompt
+# Tests whether prompt enrichment produces measurably better outputs.
+# 5 tests × 2 prompts (baseline + enriched) × 1 model = 10 API calls
+# Graded by Sonnet 4.6 via llm-rubric.
+
+description: "ATLAS Enricher Quality — Baseline vs Enriched"
+
+prompts:
+  - id: file://prompts/enricher-baseline.txt
+    label: "Baseline (raw)"
+  - id: file://prompts/enricher-enhanced.txt
+    label: "Enriched"
+
+providers:
+  - id: openai:chat:nvidia/nemotron-3-super-120b-a12b:free
+    config:
+      apiBaseUrl: https://openrouter.ai/api/v1
+      apiKeyEnvar: OPENROUTER_API_KEY
+      temperature: 0.7
+    label: "T1 (Nemotron 120B)"
+
+defaultTest:
+  options:
+    provider:
+      id: openai:chat:anthropic/claude-sonnet-4.6
+      config:
+        apiBaseUrl: https://openrouter.ai/api/v1
+        apiKeyEnvar: OPENROUTER_API_KEY
+
+tests: file://tests/enricher-tests.yaml
