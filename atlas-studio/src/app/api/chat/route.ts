@@ -14,8 +14,9 @@ export async function POST(req: Request) {
     const { messages } = await req.json();
 
     const result = streamText({
-      // Utilizing the premium model requested by the user
-      model: openrouter('anthropic/claude-sonnet-4.6'),
+      // T1 model — GPT 5.4 Nano (80% quality, $0.20/$1.25 per M, 700ms avg)
+      // Sonnet 4.6 was here before — leaked $3/$15 per M on every chat message
+      model: openrouter('openai/gpt-5.4-nano'),
       messages,
       system: `You are ATLAS, the AGI Mission Control intelligence. 
 You live entirely inside this Next.js 16 command center. 

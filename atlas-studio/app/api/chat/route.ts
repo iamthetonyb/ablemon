@@ -21,7 +21,7 @@ export async function POST(req: Request) {
   }));
 
   const result = streamText({
-    model: openrouter('anthropic/claude-sonnet-4-6'),
+    model: openrouter('openai/gpt-5.4-nano'),
     messages: coreMessages,
     system: `You are ATLAS, an autonomous AGI system embedded in the ATLAS Studio control plane.
 You assist the operator with business strategy, code, deployments, and task execution.
