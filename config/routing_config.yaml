@@ -11,25 +11,44 @@
 # Legacy: Qwen3.5 + OpenAI OAuth as secondary fallbacks
 
 providers:
-  # ── Tier 1: Primary — NVIDIA NIM (free, unlogged) ─────────────
-  - name: "nemotron-3-super-nim"
+  # ── Tier 1: Primary — Nemotron 120B on NIM ────────────────────
+  # 120B total / 12B active MoE — Mamba-Transformer hybrid, 262K ctx
+  # Best-in-class for tool calling, reasoning, and agentic tasks
+  - name: "nemotron-120b-nim"
     tier: 1
     provider_type: "nvidia_nim"
     endpoint: "https://integrate.api.nvidia.com/v1"
-    model_id: "nvidia/llama-3.3-nemotron-super-49b-v1"
-    cost_per_m_input: 0.00
-    cost_per_m_output: 0.00
+    model_id: "nvidia/nemotron-3-super-120b-a12b"
+    cost_per_m_input: 0.30
+    cost_per_m_output: 0.80
+    max_context: 262144
+    supports_tools: true
+    supports_vision: false
+    throughput_tps: 60
+    enabled: true
+    fallback_to: "qwen3.5-nim"
+    api_key_env: "NVIDIA_API_KEY"
+
+  # ── Tier 1: Fallback — Qwen 3.5 on NIM (same key) ────────────
+  # 397B total / 17B active MoE — strong reasoning, 131K ctx
+  # Same NVIDIA_API_KEY, no OpenRouter tokens burned
+  - name: "qwen3.5-nim"
+    tier: 1
+    provider_type: "nvidia_nim"
+    endpoint: "https://integrate.api.nvidia.com/v1"
+    model_id: "qwen/qwen3.5-397b-a17b"
+    cost_per_m_input: 0.20
+    cost_per_m_output: 0.60
     max_context: 131072
     supports_tools: true
     supports_vision: false
-    throughput_tps: 80
+    throughput_tps: 50
     enabled: true
     fallback_to: "nemotron-120b-openrouter"
     api_key_env: "NVIDIA_API_KEY"
 
-  # ── Tier 1: Fallback — Nemotron 120B via OpenRouter (free) ────
-  # 120B total / 12B active MoE — Mamba-Transformer hybrid
-  # Free tier logs prompts; don't use for sensitive client work
+  # ── Tier 1: OpenRouter backup (free, logged) ──────────────────
+  # Only hit if both NIM models are down; saves OR credits
   - name: "nemotron-120b-openrouter"
     tier: 1
     provider_type: "openrouter"
@@ -47,7 +66,7 @@ providers:
     extra:
       timeout: 600.0
 
-  # ── Tier 1: Second Fallback — Qwen 3.5 (paid) ────────────────
+  # ── Tier 1: Last resort — Qwen 3.5 on OpenRouter (paid) ──────
   - name: "qwen3.5-openrouter"
     tier: 1
     provider_type: "openrouter"
