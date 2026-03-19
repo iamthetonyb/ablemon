@@ -22,9 +22,9 @@ ExecStart=/home/atlas/.atlas/venv/bin/python /home/atlas/.atlas/atlas/start.py
 Restart=on-failure
 RestartSec=30
 
-# Memory guard — prevent OOM on 1GB VPS (leave ~256MB for OS)
-MemoryMax=768M
-MemoryHigh=640M
+# Memory guard — prevent OOM on 2GB VPS (leave ~512MB for OS)
+MemoryMax=1536M
+MemoryHigh=1280M
 
 # Logging
 StandardOutput=journal
