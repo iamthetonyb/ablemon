@@ -81,3 +81,35 @@ GitHub Actions deploy workflow was using deprecated `actions/checkout@v4` (Node.
 **Pattern observed**: The operator prefers fixes to be pushed to GitHub immediately and deployed automatically via the CI/CD pipeline. Don't just fix locally — always push so the server updates.
 
 ---
+
+## 2026-03-19 12:00 | FAILURE ANALYSIS: "Message is too long" Telegram error
+
+**What Failed**:
+Long AI responses exceeded Telegram's 4096 character limit, causing the entire response to fail with `Message is too long`. The user got an error instead of the answer.
+
+**Root Cause**:
+`_run_pipeline()` and `_run_client_pipeline()` called `reply_text(response)` directly with no size check. Any response over 4096 chars would be rejected by Telegram API.
+
+**Prevention**:
+1. Added `_send_telegram_chunked()` helper that splits responses on paragraph boundaries (double newline → single newline → hard split) into ≤4096 char chunks
+2. Both master and client pipelines now use chunked sender
+3. Rule: NEVER send unsized text to Telegram — always go through the chunked sender
+
+---
+
+## 2026-03-19 12:00 | WIN
+**Source**: manual_session_review
+
+Added Alibaba Cloud DashScope as a Tier 1 fallback provider for Qwen 3.5. Uses OpenAI-compatible API (`https://dashscope-intl.aliyuncs.com/compatible-mode/v1`). Reused OpenRouterProvider with custom `base_url` parameter — no new provider class needed. Added to routing_config.yaml, deploy.yml (env var passthrough), and provider_registry.py (handles `dashscope` type).
+
+---
+
+## 2026-03-19 12:00 | IMPROVEMENT: Provider startup diagnostics
+
+**What Changed**:
+Added explicit logging at gateway startup showing which providers are AVAILABLE vs SKIPPED and why (missing API key, disabled, etc.). Previously, missing providers were silently skipped, making it impossible to diagnose routing issues from logs.
+
+**Why It Matters**:
+NVIDIA NIM provider was silently failing (likely missing API key or invalid model endpoint), always falling through to OpenRouter Qwen. Without startup logging, there was no way to know from the server logs.
+
+---

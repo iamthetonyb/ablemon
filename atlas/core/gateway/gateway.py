@@ -527,6 +527,13 @@ class ATLASGateway:
         config_path = _PROJECT_ROOT / "config" / "routing_config.yaml"
         if config_path.exists():
             self.provider_registry = ProviderRegistry.from_yaml(config_path)
+            # Log which providers are available vs skipped
+            for p in self.provider_registry.all_providers:
+                if p.is_available:
+                    logger.info(f"Provider AVAILABLE: {p.name} ({p.provider_type}/{p.model_id})")
+                else:
+                    reason = "disabled" if not p.enabled else f"missing env {p.api_key_env}"
+                    logger.warning(f"Provider SKIPPED: {p.name} — {reason}")
             chain = self.provider_registry.build_provider_chain()
 
             # Also inject OpenAI OAuth if authenticated (not in registry — BYOK)
@@ -1191,19 +1198,50 @@ class ATLASGateway:
                     "direction": "outbound"
                 })
 
-                # Try Markdown first, fall back to plain text if Telegram can't parse it
-                try:
-                    await update.message.reply_text(response, parse_mode="Markdown")
-                except Exception:
-                    await update.message.reply_text(response)
+                await self._send_telegram_chunked(update, response)
             except Exception as e:
                 logger.error(f"Pipeline error: {e}", exc_info=True)
                 try:
-                    await update.message.reply_text(f"⚠️ Internal error: {e}")
+                    await update.message.reply_text(f"⚠️ Internal error: {str(e)[:200]}")
                 except Exception:
                     pass
 
         asyncio.create_task(_run_pipeline())
+
+    async def _send_telegram_chunked(self, update: Update, text: str):
+        """Send a response to Telegram, splitting into chunks if >4096 chars."""
+        MAX_LEN = 4096
+        if len(text) <= MAX_LEN:
+            try:
+                await update.message.reply_text(text, parse_mode="Markdown")
+            except Exception:
+                await update.message.reply_text(text)
+            return
+
+        # Split on paragraph boundaries first, fall back to hard split
+        chunks = []
+        remaining = text
+        while remaining:
+            if len(remaining) <= MAX_LEN:
+                chunks.append(remaining)
+                break
+            # Try to split at last double-newline within limit
+            split_at = remaining.rfind("\n\n", 0, MAX_LEN)
+            if split_at == -1:
+                # Try single newline
+                split_at = remaining.rfind("\n", 0, MAX_LEN)
+            if split_at == -1 or split_at < MAX_LEN // 2:
+                # Hard split at limit
+                split_at = MAX_LEN
+            chunk = remaining[:split_at]
+            remaining = remaining[split_at:].lstrip("\n")
+            chunks.append(chunk)
+
+        for chunk in chunks:
+            try:
+                await update.message.reply_text(chunk, parse_mode="Markdown")
+            except Exception:
+                await update.message.reply_text(chunk)
 
     async def _handle_approval_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle Telegram inline button callbacks for approval workflow."""
@@ -1271,10 +1309,13 @@ class ATLASGateway:
                     "message": response,
                     "direction": "outbound"
                 })
-                await update.message.reply_text(response)
+                await self._send_telegram_chunked(update, response)
             except Exception as e:
                 logger.error(f"Client pipeline error: {e}", exc_info=True)
-                await update.message.reply_text(f"⚠️ Internal error")
+                try:
+                    await update.message.reply_text(f"⚠️ Internal error")
+                except Exception:
+                    pass
 
         asyncio.create_task(_run_client_pipeline())
 

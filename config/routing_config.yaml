@@ -40,8 +40,26 @@ providers:
     supports_vision: false
     throughput_tps: 40
     enabled: true
-    fallback_to: "mimo-v2-pro"
+    fallback_to: "qwen3.5-dashscope"
     api_key_env: "OPENROUTER_API_KEY"
+    extra:
+      timeout: 600.0
+
+  # ── Tier 1 Alibaba DashScope Fallback ──────────────────────
+  - name: "qwen3.5-dashscope"
+    tier: 1
+    provider_type: "dashscope"
+    endpoint: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    model_id: "qwen-plus"
+    cost_per_m_input: 0.80
+    cost_per_m_output: 2.00
+    max_context: 131072
+    supports_tools: true
+    supports_vision: false
+    throughput_tps: 50
+    enabled: true
+    fallback_to: "mimo-v2-pro"
+    api_key_env: "DASHSCOPE_API_KEY"
     extra:
       timeout: 600.0
 

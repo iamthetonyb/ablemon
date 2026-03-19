@@ -50,6 +50,7 @@ class OpenRouterProvider(LLMProvider):
         self,
         api_key: str,
         model: str = None,
+        base_url: str = None,
         site_url: str = "https://atlas.local",
         site_name: str = "ATLAS Agent",
         timeout: float = 120.0
@@ -59,7 +60,7 @@ class OpenRouterProvider(LLMProvider):
 
         config = ProviderConfig(
             api_key=api_key,
-            base_url=self.BASE_URL,
+            base_url=base_url or self.BASE_URL,
             model=model,
             timeout=timeout,
             cost_per_million_input=pricing["input"],

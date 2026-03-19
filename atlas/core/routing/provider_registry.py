@@ -234,12 +234,13 @@ class ProviderRegistry:
                 return None
             return NVIDIANIMProvider(api_key=key, model=config.model_id)
 
-        elif ptype == "openrouter":
+        elif ptype in ("openrouter", "dashscope"):
             if not key:
                 return None
             return OpenRouterProvider(
                 api_key=key,
                 model=config.model_id,
+                base_url=config.endpoint if config.endpoint else None,
                 timeout=config.extra.get("timeout", 600.0),
             )
 
