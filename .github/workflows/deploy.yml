@@ -131,8 +131,8 @@ jobs:
               && echo "✅ ATLAS is running" \
               || { echo "❌ ATLAS failed to start"; journalctl -u atlas -n 40 --no-pager; exit 1; }
 
-            echo "=== Startup logs (last 40 lines) ==="
-            journalctl -u atlas -n 40 --no-pager
+            echo "=== Startup logs (last 80 lines) ==="
+            journalctl -u atlas -n 80 --no-pager
 
             echo "=== OAuth provider diagnostic ==="
             sudo -u atlas /home/atlas/.atlas/venv/bin/python3 /opt/atlas/ABLE/scripts/oauth-diagnostic.py 2>&1 || echo "⚠ OAuth diagnostic failed (see output above)"
