@@ -71,7 +71,9 @@ test_payload = {
     "input": [{"role": "user", "content": "Say OK"}],
     "stream": True,
     "store": False,
+    "reasoning": {"effort": "xhigh"},
 }
+print(f"   Payload includes reasoning.effort=xhigh (matches runtime config)")
 
 headers = {
     "Authorization": f"Bearer {token}",
