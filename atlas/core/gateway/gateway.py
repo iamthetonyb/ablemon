@@ -599,18 +599,8 @@ class ATLASGateway:
                     logger.warning(f"Provider SKIPPED: {p.name} — {reason}")
             chain = self.provider_registry.build_provider_chain()
 
-            # Also inject OpenAI OAuth if authenticated (not in registry — BYOK)
-            if _AUTH_AVAILABLE and self.auth_manager and self.auth_manager.is_authenticated('openai_oauth'):
-                try:
-                    oauth_provider = OpenAIChatGPTProvider(
-                        config=ProviderConfig(model="gpt-5.4"),
-                        auth_manager=self.auth_manager
-                    )
-                    # Insert after tier 1 providers
-                    chain.providers.insert(1, oauth_provider)
-                    logger.info("Provider added: OpenAI OAuth (BYOK) via registry")
-                except Exception as e:
-                    logger.warning(f"Failed to init OpenAI OAuth provider: {e}")
+            # OpenAI OAuth is now wired through the registry (provider_type: openai_oauth)
+            # No manual injection needed — registry handles T1 Nano + T2 GPT 5.4
 
             return chain
 

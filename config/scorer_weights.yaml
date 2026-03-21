@@ -4,8 +4,8 @@
 # These weights are tunable by the M2.7 evolution daemon.
 #
 # Score mapping:
-#   < 0.4  → Tier 1 (Nemotron 3 Super)
-#   0.4-0.7 → Tier 2 (MiMo-V2-Pro)
+#   < 0.4  → Tier 1 (GPT 5.4 Nano via OpenAI OAuth)
+#   0.4-0.7 → Tier 2 (GPT 5.4 via OpenAI OAuth)
 #   > 0.7  → Tier 4 (Opus 4.6, with budget gating)
 
 features:

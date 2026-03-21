@@ -55,6 +55,13 @@ class ProviderTierConfig:
         # Ollama doesn't need a key
         if self.provider_type == "ollama":
             return True
+        # OAuth providers check auth.json, not env vars
+        if self.provider_type == "openai_oauth":
+            try:
+                from core.auth.manager import AuthManager
+                return AuthManager().is_authenticated("openai_oauth")
+            except Exception:
+                return False
         return self.api_key is not None
 
 
@@ -225,6 +232,7 @@ class ProviderRegistry:
         from core.providers.openrouter import OpenRouterProvider
         from core.providers.anthropic_provider import AnthropicProvider
         from core.providers.ollama import OllamaProvider
+        from core.providers.base import ProviderConfig
 
         key = config.api_key
         ptype = config.provider_type
@@ -254,6 +262,24 @@ class ProviderRegistry:
                 model=config.model_id,
                 base_url=config.endpoint or "http://localhost:11434",
             )
+
+        elif ptype == "openai_oauth":
+            try:
+                from core.providers.openai_oauth import OpenAIChatGPTProvider
+                from core.auth.manager import AuthManager
+                auth_mgr = AuthManager()
+                if not auth_mgr.is_authenticated("openai_oauth"):
+                    logger.warning(f"OpenAI OAuth not authenticated for {config.name}")
+                    return None
+                reasoning_effort = config.extra.get("reasoning_effort", "none")
+                return OpenAIChatGPTProvider(
+                    config=ProviderConfig(model=config.model_id),
+                    auth_manager=auth_mgr,
+                    reasoning_effort=reasoning_effort,
+                )
+            except ImportError as e:
+                logger.warning(f"OpenAI OAuth deps missing for {config.name}: {e}")
+                return None
 
         else:
             logger.warning(f"Unknown provider type: {ptype}")

@@ -22,14 +22,17 @@ User Message → ComplexityScorer → ProviderRegistry → LLM Provider
 
 | Tier | Provider | Model | Cost (in/out per M) | Use Case |
 |------|----------|-------|---------------------|----------|
-| 1 | Nemotron 3 Super | nvidia/llama-3.3-nemotron-super-49b-v1 | $0/$0 | Default — simple tasks |
-| 1 | Qwen3.5 (legacy) | qwen/qwen3.5-397b-a17b | $0.60/$3.00 | Fallback for Nemotron |
-| 2 | MiMo-V2-Pro | xiaomi/mimo-v2-pro | $1.00/$3.00 | Moderate complexity |
-| 3 | MiniMax M2.7 | minimax/minimax-m2.7 | $0.30/$1.20 | **Background-only** (evolution daemon) |
-| 4 | Claude Opus 4.6 | claude-opus-4-6 | $15.00/$75.00 | Premium — budget-gated |
+| 1 | GPT 5.4 Nano | gpt-5.4-nano (OpenAI OAuth) | $0 (sub) | Default — 70-80% of requests |
+| 1 (fallback) | Nemotron 120B | nvidia/nemotron-3-super-120b-a12b (NIM) | $0/$0 | Free fallback when Nano down |
+| 2 | GPT 5.4 | gpt-5.4 (OpenAI OAuth) | $0 (sub) | Moderate complexity |
+| 2 (fallback) | MiMo-V2-Pro | xiaomi/mimo-v2-pro (OpenRouter) | $1.00/$3.00 | GPT 5.4 fallback |
+| 3 | MiniMax M2.7 | minimax/minimax-m2.7 (OpenRouter) | $0.30/$1.20 | **Background-only** (evolution daemon) |
+| 4 | Claude Opus 4.6 | claude-opus-4-6 (Anthropic) | $15.00/$75.00 | Premium — budget-gated |
 | 5 | Ollama (local) | llama3.1 | $0/$0 | Offline fallback |
 
 **M2.7 is never user-facing.** It only runs as the evolution daemon's analysis brain.
+
+**GPT 5.4 Nano and GPT 5.4 route through OpenAI OAuth** (ChatGPT subscription), not OpenRouter or API keys. Authenticate once with `python scripts/atlas-auth.py` — tokens auto-refresh. OpenRouter is retained only for MiMo fallback and M2.7 evolution.
 
 ## Complexity Scoring
 
@@ -49,8 +52,8 @@ Plus domain-specific adjustments (security +0.15, creative -0.05, etc.)
 
 | Score | Tier | Provider |
 |-------|------|----------|
-| < 0.4 | 1 | Nemotron 3 Super |
-| 0.4 - 0.7 | 2 | MiMo-V2-Pro |
+| < 0.4 | 1 | GPT 5.4 Nano (OpenAI OAuth) |
+| 0.4 - 0.7 | 2 | GPT 5.4 (OpenAI OAuth) |
 | > 0.7 | 4 | Claude Opus 4.6 (budget-gated) |
 
 When Opus budget is exhausted, Tier 4 tasks cap at Tier 2.
@@ -203,6 +206,7 @@ results = mgr.get_results("higher_safety_weight")
 
 | Variable | Required By |
 |----------|-------------|
-| `NVIDIA_API_KEY` | Nemotron 3 Super (Tier 1) |
-| `OPENROUTER_API_KEY` | Qwen3.5, MiMo, M2.7 (Tiers 1-3) |
+| *(OpenAI OAuth)* | GPT 5.4 Nano (T1), GPT 5.4 (T2) — `python scripts/atlas-auth.py` |
+| `OPENROUTER_API_KEY` | MiMo (Tier 2 fallback), M2.7 (Tier 3 evolution) |
+| `NVIDIA_API_KEY` | Nemotron 120B (Tier 1 fallback, free NIM) |
 | `ANTHROPIC_API_KEY` | Claude Opus 4.6 (Tier 4) |

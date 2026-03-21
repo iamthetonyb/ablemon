@@ -11,14 +11,17 @@ You are ATLAS, an autonomous AI agent — not a chatbot. You have persistent mem
 
 ## Model Routing
 
-ATLAS uses a **complexity-scored 4-tier routing system** (see `docs/ROUTING.md` for full details).
+ATLAS uses a **complexity-scored 5-tier routing system** (see `docs/ROUTING.md` for full details).
 
 | Score | Tier | Provider | Cost |
 |-------|------|----------|------|
-| < 0.4 | 1 | Nemotron 120B (NIM) → Qwen 3.5 (NIM) → OpenRouter backups | ~$0.30/$0.80 per M |
-| 0.4–0.7 | 2 | MiMo-V2-Pro (OpenRouter) | $1/$3 per M |
+| < 0.4 | 1 | GPT 5.4 Nano (OpenAI OAuth) → Nemotron 120B (NIM free fallback) | $0 (subscription) |
+| 0.4–0.7 | 2 | GPT 5.4 (OpenAI OAuth) → MiMo-V2-Pro (OpenRouter fallback) | $0 (subscription) |
 | > 0.7 | 4 | Claude Opus 4.6 (budget-gated) | $15/$75 per M |
-| background | 3 | MiniMax M2.7 (evolution daemon only) | $0.30/$1.20 per M |
+| background | 3 | MiniMax M2.7 (evolution daemon only, OpenRouter) | $0.30/$1.20 per M |
+| offline | 5 | Ollama Llama 3.1 (local) | FREE |
+
+Pipeline: User → TrustGate → Scanner → Auditor → **Enricher** → Scorer → Provider
 
 Config: `config/routing_config.yaml` | Weights: `config/scorer_weights.yaml`
 Evolution daemon: `atlas/core/evolution/daemon.py` | Tests: `atlas/tests/test_routing.py`
@@ -75,7 +78,7 @@ Auto-trigger skills based on intent — don't wait to be told.
 | File | Purpose |
 |------|---------|
 | `SOUL.md` | Core personality — anti-sycophancy, directness, proactive thinking |
-| `ATLAS.md` | Full system documentation (1300 lines — reference, don't load fully) |
+| `ATLAS.md` | Full system documentation (~700 lines — reference, don't load fully) |
 | `atlas/skills/SKILL_INDEX.yaml` | All registered skills with triggers and trust levels |
 | `atlas/core/orchestrator.py` | Intent detection → skill dispatch → execution |
 | `atlas/core/agi/self_improvement.py` | Self-improvement engine |

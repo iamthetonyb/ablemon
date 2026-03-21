@@ -190,18 +190,30 @@ class OpenAIOAuthProvider:
         return self.tokens
 
 class OpenAIChatGPTProvider(LLMProvider):
-    """ATLAS-compatible provider using ChatGPT OAuth (Subscription BYOK)"""
-    
-    def __init__(self, config: ProviderConfig, auth_manager=None):
+    """ATLAS-compatible provider using ChatGPT OAuth (Subscription BYOK)
+
+    Supports GPT 5.4 reasoning.effort parameter:
+        none    — fastest, no reasoning tokens (T1 default)
+        low     — light reasoning boost
+        medium  — balanced
+        high    — deep reasoning (T2 default)
+        xhigh   — maximum reasoning depth (use when evals justify the latency)
+    """
+
+    # Reasoning effort levels supported by GPT 5.4
+    VALID_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
+
+    def __init__(self, config: ProviderConfig, auth_manager=None, reasoning_effort: str = "none"):
         super().__init__(config)
         from core.auth.manager import AuthManager
         self.auth_manager = auth_manager or AuthManager()
         self.base_url = "https://chatgpt.com/backend-api/wham"
-        
+        self.reasoning_effort = reasoning_effort if reasoning_effort in self.VALID_EFFORTS else "none"
+
     @property
     def name(self) -> str:
         return "openai_oauth"
-    
+
     async def complete(
         self,
         messages: List[Message],
@@ -214,21 +226,40 @@ class OpenAIChatGPTProvider(LLMProvider):
         token = self.auth_manager.get_provider_token('openai_oauth')
         if not token:
             raise ProviderError(self.name, "Not authenticated with OpenAI OAuth", retryable=False)
-            
-        # Simplified WHAM API format
+
+        # Allow per-request override of reasoning effort
+        effort = kwargs.pop("reasoning_effort", self.reasoning_effort)
+        if effort not in self.VALID_EFFORTS:
+            effort = self.reasoning_effort
+
+        # Responses API format (WHAM backend)
         payload = {
-            "model": self.model or "gpt-4o",
-            "messages": [
+            "model": self.model or "gpt-5.4",
+            "input": [
                 {
                     "role": m.role.value,
                     "content": m.content if isinstance(m.content, str) else json.dumps(m.content)
                 } for m in messages
             ],
             "stream": False,
-            "temperature": temperature,
-            "max_tokens": max_tokens
         }
-        
+
+        # Add reasoning effort (skip for "none" to keep payload clean)
+        if effort and effort != "none":
+            payload["reasoning"] = {"effort": effort}
+
+        # temperature is not supported when reasoning is active
+        if effort in ("none", "minimal") or not effort:
+            payload["temperature"] = temperature
+
+        if max_tokens:
+            payload["max_output_tokens"] = max_tokens
+
+        if tools:
+            payload["tools"] = tools
+        if tool_choice:
+            payload["tool_choice"] = tool_choice
+
         try:
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
@@ -236,30 +267,49 @@ class OpenAIChatGPTProvider(LLMProvider):
                 lambda: requests.post(
                     f"{self.base_url}/responses",
                     json=payload,
-                    headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},
-                    timeout=60
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=120,  # longer timeout for reasoning
                 )
             )
             response.raise_for_status()
             data = response.json()
-            
-            # Note: This is a placeholder for the actual WHAM backend response parsing
-            content = data.get('output', [{}])[0].get('content', [{}])[0].get('text', '')
-            
+
+            # Parse Responses API output format
+            content = ""
+            for output_item in data.get("output", []):
+                if output_item.get("type") == "message":
+                    for block in output_item.get("content", []):
+                        if block.get("type") == "output_text":
+                            content += block.get("text", "")
+
+            # Extract usage if available
+            usage_data = data.get("usage", {})
+            usage = UsageStats(
+                prompt_tokens=usage_data.get("input_tokens", 0),
+                completion_tokens=usage_data.get("output_tokens", 0),
+                total_tokens=usage_data.get("total_tokens", 0),
+            )
+
             return CompletionResult(
                 content=content,
-                finish_reason="stop",
-                usage=UsageStats(0, 0, 0), # OAuth doesn't report traditional token usage usually
+                finish_reason=data.get("status", "completed"),
+                usage=usage,
                 provider=self.name,
                 model=self.model,
                 raw_response=data
             )
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code if e.response else 0
+            retryable = status in (429, 500, 502, 503)
+            raise ProviderError(self.name, f"HTTP {status}: {e}", retryable=retryable)
         except Exception as e:
             raise ProviderError(self.name, str(e))
 
     async def stream(self, messages: List[Message], **kwargs) -> AsyncIterator[str]:
-        # Basic streaming fallback: generate then yield
-        # Actually implementing WHAM streaming requires SSE handling
+        # TODO: Implement SSE streaming for WHAM /responses endpoint
         result = await self.complete(messages, **kwargs)
         yield result.content
 
