@@ -306,19 +306,23 @@ class OpenAIChatGPTProvider(LLMProvider):
 
         try:
             loop = asyncio.get_event_loop()
+            url = f"{self.base_url}/responses"
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            }
+            logger.debug(f"WHAM request: POST {url} model={payload.get('model')} timeout={timeout}")
             response = await loop.run_in_executor(
                 None,
                 lambda: requests.post(
-                    f"{self.base_url}/responses",
+                    url,
                     json=payload,
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json",
-                    },
+                    headers=headers,
                     timeout=timeout,
                     stream=True,
                 )
             )
+            logger.debug(f"WHAM response: {response.status_code} headers={dict(list(response.headers.items())[:3])}")
             response.raise_for_status()
 
             content, usage_data = await loop.run_in_executor(
@@ -347,9 +351,17 @@ class OpenAIChatGPTProvider(LLMProvider):
             except Exception:
                 body = e.response.text[:200] if e.response else ""
             retryable = status in (429, 500, 502, 503)
+            logger.error(f"WHAM HTTPError: status={status} body={body!r} has_response={e.response is not None}")
             raise ProviderError(self.name, f"HTTP {status}: {body}", retryable=retryable)
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"WHAM ConnectionError: {e}")
+            raise ProviderError(self.name, f"Connection failed: {e}", retryable=True)
+        except requests.exceptions.Timeout as e:
+            logger.error(f"WHAM Timeout: {e}")
+            raise ProviderError(self.name, f"Timeout: {e}", retryable=True)
         except Exception as e:
-            raise ProviderError(self.name, str(e))
+            logger.error(f"WHAM unexpected error: {type(e).__name__}: {e}", exc_info=True)
+            raise ProviderError(self.name, f"{type(e).__name__}: {e}")
 
     async def stream(self, messages: List[Message], **kwargs) -> AsyncIterator[str]:
         """Stream tokens from WHAM SSE endpoint."""
