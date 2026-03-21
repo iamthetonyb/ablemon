@@ -59,4 +59,73 @@ else:
     print("4. get_provider_token: FAIL — returned None (refresh failed)")
     sys.exit(1)
 
-print("\nAll OAuth checks passed")
+print("\nAll auth checks passed. Testing WHAM connectivity...")
+
+# 5. Test actual WHAM API connectivity
+import requests
+
+wham_url = "https://chatgpt.com/backend-api/wham/responses"
+test_payload = {
+    "model": "gpt-5.4-mini",
+    "instructions": "You are a test assistant.",
+    "input": [{"role": "user", "content": "Say OK"}],
+    "stream": True,
+    "store": False,
+}
+
+headers = {
+    "Authorization": f"Bearer {token}",
+    "Content-Type": "application/json",
+}
+
+print(f"5. WHAM URL: {wham_url}")
+print(f"   Token prefix: {token[:40]}...")
+
+try:
+    resp = requests.post(
+        wham_url,
+        json=test_payload,
+        headers=headers,
+        timeout=30,
+        stream=True,
+    )
+    print(f"   HTTP status: {resp.status_code}")
+    print(f"   Response headers: {dict(list(resp.headers.items())[:5])}")
+    if resp.status_code == 200:
+        # Read first few SSE lines
+        lines = []
+        for raw_line in resp.iter_lines():
+            line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
+            lines.append(line)
+            if len(lines) >= 5:
+                break
+        print(f"   First SSE lines: {lines[:3]}")
+        print("   WHAM API: OK")
+    else:
+        body = resp.text[:500]
+        print(f"   Response body: {body}")
+        print("   WHAM API: FAIL")
+except requests.exceptions.ConnectionError as e:
+    print(f"   Connection error: {e}")
+    print("   WHAM API: BLOCKED (likely Cloudflare or IP block)")
+except requests.exceptions.Timeout:
+    print("   Timeout after 30s")
+    print("   WHAM API: TIMEOUT")
+except Exception as e:
+    print(f"   Error: {type(e).__name__}: {e}")
+    print("   WHAM API: FAIL")
+
+# 6. DNS and basic connectivity check
+import socket
+print("\n6. Network diagnostics:")
+try:
+    ip = socket.getaddrinfo("chatgpt.com", 443)[0][4][0]
+    print(f"   chatgpt.com resolves to: {ip}")
+except Exception as e:
+    print(f"   DNS resolution failed: {e}")
+
+try:
+    ip = socket.getaddrinfo("api.openai.com", 443)[0][4][0]
+    print(f"   api.openai.com resolves to: {ip}")
+except Exception as e:
+    print(f"   DNS resolution failed: {e}")
