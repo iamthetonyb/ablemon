@@ -1,167 +1,131 @@
 # ATLAS — Autonomous Task & Learning Agent System
 
-An executive-level AI agent operating via Telegram with a secure multi-agent pipeline, persistent memory, billing tracking, and AGI-oriented features.
+A self-evolving AI agent that operates 24/7 across Telegram, Discord, web dashboard, and CLI. Multi-model routing, persistent memory, autonomous scheduling, and a growing skill library — all running on your own infrastructure.
+
+---
+
+## What It Does
+
+- **Multi-model intelligence** — 5-tier routing system that scores every request and selects the optimal model. Simple questions hit fast, cheap models. Complex reasoning escalates automatically. Premium models are budget-gated.
+- **Self-evolving** — Background daemon continuously tunes routing weights based on real interaction outcomes. The system gets smarter over time without manual tuning.
+- **Persistent memory** — SQLite + vector hybrid memory across sessions. Conversations, learnings, objectives, and client context survive restarts.
+- **Autonomous operations** — Scheduled briefings, security pentests, self-reflection, learnings extraction — all run autonomously on cron with SQLite-backed execution logging and missed job recovery.
+- **Skill system** — 25+ modular skills (copywriting, research, security audit, GitHub, Vercel deploy, VPS provisioning) that auto-trigger on intent detection.
+- **Agent swarm** — Complex tasks auto-spawn parallel sub-agents (researcher, analyst, coder, critic, planner) with consensus building.
+- **Multi-channel** — Telegram, Discord, Slack, web dashboard (Next.js), CLI, webhooks.
+- **Security-first** — Trust gate scoring on every message, prompt injection detection, encrypted secrets, automated penetration testing, full audit trail.
+
+---
+
+## Model Routing
+
+Requests are complexity-scored (0.0–1.0) and routed to the best model for the job:
+
+| Tier | Model | When |
+|------|-------|------|
+| 1 | GPT 5.4 Mini (xhigh reasoning) | Default — fast, high quality |
+| 2 | GPT 5.4 (xhigh reasoning) | Complex tasks, deep reasoning |
+| 3 | MiniMax M2.7 | Background only — evolution daemon |
+| 4 | Claude Opus 4.6 | Premium — budget-gated |
+| 5 | Qwen 3.5 27B (local) | Offline fallback |
+
+T1 and T2 route through your ChatGPT subscription at $0 per token. T5 runs locally via Ollama with YaRN context extension for long-form analysis.
 
 ---
 
 ## Quick Start
 
-### Option A — Docker (Recommended for production)
-
 ```bash
-cd atlas
-cp .env.example .env
-# Edit .env with your credentials (see Configuration below)
-docker-compose up -d
-docker logs -f atlas
+# 1. Clone and install
+git clone https://github.com/iamthetonyb/ABLE.git && cd ABLE
+cd atlas && pip install -r requirements.txt
+
+# 2. Connect your ChatGPT subscription (T1/T2 routing)
+python3 scripts/atlas-auth.py
+
+# 3. Set API keys for fallback/premium providers
+cp .env.example .env  # Add ANTHROPIC_API_KEY, OPENROUTER_API_KEY, etc.
+
+# 4. Pull local model (offline fallback)
+ollama pull qwen3.5:27b-q3_K_M
+
+# 5. Run
+python3 start.py
 ```
-
-### Option B — Local Python
-
-```bash
-cd atlas
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-# Edit .env with your credentials
-python start.py
-```
-
----
-
-## Configuration
-
-Edit `atlas/.env` with these required values:
-
-```env
-TELEGRAM_BOT_TOKEN=your_bot_token_from_botfather
-ATLAS_OWNER_TELEGRAM_ID=your_telegram_user_id
-OLLAMA_API_KEY=your_ollama_key          # Optional
-NVIDIA_API_KEY=your_nvidia_key          # Optional (free tier AI)
-ANTHROPIC_API_KEY=your_claude_key       # Optional (premium reasoning)
-```
-
-**Never commit `.env` to git** — it's in `.gitignore`.
 
 ---
 
 ## Architecture
 
 ```
-AIDE/
-├── atlas/              ← Main application
-│   ├── start.py        ← Entry point
-│   ├── core/           ← Agent pipeline, security, swarm orchestrator
-│   ├── channels/       ← Telegram, Discord, Slack adapters
-│   ├── memory/         ← Hybrid SQLite + vector + markdown memory
-│   ├── skills/         ← Skill library, loader, and executor
-│   │   └── scripts/    ← init_skill.py, package_skill.py
-│   ├── tools/          ← Browser, shell, search, webhooks, MCP bridge
-│   ├── billing/        ← Usage tracking and invoices
-│   ├── scheduler/      ← Cron-based scheduled tasks
-│   ├── security/       ← AES-256 encryption, malware scanner, secret isolation
-│   └── audit/          ← Audit logs, alerts, traces, git trail
-│
-├── docs/               ← Documentation
-│   ├── CUSTOMIZATION.md
-│   ├── SECURITY.md
-│   └── TOOLS.md
-│
-├── scripts/            ← Setup scripts
-│   └── atlas-setup.sh
-│
-├── ATLAS.md            ← Full system configuration (1400+ lines)
-└── SOUL.md             ← Core identity and behavioral directives
+User → TrustGate → Scanner → Auditor → Enricher → Scorer → Provider
+                                                      |
+                                           Logger → Evolution Daemon
 ```
 
-### Message Pipeline
+### Core Systems
 
-```
-Telegram → UnifiedGateway → Scanner → Auditor → TrustGate → Executor → AI Backend → Response
-```
+| System | What It Does |
+|--------|-------------|
+| **Complexity Scorer** | Rule-based scoring (<5ms, no LLM calls) with domain-specific adjustments |
+| **Prompt Enricher** | Expands vague inputs into actionable domain-specific criteria |
+| **Evolution Daemon** | M2.7-powered background cycles that tune scoring weights from real data |
+| **Persistent Scheduler** | SQLite-backed cron with retry, backoff, and missed job recovery |
+| **Agent Swarm** | 9-role parallel execution for complex tasks (auto-triggered at score >= 0.6) |
+| **Skill Engine** | Auto-triggering modular capabilities with trust levels and progressive disclosure |
 
-### AI Provider Chain
+### Web Dashboard (ATLAS Studio)
 
-```
-1. NVIDIA NIM (kimi-k2.5 / Qwen3.5)  → Free tier
-2. OpenRouter (kimi-k2.5)            → Fallback ($0.60/$3.00 per M)
-3. Anthropic (claude-opus-4-5)       → Complex reasoning ($5/$25 per M)
-4. Ollama (qwen3.5 / llama)          → Offline fallback (free)
-```
-
-### Agent Swarm
-
-Complex tasks (complexity score ≥ 0.6) auto-spawn agent swarms:
-- RESEARCHER, ANALYST, WRITER, CODER, REVIEWER, CRITIC, PLANNER, EXECUTOR, COORDINATOR
-
----
-
-## Server Deployment (Digital Ocean)
-
-From your local machine:
+Next.js 16.2 dashboard for system management — provider health, tool gating, audit viewer, chat interface.
 
 ```bash
-bash deploy-to-server.sh
-```
-
-Or GitHub Actions auto-deploys on push to main.
-
-Manual steps:
-```bash
-ssh root@YOUR_SERVER_IP
-git clone https://github.com/iamthetonyb/AIDE.git /opt/atlas/AIDE
-cd /opt/atlas/AIDE/atlas
-cp .env.example .env && nano .env
-docker-compose up -d
-docker logs -f atlas
+cd atlas-studio && npm install && npm run dev
 ```
 
 ---
 
-## Health Check
+## Qwen 3.5 Local Capabilities
 
-Once running, verify:
-- `curl http://localhost:8080/health` → `{"status": "ok"}`
-- Send `/start` to your Telegram bot
+The Tier 5 local fallback uses Qwen 3.5 via Ollama with:
 
----
+- **YaRN context extension** — 32K base extended to 262K+ tokens for long documents
+- **Video/long-form analysis** — Process transcripts, research papers, and extended content locally
+- **MoE architecture** — 235B total parameters, 22B active per forward pass
+- **Configurable thinking** — Off / low / medium / high / ultra reasoning modes
 
-## Key Files
-
-| File | Purpose |
-|------|---------|
-| `ATLAS.md` | Full system configuration — read every session |
-| `SOUL.md` | Core identity and behavioral directives |
-| `docs/CUSTOMIZATION.md` | Personalization guide |
-| `atlas/config/gateway.json` | Non-secret runtime settings |
-| `atlas/.env` | Secrets (never commit) |
+Pull the models: `ollama pull qwen3.5:27b-q3_K_M && ollama pull qwen3.5:9b`
 
 ---
 
-## Skill System
+## Autonomous Operations
 
-Create new skills:
-```bash
-python atlas/skills/scripts/init_skill.py my-skill --path atlas/skills/library --resources scripts,references
-```
+These run on schedule without user prompting:
 
-Package skills:
-```bash
-python atlas/skills/scripts/package_skill.py atlas/skills/library/my-skill
-```
+| Job | Schedule | What |
+|-----|----------|------|
+| Morning Briefing | 9am daily | System health, goals, provider status |
+| Evening Check-in | 9pm daily | Day summary, activity review |
+| GitHub Digest | 1pm daily | Repository activity scan |
+| Learnings Extraction | 3am daily | Pattern mining from conversations |
+| Self-Reflection | Sunday midnight | Performance audit, improvement plans |
+| Security Pentest | Monday 4am | 60+ automated attack vectors |
 
-Install from skills.sh registry:
-```bash
-npx skills add <owner/repo>
-```
+All jobs are SQLite-persisted with retry logic. Missed jobs auto-recover on restart.
 
 ---
 
-## Qwen 3.5 Optimizations
+## Environment Variables
 
-When using Qwen 3.5 via Ollama:
-- **YaRN context extension**: 32K → 262K → 1M tokens
-- **Thinking modes**: off / low / medium / high / ultra
-- **MoE routing**: 235B total params, 22B active per forward pass
+| Variable | Purpose |
+|----------|---------|
+| *OpenAI OAuth* | `python3 scripts/atlas-auth.py` — connects ChatGPT subscription |
+| `ANTHROPIC_API_KEY` | Claude Opus 4.6 (premium tier) |
+| `OPENROUTER_API_KEY` | MiMo fallback + M2.7 evolution daemon |
+| `NVIDIA_API_KEY` | Nemotron 120B (free T1 fallback) |
+| `TELEGRAM_BOT_TOKEN` | Telegram channel |
 
-See `atlas/core/providers/ollama.py` for `QwenConfig`.
+---
+
+## License
+
+Private repository. All rights reserved.
