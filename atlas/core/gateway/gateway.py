@@ -602,7 +602,7 @@ class ATLASGateway:
             chain = self.provider_registry.build_provider_chain()
 
             # OpenAI OAuth is now wired through the registry (provider_type: openai_oauth)
-            # No manual injection needed — registry handles T1 Nano + T2 GPT 5.4
+            # No manual injection needed — registry handles T1 Mini + T2 GPT 5.4
 
             return chain
 

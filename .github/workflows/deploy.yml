@@ -105,7 +105,13 @@ jobs:
             /home/atlas/.atlas/venv/bin/pip install -r /opt/atlas/ABLE/atlas/requirements.txt --quiet --upgrade
 
             echo "=== Updating ATLAS files ==="
-            rsync -av --delete /opt/atlas/ABLE/atlas/ /home/atlas/.atlas/atlas/
+            rsync -av --delete \
+              --exclude='data/' \
+              --exclude='.secrets/' \
+              --exclude='audit/logs/' \
+              --exclude='clients/transcripts/' \
+              --exclude='__pycache__/' \
+              /opt/atlas/ABLE/atlas/ /home/atlas/.atlas/atlas/
             rsync -av /opt/atlas/ABLE/config/ /home/atlas/.atlas/config/
             cp /opt/atlas/ABLE/ATLAS.md /home/atlas/.atlas/ATLAS.md
             cp /opt/atlas/ABLE/SOUL.md /home/atlas/.atlas/SOUL.md
