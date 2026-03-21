@@ -254,16 +254,35 @@ class OpenAIChatGPTProvider(LLMProvider):
 
         # Note: WHAM does not support max_output_tokens — omit it
         if tools:
-            payload["tools"] = tools
+            # Convert Chat Completions tool format to Responses API format.
+            # Chat Completions nests under "function" key; Responses API is flat.
+            converted = []
+            for tool in tools:
+                if tool.get("type") == "function" and "function" in tool:
+                    fn = tool["function"]
+                    converted.append({
+                        "type": "function",
+                        "name": fn["name"],
+                        "description": fn.get("description", ""),
+                        "parameters": fn.get("parameters", {}),
+                    })
+                else:
+                    converted.append(tool)
+            payload["tools"] = converted
         if tool_choice:
             payload["tool_choice"] = tool_choice
 
         return payload
 
     def _consume_sse(self, response) -> tuple:
-        """Parse SSE stream from WHAM, return (content, usage_dict)."""
+        """Parse SSE stream from WHAM, return (content, usage_dict, tool_calls)."""
         full_text = ""
         usage = {}
+        tool_calls = []
+        # Accumulate function call argument deltas keyed by call_id
+        _fc_args: Dict[str, str] = {}
+        _fc_names: Dict[str, str] = {}
+
         for raw_line in response.iter_lines():
             line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
             if not line or not line.startswith("data: "):
@@ -276,12 +295,42 @@ class OpenAIChatGPTProvider(LLMProvider):
                 etype = event.get("type", "")
                 if etype == "response.output_text.delta":
                     full_text += event.get("delta", "")
+                elif etype == "response.output_item.added":
+                    item = event.get("item", {})
+                    if item.get("type") == "function_call":
+                        cid = item.get("call_id", "")
+                        _fc_names[cid] = item.get("name", "")
+                        _fc_args[cid] = ""
+                elif etype == "response.function_call_arguments.delta":
+                    cid = event.get("call_id", "")
+                    _fc_args[cid] = _fc_args.get(cid, "") + event.get("delta", "")
                 elif etype == "response.completed":
                     resp = event.get("response", {})
                     usage = resp.get("usage", {})
+                    # Also extract tool calls from completed response output
+                    for item in resp.get("output", []):
+                        if item.get("type") == "function_call":
+                            cid = item.get("call_id", item.get("id", ""))
+                            name = item.get("name", _fc_names.get(cid, ""))
+                            args = item.get("arguments", _fc_args.get(cid, "{}"))
+                            tool_calls.append(ToolCall(
+                                id=cid,
+                                name=name,
+                                arguments=args if isinstance(args, str) else json.dumps(args),
+                            ))
             except (json.JSONDecodeError, KeyError):
                 pass
-        return full_text, usage
+
+        # If we got function calls from deltas but not from completed, build them
+        if not tool_calls and _fc_names:
+            for cid, name in _fc_names.items():
+                tool_calls.append(ToolCall(
+                    id=cid,
+                    name=name,
+                    arguments=_fc_args.get(cid, "{}"),
+                ))
+
+        return full_text, usage, tool_calls
 
     async def complete(
         self,
@@ -325,7 +374,7 @@ class OpenAIChatGPTProvider(LLMProvider):
             logger.debug(f"WHAM response: {response.status_code} headers={dict(list(response.headers.items())[:3])}")
             response.raise_for_status()
 
-            content, usage_data = await loop.run_in_executor(
+            content, usage_data, tool_calls = await loop.run_in_executor(
                 None, lambda: self._consume_sse(response)
             )
 
@@ -337,11 +386,12 @@ class OpenAIChatGPTProvider(LLMProvider):
 
             return CompletionResult(
                 content=content,
-                finish_reason="completed",
+                finish_reason="tool_calls" if tool_calls else "completed",
                 usage=usage,
                 provider=self.name,
                 model=self.model,
                 raw_response=usage_data,
+                tool_calls=tool_calls or None,
             )
         except requests.exceptions.HTTPError as e:
             status = e.response.status_code if e.response else 0
