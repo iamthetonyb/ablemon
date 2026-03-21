@@ -266,8 +266,8 @@ class ModelRouter:
     falls back to simple heuristics otherwise.
 
     Tier mapping:
-        Tier 1 (score < 0.4) → Nemotron 3 Super (free, default)
-        Tier 2 (score 0.4-0.7) → MiMo-V2-Pro (escalation)
+        Tier 1 (score < 0.4) → GPT 5.4 Mini xhigh (ChatGPT subscription, $0)
+        Tier 2 (score 0.4-0.7) → GPT 5.4 xhigh (ChatGPT subscription, $0)
         Tier 4 (score > 0.7) → Opus 4.6 (premium, budget-gated)
     """
 

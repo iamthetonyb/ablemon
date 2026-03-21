@@ -26,13 +26,13 @@ providers:
     transform: file://transforms/strip_thinking.js
     label: "Qwen 3.5 397B ($0.39/$2.34)"
 
-  # Candidate: GPT 5.4 Nano — cheapest OpenAI, $0.20/$1.25
-  - id: openai:chat:openai/gpt-5.4-nano
+  # Candidate: GPT 5.4 Mini — cheapest OpenAI, $0.20/$1.25
+  - id: openai:chat:openai/gpt-5.4-mini
     config:
       apiBaseUrl: https://openrouter.ai/api/v1
       apiKeyEnvar: OPENROUTER_API_KEY
       temperature: 0.7
-    label: "GPT 5.4 Nano ($0.20/$1.25)"
+    label: "GPT 5.4 Mini ($0.20/$1.25)"
 
   # Candidate: GPT 5.4 Mini — mid-range OpenAI, $0.75/$4.50
   - id: openai:chat:openai/gpt-5.4-mini

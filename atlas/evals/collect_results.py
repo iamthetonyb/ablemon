@@ -148,7 +148,7 @@ def parse_eval(eval_data: Dict) -> Dict[str, Any]:
 
     # Build distillation pairs
     t4_key = next((k for k in parsed["by_provider"] if "T4" in k or "Sonnet" in k), None)
-    t1_key = next((k for k in parsed["by_provider"] if "T1" in k or "Nemotron" in k), None)
+    t1_key = next((k for k in parsed["by_provider"] if "T1" in k or "Mini" in k or "gpt-5.4-mini" in k), None)
 
     if t4_key and t1_key:
         t4_outputs = {o["test"]: o for o in parsed["by_provider"][t4_key]["outputs"]}

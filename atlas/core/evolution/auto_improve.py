@@ -253,7 +253,7 @@ def _generate_skill_improvements(
             ))
 
         if len(t2_failures) >= 2:
-            # T2 MiMo also struggling — might be a skill quality issue
+            # T2 GPT 5.4 also struggling — might be a skill quality issue
             skill_name = "unknown"
             for keyword in ["copywriting", "security", "refactor", "research"]:
                 if keyword in eval_name.lower():
@@ -268,7 +268,7 @@ def _generate_skill_improvements(
                 proposed_change="Review SKILL.md for missing quality criteria or overly vague instructions",
                 confidence=0.6,
                 source_eval=eval_name,
-                failure_pattern=f"T2 MiMo failing {len(t2_failures)}/{len(failures)} on {skill_name}",
+                failure_pattern=f"T2 GPT 5.4 failing {len(t2_failures)}/{len(failures)} on {skill_name}",
             ))
 
     return actions

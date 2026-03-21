@@ -81,14 +81,15 @@ async def _get_studio_session() -> "aiohttp.ClientSession":
 
 # ── Model short names for response tags ──────────────────────────────────────
 MODEL_SHORT_NAMES = {
+    "gpt-5.4-mini": "GPT 5.4 Mini",
+    "gpt-5.4": "GPT 5.4",
     "nvidia/nemotron-3-super-120b-a12b": "Nemotron 120B",
-    "nvidia/llama-3.3-nemotron-super-49b-v1": "Nemotron 49B",
-    "qwen/qwen3.5-397b-a17b": "Qwen 3.5",
     "nvidia/nemotron-3-super-120b-a12b:free": "Nemotron 120B (OR)",
     "xiaomi/mimo-v2-pro": "MiMo-V2-Pro",
     "minimax/minimax-m2.7": "MiniMax M2.7",
     "claude-opus-4-6": "Claude Opus",
-    "llama3.1": "Llama 3.1 (local)",
+    "qwen3.5:27b-q3_K_M": "Qwen 3.5 27B (local)",
+    "qwen3.5:9b": "Qwen 3.5 9B (local)",
 }
 
 
@@ -242,12 +243,13 @@ You are NOT a chatbot. You are NOT stateless. You are a persistent AGI agent run
 - Fact Checker (atlas/core/factcheck/) — hallucination detection, code verification, confidence scoring
 - Full audit trail: trust_gate.jsonl, action logs, distributed tracing
 
-### 4-Tier Complexity Routing
+### 5-Tier Complexity Routing
 Messages auto-scored and routed to optimal AI provider:
-- T1 (score <0.4): Nemotron 3 Super — fast, free
-- T2 (0.4-0.7): MiMo-V2-Pro / Qwen 3.5 — balanced
-- T3 (background): MiniMax M2.7 — evolution daemon only
-- T4 (>0.7): Claude Opus — complex reasoning, budget-gated
+- T1 (score <0.4): GPT 5.4 Mini xhigh (ChatGPT subscription, $0) → Nemotron 120B fallback
+- T2 (0.4-0.7): GPT 5.4 xhigh (ChatGPT subscription, $0) → MiMo-V2-Pro fallback
+- T3 (background): MiniMax M2.7 — evolution daemon only, never user-facing
+- T4 (>0.7): Claude Opus 4.6 — complex reasoning, budget-gated
+- T5 (offline): Qwen 3.5 27B/9B local via Ollama
 
 ### Skill System (atlas/skills/)
 - Modular capability library with auto-triggering on phrase match
@@ -650,7 +652,7 @@ class ATLASGateway:
 
         ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
         try:
-            providers.append(OllamaProvider(model="llama3.1", base_url=ollama_url))
+            providers.append(OllamaProvider(model="qwen3.5:27b-q3_K_M", base_url=ollama_url))
             logger.info("Provider added: Ollama (local fallback) [legacy]")
         except Exception as e:
             logger.warning(f"Failed to init Ollama provider: {e}")

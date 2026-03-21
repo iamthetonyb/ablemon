@@ -5,28 +5,28 @@
 # View:        cd atlas/evals && npx promptfoo@latest view
 # Run routing:  npx promptfoo@latest eval --filter-pattern "routing"
 # Run skills:   npx promptfoo@latest eval --filter-pattern "copywriting|security|refactoring"
-# Compare tiers: npx promptfoo@latest eval -p "T1 (Nemotron)" -p "T4 (Opus)"
+# Compare tiers: npx promptfoo@latest eval -p "T1 (GPT 5.4 Mini)" -p "T4 (Opus)"
 #
 # After eval:  python collect_results.py  (feeds results to AGI loop)
 
 description: "ATLAS Evaluation Suite — Routing Quality + Skill Quality"
 
 providers:
-  # Tier 1: GPT 5.4 Nano ($0.20/$1.25, 80% shootout)
-  - id: openai:chat:openai/gpt-5.4-nano
-    config:
-      apiBaseUrl: https://openrouter.ai/api/v1
-      apiKeyEnvar: OPENROUTER_API_KEY
-      temperature: 0.7
-    label: "T1 (GPT 5.4 Nano)"
-
-  # Tier 2: GPT 5.4 Mini ($0.75/$4.50, 100% shootout)
+  # Tier 1: GPT 5.4 Mini ($0.75/$4.50, 100% shootout)
   - id: openai:chat:openai/gpt-5.4-mini
     config:
       apiBaseUrl: https://openrouter.ai/api/v1
       apiKeyEnvar: OPENROUTER_API_KEY
       temperature: 0.7
-    label: "T2 (GPT 5.4 Mini)"
+    label: "T1 (GPT 5.4 Mini)"
+
+  # Tier 2: GPT 5.4 ($2.50/$10, xhigh reasoning via subscription)
+  - id: openai:chat:openai/gpt-5.4
+    config:
+      apiBaseUrl: https://openrouter.ai/api/v1
+      apiKeyEnvar: OPENROUTER_API_KEY
+      temperature: 0.7
+    label: "T2 (GPT 5.4)"
 
   # Tier 4: Premium (gold standard for distillation) — via OpenRouter
   - id: openai:chat:anthropic/claude-sonnet-4.6

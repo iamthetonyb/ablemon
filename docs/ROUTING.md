@@ -22,13 +22,13 @@ User Message → ComplexityScorer → ProviderRegistry → LLM Provider
 
 | Tier | Provider | Model | Cost (in/out per M) | Use Case |
 |------|----------|-------|---------------------|----------|
-| 1 | GPT 5.4 Nano | gpt-5.4-nano (OpenAI OAuth) | $0 (sub) | Default — 70-80% of requests |
-| 1 (fallback) | Nemotron 120B | nvidia/nemotron-3-super-120b-a12b (NIM) | $0/$0 | Free fallback when Nano down |
-| 2 | GPT 5.4 | gpt-5.4 (OpenAI OAuth) | $0 (sub) | Moderate complexity |
+| 1 | GPT 5.4 Mini (xhigh) | gpt-5.4-mini (OpenAI OAuth) | $0 (sub) | Default — 70-80% of requests |
+| 1 (fallback) | Nemotron 120B | nvidia/nemotron-3-super-120b-a12b (NIM) | $0.30/$0.80 | Fallback when Mini unavailable |
+| 2 | GPT 5.4 (xhigh) | gpt-5.4 (OpenAI OAuth) | $0 (sub) | Complex reasoning |
 | 2 (fallback) | MiMo-V2-Pro | xiaomi/mimo-v2-pro (OpenRouter) | $1.00/$3.00 | GPT 5.4 fallback |
 | 3 | MiniMax M2.7 | minimax/minimax-m2.7 (OpenRouter) | $0.30/$1.20 | **Background-only** (evolution daemon) |
 | 4 | Claude Opus 4.6 | claude-opus-4-6 (Anthropic) | $15.00/$75.00 | Premium — budget-gated |
-| 5 | Ollama (local) | llama3.1 | $0/$0 | Offline fallback |
+| 5 | Qwen 3.5 27B/9B | qwen3.5:27b-q3_K_M (Ollama) | $0/$0 | Offline fallback |
 
 **M2.7 is never user-facing.** It only runs as the evolution daemon's analysis brain.
 

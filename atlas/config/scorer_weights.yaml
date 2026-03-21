@@ -3,8 +3,8 @@
 #
 # Feature weights determine how each signal contributes to the final
 # complexity score (0.0-1.0). The score maps to routing tiers:
-#   < tier_1_max  → T1 (Nemotron 120B — cheap/fast)
-#   tier_1_max-tier_2_max → T2 (MiMo-V2-Pro — balanced)
+#   < tier_1_max  → T1 (GPT 5.4 Mini xhigh — $0 via ChatGPT subscription)
+#   tier_1_max-tier_2_max → T2 (GPT 5.4 xhigh — $0 via ChatGPT subscription)
 #   > tier_2_max  → T4 (Opus 4.6 — premium, budget-gated)
 #
 # Evolution daemon reads synthetic harness results and adjusts these

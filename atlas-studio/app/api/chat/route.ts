@@ -22,8 +22,8 @@ export async function POST(req: Request) {
   }));
 
   const result = streamText({
-    // T1: GPT 5.4 Nano — $0.20/$1.25 per M, 80% quality on our benchmark
-    model: openrouter('openai/gpt-5.4-nano'),
+    // T1: GPT 5.4 Mini — $0.75/$4.50 per M, 100% quality on our benchmark
+    model: openrouter('openai/gpt-5.4-mini'),
     messages: coreMessages,
     system: `You are ATLAS, an autonomous AGI system embedded in the ATLAS Studio control plane.
 You assist the operator with business strategy, code, deployments, and task execution.

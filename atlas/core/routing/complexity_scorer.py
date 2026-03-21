@@ -4,8 +4,8 @@ Complexity Scorer — Rule-based task complexity scoring for multi-tier routing.
 No LLM calls. Must run in <5ms. Pure heuristic pattern matching.
 
 Score mapping:
-    < 0.4  → Tier 1 (Nemotron 3 Super — default)
-    0.4-0.7 → Tier 2 (MiMo-V2-Pro — escalation)
+    < 0.4  → Tier 1 (GPT 5.4 Mini xhigh — default, $0 via ChatGPT subscription)
+    0.4-0.7 → Tier 2 (GPT 5.4 xhigh — escalation, $0 via ChatGPT subscription)
     > 0.7  → Tier 4 (Opus 4.6 — premium, budget-gated)
 
 Weights are stored in config/scorer_weights.yaml and tunable by the
@@ -41,8 +41,8 @@ class ComplexityScorer:
     Rule-based complexity scorer. No LLM calls.
 
     Returns a float 0.0-1.0 that maps to provider tiers:
-        < 0.4  → Tier 1 (Nemotron 3 Super)
-        0.4-0.7 → Tier 2 (MiMo-V2-Pro)
+        < 0.4  → Tier 1 (GPT 5.4 Mini xhigh)
+        0.4-0.7 → Tier 2 (GPT 5.4 xhigh)
         > 0.7  → Tier 4 (Opus 4.6, with budget gating)
 
     Weights are stored in config and tunable by the M2.7 evolution daemon.

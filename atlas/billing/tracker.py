@@ -118,12 +118,15 @@ class BillingTracker:
         "anthropic": {"input": 3.00, "output": 15.00},
         "ollama": {"input": 0.0, "output": 0.0},
         # Registry-based provider names
-        "nemotron-3-super": {"input": 0.0, "output": 0.0},
-        "qwen3.5-openrouter": {"input": 0.60, "output": 3.00},
+        "gpt-5.4-mini": {"input": 0.0, "output": 0.0},
+        "gpt-5.4": {"input": 0.0, "output": 0.0},
+        "nemotron-120b-nim": {"input": 0.30, "output": 0.80},
+        "nemotron-120b-openrouter": {"input": 0.0, "output": 0.0},
         "mimo-v2-pro": {"input": 1.00, "output": 3.00},
         "minimax-m2.7": {"input": 0.30, "output": 1.20},
         "claude-opus-4-6": {"input": 15.00, "output": 75.00},
         "ollama-local": {"input": 0.0, "output": 0.0},
+        "ollama-local-small": {"input": 0.0, "output": 0.0},
     }
 
     # Client billing rates (can be higher than cost)

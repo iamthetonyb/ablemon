@@ -5,21 +5,21 @@
 description: "ATLAS Skill Quality — T1 vs T2 vs T4"
 
 providers:
-  # Tier 1: GPT 5.4 Nano ($0.20/$1.25, 80% shootout)
-  - id: openai:chat:openai/gpt-5.4-nano
-    config:
-      apiBaseUrl: https://openrouter.ai/api/v1
-      apiKeyEnvar: OPENROUTER_API_KEY
-      temperature: 0.7
-    label: "T1 (GPT 5.4 Nano)"
-
-  # Tier 2: GPT 5.4 Mini ($0.75/$4.50, 100% shootout)
+  # Tier 1: GPT 5.4 Mini ($0.20/$1.25, 80% shootout)
   - id: openai:chat:openai/gpt-5.4-mini
     config:
       apiBaseUrl: https://openrouter.ai/api/v1
       apiKeyEnvar: OPENROUTER_API_KEY
       temperature: 0.7
-    label: "T2 (GPT 5.4 Mini)"
+    label: "T1 (GPT 5.4 Mini)"
+
+  # Tier 2: GPT 5.4 Mini ($0.75/$4.50, 100% shootout)
+  - id: openai:chat:openai/gpt-5.4
+    config:
+      apiBaseUrl: https://openrouter.ai/api/v1
+      apiKeyEnvar: OPENROUTER_API_KEY
+      temperature: 0.7
+    label: "T2 (GPT 5.4)"
 
   # Tier 4: Sonnet 4.6 (gold standard for distillation)
   - id: openai:chat:anthropic/claude-sonnet-4.6

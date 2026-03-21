@@ -1,7 +1,7 @@
 # ATLAS Enricher A/B — Same model, raw vs enriched prompt
 # Tests whether prompt enrichment produces measurably better outputs.
 # 5 tests × 2 prompts (baseline + enriched) × 1 model = 10 API calls
-# Updated 2026-03-19: T1=Nano, grader=Mini (post-shootout)
+# Updated 2026-03-19: T1=Mini, grader=Mini (post-shootout)
 
 description: "ATLAS Enricher Quality — Baseline vs Enriched"
 
@@ -12,12 +12,12 @@ prompts:
     label: "Enriched"
 
 providers:
-  - id: openai:chat:openai/gpt-5.4-nano
+  - id: openai:chat:openai/gpt-5.4-mini
     config:
       apiBaseUrl: https://openrouter.ai/api/v1
       apiKeyEnvar: OPENROUTER_API_KEY
       temperature: 0.7
-    label: "T1 (GPT 5.4 Nano)"
+    label: "T1 (GPT 5.4 Mini)"
 
 defaultTest:
   options:
