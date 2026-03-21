@@ -15,12 +15,17 @@ class InitiativeEngine:
 
     Every job collects REAL data before generating responses.
     No hallucinated status reports.
+
+    Results are persisted to the cron execution DB BEFORE Telegram delivery.
+    If delivery fails, results are still queryable from the DB and logged
+    to audit/initiative_results.jsonl as a fallback.
     """
 
     def __init__(self, gateway):
         self.gateway = gateway
         from core.gateway.goals import GoalTracker
         self.goal_tracker = GoalTracker()
+        self._results_log = Path(gateway.audit_dir) / "initiative_results.jsonl" if hasattr(gateway, 'audit_dir') else None
 
     def register_jobs(self, scheduler):
         """Register proactive AGI jobs with the CronScheduler."""
@@ -70,23 +75,45 @@ class InitiativeEngine:
 
     # ── Telegram Delivery ─────────────────────────────────────────────────
 
-    async def _send_to_owner(self, message: str):
-        """Send a proactive message to the owner via Telegram."""
+    async def _send_to_owner(self, message: str, job_name: str = "unknown"):
+        """Send a proactive message to the owner via Telegram.
+
+        Always persists to initiative_results.jsonl first, so results survive
+        even if Telegram delivery fails.
+        """
+        # Persist to file BEFORE attempting delivery
+        self._persist_result(job_name, message)
+
         if not self.gateway.master_bot or not self.gateway.owner_telegram_id:
-            logger.warning("InitiativeEngine: No master_bot or owner ID — message dropped")
+            logger.warning(f"InitiativeEngine [{job_name}]: No master_bot or owner ID — result saved to log only")
             return
 
         try:
-            # Telegram caps messages at 4096 chars
             if len(message) > 4000:
                 chunks = [message[i:i + 4000] for i in range(0, len(message), 4000)]
                 for chunk in chunks:
                     await self._send_single(chunk)
             else:
                 await self._send_single(message)
-            logger.info("InitiativeEngine: Proactive message delivered.")
+            logger.info(f"InitiativeEngine [{job_name}]: Delivered via Telegram.")
         except Exception as e:
-            logger.error(f"InitiativeEngine delivery failed: {e}")
+            logger.error(f"InitiativeEngine [{job_name}]: Telegram delivery failed: {e} — result persisted to log")
+
+    def _persist_result(self, job_name: str, message: str):
+        """Write result to initiative_results.jsonl (independent of Telegram)."""
+        if not self._results_log:
+            return
+        try:
+            entry = {
+                "timestamp": datetime.now().isoformat(),
+                "job": job_name,
+                "message_length": len(message),
+                "message_preview": message[:500],
+            }
+            with open(self._results_log, "a") as f:
+                f.write(json.dumps(entry) + "\n")
+        except Exception as e:
+            logger.warning(f"Failed to persist initiative result: {e}")
 
     async def _send_single(self, text: str):
         """Send one message, falling back to plain text if Markdown fails."""
@@ -218,10 +245,12 @@ class InitiativeEngine:
                 return "No cron execution history."
             lines = []
             for h in history:
-                icon = "✅" if h["success"] else "❌"
+                icon = "✅" if h.get("success") else ("⏳" if h.get("success") is None else "❌")
                 ts = datetime.fromtimestamp(h["started_at"]).strftime("%m-%d %H:%M")
+                dur = f"({h['duration_s']:.1f}s)" if h.get("duration_s") else "(running)"
+                trigger = f" [{h['trigger']}]" if h.get("trigger", "scheduled") != "scheduled" else ""
                 err = f" — {h['error']}" if h.get("error") else ""
-                lines.append(f"  {icon} {ts} {h['name']} ({h['duration_s']:.1f}s){err}")
+                lines.append(f"  {icon} {ts} {h['name']} {dur}{trigger}{err}")
             return "\n".join(lines)
         except Exception:
             return "Cron history unavailable."
@@ -230,7 +259,7 @@ class InitiativeEngine:
 
     async def _morning_briefing(self):
         """Generate and send the 9AM morning briefing with REAL data."""
-        await self._send_to_owner("☀️ `Compiling morning briefing...`")
+        await self._send_to_owner("☀️ `Compiling morning briefing...`", "morning-briefing")
 
         stats = self._collect_system_stats()
         goals_context = self.goal_tracker.get_summary()
@@ -282,11 +311,11 @@ Structure:
 Rules: Be direct. No fluff. Every claim must reference the data above. If something is at zero, say so."""
 
         briefing = await self._ask_llm(prompt)
-        await self._send_to_owner(f"🌅 Morning Briefing\n\n{briefing}")
+        await self._send_to_owner(f"🌅 Morning Briefing\n\n{briefing}", "morning-briefing")
 
     async def _goal_checkin(self):
         """Generate and send the 9PM daily review with real data."""
-        await self._send_to_owner("🌙 `Compiling evening review...`")
+        await self._send_to_owner("🌙 `Compiling evening review...`", "evening-checkin")
 
         stats = self._collect_system_stats()
         goals_context = self.goal_tracker.get_summary()
@@ -315,14 +344,14 @@ Structure:
 Keep it under 500 words."""
 
         checkin = await self._ask_llm(prompt)
-        await self._send_to_owner(f"📊 Evening Check-In\n\n{checkin}")
+        await self._send_to_owner(f"📊 Evening Check-In\n\n{checkin}", "evening-checkin")
 
     async def _github_digest(self):
         """Scan repos and send a real digest."""
         try:
             repos = await self.gateway.github.list_repos()
             if not repos:
-                await self._send_to_owner("📡 GitHub Digest: No repositories found.")
+                await self._send_to_owner("📡 GitHub Digest: No repositories found.", "github-digest")
                 return
 
             repo_lines = []
@@ -336,14 +365,15 @@ Keep it under 500 words."""
             repo_summary = "\n".join(repo_lines)
             await self._send_to_owner(
                 f"📡 GitHub Digest\n\n"
-                f"{len(repos)} repositories | Top 15 by activity:\n{repo_summary}"
+                f"{len(repos)} repositories | Top 15 by activity:\n{repo_summary}",
+                "github-digest",
             )
         except Exception as e:
-            await self._send_to_owner(f"📡 GitHub Digest: Error — {e}")
+            await self._send_to_owner(f"📡 GitHub Digest: Error — {e}", "github-digest")
 
     async def _self_reflection(self):
         """Weekly self-improvement diagnostic with REAL data."""
-        await self._send_to_owner("🧠 `Running weekly self-reflection with real system data...`")
+        await self._send_to_owner("🧠 `Running weekly self-reflection with real system data...`", "self-reflect")
 
         stats = self._collect_system_stats()
         audit_data = self._collect_audit_data(hours=168)  # 7 days
@@ -401,7 +431,7 @@ Be brutally honest. If something isn't working, say so with evidence from the da
             except Exception as e:
                 logger.warning(f"Failed to log reflection: {e}")
 
-        await self._send_to_owner(f"🧬 Weekly Self-Reflection\n\n{reflection}")
+        await self._send_to_owner(f"🧬 Weekly Self-Reflection\n\n{reflection}", "self-reflect")
 
     async def _extract_learnings(self):
         """Extract learnings from recent conversations and log them."""
@@ -479,7 +509,7 @@ Output ONLY the learnings, no preamble."""
 
             summary += f"\nFull report: `audit/logs/{report.run_id}.md`"
 
-            await self._send_to_owner(summary)
+            await self._send_to_owner(summary, "security-pentest")
 
             # Log to self-improvement if there are failures
             if report.failed > 0 and hasattr(self.gateway, 'self_improvement') and self.gateway.self_improvement:

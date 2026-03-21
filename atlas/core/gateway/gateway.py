@@ -1701,7 +1701,13 @@ class ATLASGateway:
         # Start the Persistence Layer (Proactive AGI)
         self.initiative.register_jobs(self.scheduler)
         print(f"🕰️ ATLAS Persistent Scheduler started with {len(self.scheduler.jobs)} autonomous missions")
-        asyncio.create_task(self.scheduler.run_forever(poll_interval=30.0))
+
+        # Recover any jobs missed during downtime (up to 48h lookback)
+        async def _start_scheduler():
+            await self.scheduler.recover_missed_jobs(max_lookback_hours=48)
+            await self.scheduler.run_forever(poll_interval=30.0)
+
+        asyncio.create_task(_start_scheduler())
 
         # Start the Evolution Daemon (M2.7 background self-improvement)
         try:

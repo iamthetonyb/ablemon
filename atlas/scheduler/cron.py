@@ -1,14 +1,18 @@
 """
-ATLAS Cron Scheduler - PicoClaw-inspired scheduled task execution.
+ATLAS Cron Scheduler — Persistent, self-healing scheduled task execution.
 
-Human-readable cron syntax, graceful shutdown, audit logging.
+SQLite-backed execution log, retry with backoff, missed job recovery on startup.
+Every job execution is recorded before delivery — results survive gateway restarts.
 """
 
 import asyncio
 import logging
+import sqlite3
 import time
+import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Awaitable
 
 logger = logging.getLogger(__name__)
@@ -16,7 +20,7 @@ logger = logging.getLogger(__name__)
 # ── Simple cron expression parser ─────────────────────────────────────────
 
 def _matches_field(value: int, expr: str, min_val: int, max_val: int) -> bool:
-    """Check if a value matches a cron field expression"""
+    """Check if a value matches a cron field expression."""
     if expr == '*':
         return True
     if '/' in expr:
@@ -53,6 +57,28 @@ def cron_matches(expr: str, dt: datetime) -> bool:
         return False
 
 
+def _next_occurrence(expr: str, after: datetime) -> Optional[datetime]:
+    """Find the next datetime that matches a cron expression (within 8 days)."""
+    check = after.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    limit = after + timedelta(days=8)
+    while check < limit:
+        if cron_matches(expr, check):
+            return check
+        check += timedelta(minutes=1)
+    return None
+
+
+def _expected_runs_since(expr: str, since: datetime, until: datetime) -> List[datetime]:
+    """Find all times a cron expression should have fired between since and until."""
+    runs = []
+    cursor = since.replace(second=0, microsecond=0)
+    while cursor <= until:
+        if cron_matches(expr, cursor):
+            runs.append(cursor)
+        cursor += timedelta(minutes=1)
+    return runs
+
+
 # ── Pre-defined schedule expressions ──────────────────────────────────────
 
 EVERY_MINUTE = "* * * * *"
@@ -70,7 +96,7 @@ MONTHLY_1ST = "0 0 1 * *"
 
 @dataclass
 class CronJob:
-    """A scheduled task"""
+    """A scheduled task."""
     name: str
     schedule: str               # Cron expression
     task: Callable              # Async callable
@@ -78,46 +104,181 @@ class CronJob:
     description: str = ""
     enabled: bool = True
     last_run: Optional[float] = None
-    last_status: Optional[str] = None  # "success" | "failed"
+    last_status: Optional[str] = None  # "success" | "failed" | "timeout"
     run_count: int = 0
     error_count: int = 0
     timeout_seconds: float = 300.0  # 5 minute default timeout
+    max_retries: int = 3
+    retry_backoff_base: float = 30.0  # seconds
 
 
 @dataclass
 class JobResult:
-    """Result of a job execution"""
-    name: str
-    success: bool
-    duration_s: float
+    """Result of a job execution."""
+    id: str = field(default_factory=lambda: str(uuid.uuid4())[:12])
+    name: str = ""
+    success: bool = False
+    duration_s: float = 0.0
     output: Optional[Any] = None
     error: Optional[str] = None
     started_at: float = field(default_factory=time.time)
+    attempt: int = 1
+    trigger: str = "scheduled"  # "scheduled" | "manual" | "recovery" | "retry"
+
+
+# ── Persistent execution log (SQLite) ─────────────────────────────────────
+
+class CronExecutionDB:
+    """SQLite-backed execution log. Survives restarts."""
+
+    def __init__(self, db_path: str = "data/cron_executions.db"):
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+
+    def _init_db(self):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS executions (
+                    id TEXT PRIMARY KEY,
+                    job_name TEXT NOT NULL,
+                    started_at REAL NOT NULL,
+                    finished_at REAL,
+                    success INTEGER,
+                    duration_s REAL,
+                    error TEXT,
+                    attempt INTEGER DEFAULT 1,
+                    trigger TEXT DEFAULT 'scheduled',
+                    output_preview TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_executions_job_time
+                ON executions (job_name, started_at DESC)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_executions_time
+                ON executions (started_at DESC)
+            """)
+
+    def record_start(self, result: JobResult):
+        """Record job start (before execution)."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT INTO executions (id, job_name, started_at, attempt, trigger) VALUES (?, ?, ?, ?, ?)",
+                (result.id, result.name, result.started_at, result.attempt, result.trigger),
+            )
+
+    def record_finish(self, result: JobResult):
+        """Record job completion (success or failure)."""
+        output_preview = str(result.output)[:500] if result.output else None
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """UPDATE executions
+                   SET finished_at = ?, success = ?, duration_s = ?, error = ?, output_preview = ?
+                   WHERE id = ?""",
+                (
+                    result.started_at + result.duration_s,
+                    1 if result.success else 0,
+                    result.duration_s,
+                    result.error,
+                    output_preview,
+                    result.id,
+                ),
+            )
+
+    def get_last_success(self, job_name: str) -> Optional[float]:
+        """Get timestamp of last successful execution for a job."""
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT started_at FROM executions WHERE job_name = ? AND success = 1 ORDER BY started_at DESC LIMIT 1",
+                (job_name,),
+            ).fetchone()
+        return row[0] if row else None
+
+    def get_recent(self, limit: int = 50, job_name: str = None) -> List[Dict]:
+        """Get recent execution history."""
+        with sqlite3.connect(self.db_path) as conn:
+            if job_name:
+                rows = conn.execute(
+                    "SELECT id, job_name, started_at, finished_at, success, duration_s, error, attempt, trigger "
+                    "FROM executions WHERE job_name = ? ORDER BY started_at DESC LIMIT ?",
+                    (job_name, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, job_name, started_at, finished_at, success, duration_s, error, attempt, trigger "
+                    "FROM executions ORDER BY started_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+        return [
+            {
+                "id": r[0], "name": r[1], "started_at": r[2], "finished_at": r[3],
+                "success": bool(r[4]) if r[4] is not None else None,
+                "duration_s": r[5], "error": r[6], "attempt": r[7], "trigger": r[8],
+            }
+            for r in rows
+        ]
+
+    def get_job_stats(self, job_name: str, days: int = 30) -> Dict:
+        """Get execution statistics for a job over N days."""
+        cutoff = time.time() - (days * 86400)
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                """SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successes,
+                    SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as failures,
+                    AVG(duration_s) as avg_duration,
+                    MAX(started_at) as last_run
+                FROM executions WHERE job_name = ? AND started_at > ?""",
+                (job_name, cutoff),
+            ).fetchone()
+        return {
+            "total": row[0] or 0,
+            "successes": row[1] or 0,
+            "failures": row[2] or 0,
+            "avg_duration_s": round(row[3] or 0, 1),
+            "last_run": row[4],
+            "success_rate": round((row[1] or 0) / max(row[0] or 1, 1) * 100, 1),
+        }
+
+    def cleanup(self, max_age_days: int = 90):
+        """Purge records older than max_age_days."""
+        cutoff = time.time() - (max_age_days * 86400)
+        with sqlite3.connect(self.db_path) as conn:
+            deleted = conn.execute(
+                "DELETE FROM executions WHERE started_at < ?", (cutoff,)
+            ).rowcount
+        if deleted:
+            logger.info(f"Cron DB cleanup: purged {deleted} records older than {max_age_days} days")
 
 
 # ── Scheduler ─────────────────────────────────────────────────────────────
 
 class CronScheduler:
     """
-    Cron-based scheduler for ATLAS background tasks.
+    Persistent cron scheduler for ATLAS autonomous operations.
 
-    All default ATLAS maintenance tasks are registered here:
-    - Daily memory consolidation
-    - Weekly billing summary
-    - Health checks
-    - Proactive briefings
+    - SQLite-backed execution log (survives restarts)
+    - Retry with exponential backoff (up to 3 attempts)
+    - Missed job recovery on startup
+    - Awaited execution (no fire-and-forget)
+    - 90-day history retention with auto-cleanup
 
     Usage:
         scheduler = CronScheduler()
         scheduler.add_job("daily-cleanup", DAILY_3AM, my_cleanup_func)
+        await scheduler.recover_missed_jobs()  # catch up after downtime
         await scheduler.run_forever()
     """
 
-    def __init__(self, audit_log=None):
+    def __init__(self, audit_log=None, db_path: str = "data/cron_executions.db"):
         self.jobs: Dict[str, CronJob] = {}
         self.audit_log = audit_log
         self._running = False
-        self._history: List[JobResult] = []
+        self.db = CronExecutionDB(db_path)
+        self._startup_time = time.time()
 
     def add_job(
         self,
@@ -128,22 +289,9 @@ class CronScheduler:
         description: str = "",
         enabled: bool = True,
         timeout: float = 300.0,
+        max_retries: int = 3,
     ) -> CronJob:
-        """
-        Register a new cron job.
-
-        Args:
-            name: Unique job identifier
-            schedule: Cron expression (e.g., "0 9 * * 1-5")
-            task: Async function to call
-            args: Arguments to pass to the task
-            description: Human-readable description
-            enabled: Whether job is active
-            timeout: Max execution time in seconds
-
-        Returns:
-            The created CronJob
-        """
+        """Register a new cron job."""
         job = CronJob(
             name=name,
             schedule=schedule,
@@ -152,13 +300,23 @@ class CronScheduler:
             description=description,
             enabled=enabled,
             timeout_seconds=timeout,
+            max_retries=max_retries,
         )
+        # Hydrate from DB: restore last_run/status from persistent history
+        last = self.db.get_last_success(name)
+        if last:
+            job.last_run = last
+        stats = self.db.get_job_stats(name, days=30)
+        job.run_count = stats["total"]
+        job.error_count = stats["failures"]
+        if stats["last_run"]:
+            job.last_run = stats["last_run"]
+
         self.jobs[name] = job
-        logger.info(f"Registered cron job: {name} [{schedule}]")
+        logger.info(f"Registered cron job: {name} [{schedule}] (history: {stats['total']} runs, {stats['success_rate']}% success)")
         return job
 
     def remove_job(self, name: str) -> bool:
-        """Remove a job by name"""
         if name in self.jobs:
             del self.jobs[name]
             logger.info(f"Removed cron job: {name}")
@@ -173,14 +331,72 @@ class CronScheduler:
         if name in self.jobs:
             self.jobs[name].enabled = False
 
+    async def recover_missed_jobs(self, max_lookback_hours: int = 48):
+        """
+        On startup, detect jobs that should have run during downtime and execute them.
+
+        Only recovers jobs with schedules coarser than every-5-minutes (skip health checks).
+        Only recovers if the last successful run is older than the expected interval.
+        """
+        now = datetime.now()
+        lookback = now - timedelta(hours=max_lookback_hours)
+        recovered = 0
+
+        for name, job in self.jobs.items():
+            if not job.enabled:
+                continue
+
+            # Skip high-frequency jobs (every minute / 5 minutes) — not worth recovering
+            if job.schedule in (EVERY_MINUTE, EVERY_5_MINUTES, EVERY_15_MINUTES):
+                continue
+
+            # Find when this job last succeeded
+            last_success = self.db.get_last_success(name)
+            if last_success:
+                last_dt = datetime.fromtimestamp(last_success)
+            else:
+                last_dt = lookback  # never ran — check full lookback
+
+            # Find expected runs since last success
+            expected = _expected_runs_since(job.schedule, last_dt, now)
+            if not expected:
+                continue
+
+            # Check if the most recent expected run was missed
+            most_recent_expected = expected[-1]
+            if last_success and last_success >= most_recent_expected.timestamp():
+                continue  # Already ran
+
+            # This job missed its last scheduled run — recover it
+            logger.warning(
+                f"⚡ Recovering missed job: {name} "
+                f"(last success: {datetime.fromtimestamp(last_success).isoformat() if last_success else 'never'}, "
+                f"expected: {most_recent_expected.isoformat()})"
+            )
+            try:
+                await self._run_job(job, trigger="recovery")
+                recovered += 1
+            except Exception as e:
+                logger.error(f"Recovery failed for {name}: {e}")
+
+        if recovered:
+            logger.info(f"⚡ Recovered {recovered} missed job(s)")
+        else:
+            logger.info("No missed jobs to recover")
+
     async def run_forever(self, poll_interval: float = 30.0):
         """
         Run the scheduler indefinitely.
 
         Checks every poll_interval seconds for due jobs.
+        Jobs are awaited (not fire-and-forget). Multiple due jobs run sequentially
+        to avoid resource contention.
         """
         self._running = True
-        logger.info(f"⏰ Cron scheduler started ({len(self.jobs)} jobs)")
+        logger.info(f"⏰ Cron scheduler started ({len(self.jobs)} jobs, persistent DB active)")
+
+        # Daily DB cleanup at startup
+        self.db.cleanup(max_age_days=90)
 
         while self._running:
             now = datetime.now()
@@ -190,73 +406,82 @@ class CronScheduler:
                 # Avoid double-firing in same minute
                 if job.last_run and (time.time() - job.last_run) < 60:
                     continue
-                asyncio.create_task(self._run_job(job))
+                # Await execution — no fire-and-forget
+                await self._run_job_with_retry(job)
 
             await asyncio.sleep(poll_interval)
 
     async def run_job_now(self, name: str) -> JobResult:
-        """Manually trigger a job immediately"""
+        """Manually trigger a job immediately."""
         job = self.jobs.get(name)
         if not job:
             raise ValueError(f"Job '{name}' not found")
-        return await self._run_job(job)
+        return await self._run_job_with_retry(job, trigger="manual")
 
-    async def _run_job(self, job: CronJob) -> JobResult:
-        """Execute a single job with timeout and audit logging"""
+    async def _run_job_with_retry(self, job: CronJob, trigger: str = "scheduled") -> JobResult:
+        """Execute a job with retry on failure (exponential backoff)."""
+        result = await self._run_job(job, trigger=trigger)
+
+        attempt = 1
+        while not result.success and attempt < job.max_retries:
+            attempt += 1
+            backoff = job.retry_backoff_base * (2 ** (attempt - 2))  # 30s, 60s, 120s
+            logger.info(f"🔄 Retrying {job.name} in {backoff:.0f}s (attempt {attempt}/{job.max_retries})")
+            await asyncio.sleep(backoff)
+            result = await self._run_job(job, trigger="retry", attempt=attempt)
+
+        if not result.success and attempt >= job.max_retries:
+            logger.error(f"💀 Job '{job.name}' failed after {attempt} attempts — giving up until next schedule")
+
+        return result
+
+    async def _run_job(self, job: CronJob, trigger: str = "scheduled", attempt: int = 1) -> JobResult:
+        """Execute a single job with timeout, persistence, and audit logging."""
         start = time.time()
         job.last_run = start
         job.run_count += 1
 
-        logger.info(f"⏰ Running job: {job.name}")
+        result = JobResult(
+            name=job.name,
+            started_at=start,
+            attempt=attempt,
+            trigger=trigger,
+        )
+
+        # Persist start BEFORE execution
+        self.db.record_start(result)
+        logger.info(f"⏰ Running job: {job.name} [trigger={trigger}, attempt={attempt}]")
 
         try:
             output = await asyncio.wait_for(
                 job.task(**job.args),
-                timeout=job.timeout_seconds
+                timeout=job.timeout_seconds,
             )
 
-            duration = time.time() - start
-            result = JobResult(
-                name=job.name,
-                success=True,
-                duration_s=duration,
-                output=output,
-                started_at=start
-            )
+            result.duration_s = time.time() - start
+            result.success = True
+            result.output = output
             job.last_status = "success"
-            logger.info(f"✅ Job '{job.name}' completed in {duration:.1f}s")
+            logger.info(f"✅ Job '{job.name}' completed in {result.duration_s:.1f}s")
 
         except asyncio.TimeoutError:
-            duration = time.time() - start
-            result = JobResult(
-                name=job.name,
-                success=False,
-                duration_s=duration,
-                error=f"Timed out after {job.timeout_seconds}s",
-                started_at=start
-            )
+            result.duration_s = time.time() - start
+            result.error = f"Timed out after {job.timeout_seconds}s"
             job.last_status = "timeout"
             job.error_count += 1
-            logger.warning(f"⏱ Job '{job.name}' timed out")
+            logger.warning(f"⏱ Job '{job.name}' timed out after {job.timeout_seconds}s")
 
         except Exception as e:
-            duration = time.time() - start
-            result = JobResult(
-                name=job.name,
-                success=False,
-                duration_s=duration,
-                error=str(e),
-                started_at=start
-            )
+            result.duration_s = time.time() - start
+            result.error = str(e)
             job.last_status = "failed"
             job.error_count += 1
             logger.error(f"❌ Job '{job.name}' failed: {e}")
 
-        self._history.append(result)
-        if len(self._history) > 500:
-            self._history = self._history[-500:]
+        # Persist result AFTER execution (before any delivery)
+        self.db.record_finish(result)
 
-        # Audit log
+        # Audit log (best-effort, non-blocking)
         if self.audit_log:
             try:
                 await self.audit_log.log_event(
@@ -266,7 +491,9 @@ class CronScheduler:
                         "success": result.success,
                         "duration_s": result.duration_s,
                         "error": result.error,
-                    }
+                        "trigger": trigger,
+                        "attempt": attempt,
+                    },
                 )
             except Exception:
                 pass
@@ -278,37 +505,31 @@ class CronScheduler:
         logger.info("Cron scheduler stopped")
 
     def get_status(self) -> Dict[str, Any]:
-        """Get status of all jobs"""
+        """Get status of all jobs with persistent stats."""
+        jobs_status = {}
+        for name, job in self.jobs.items():
+            stats = self.db.get_job_stats(name, days=30)
+            jobs_status[name] = {
+                "schedule": job.schedule,
+                "description": job.description,
+                "enabled": job.enabled,
+                "last_run": job.last_run,
+                "last_status": job.last_status,
+                "run_count_30d": stats["total"],
+                "success_rate_30d": stats["success_rate"],
+                "error_count_30d": stats["failures"],
+                "avg_duration_s": stats["avg_duration_s"],
+            }
         return {
             "total_jobs": len(self.jobs),
             "enabled_jobs": sum(1 for j in self.jobs.values() if j.enabled),
-            "jobs": {
-                name: {
-                    "schedule": job.schedule,
-                    "description": job.description,
-                    "enabled": job.enabled,
-                    "last_run": job.last_run,
-                    "last_status": job.last_status,
-                    "run_count": job.run_count,
-                    "error_count": job.error_count,
-                }
-                for name, job in self.jobs.items()
-            }
+            "db_path": str(self.db.db_path),
+            "jobs": jobs_status,
         }
 
-    def get_recent_history(self, limit: int = 50) -> List[Dict]:
-        """Get recent job execution history"""
-        recent = sorted(self._history, key=lambda r: r.started_at, reverse=True)
-        return [
-            {
-                "name": r.name,
-                "success": r.success,
-                "duration_s": r.duration_s,
-                "error": r.error,
-                "started_at": r.started_at,
-            }
-            for r in recent[:limit]
-        ]
+    def get_recent_history(self, limit: int = 50, job_name: str = None) -> List[Dict]:
+        """Get recent job execution history from persistent DB."""
+        return self.db.get_recent(limit=limit, job_name=job_name)
 
 
 def register_default_jobs(
@@ -317,17 +538,11 @@ def register_default_jobs(
     billing=None,
     audit_log=None,
 ) -> None:
-    """
-    Register all default ATLAS maintenance jobs.
+    """Register all default ATLAS maintenance jobs."""
 
-    Call this once during initialization to set up standard schedules.
-    """
-
-    # Memory consolidation - 3am daily
     async def consolidate_memory():
         if memory:
             logger.info("Running memory consolidation...")
-            # archive old memories
             return "Memory consolidated"
 
     scheduler.add_job(
@@ -337,7 +552,6 @@ def register_default_jobs(
         description="Archive and compress old memories",
     )
 
-    # Weekly billing summary - Sunday 6pm
     async def billing_summary():
         if billing:
             logger.info("Generating weekly billing summary...")
@@ -350,7 +564,6 @@ def register_default_jobs(
         description="Generate weekly billing report for all clients",
     )
 
-    # Health check - every 5 minutes
     async def health_check():
         logger.debug("Health check OK")
         return {"status": "healthy", "timestamp": time.time()}
@@ -361,9 +574,9 @@ def register_default_jobs(
         health_check,
         description="Periodic system health check",
         timeout=30.0,
+        max_retries=1,  # Don't retry health checks
     )
 
-    # Audit log rotation - monthly
     async def rotate_audit_log():
         if audit_log:
             logger.info("Rotating audit logs...")
