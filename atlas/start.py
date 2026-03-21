@@ -5,9 +5,23 @@ Secure Multi-Tenant AI Agent System — Modular Gateway Architecture
 """
 
 import asyncio
+import logging
 import os
 import sys
 from pathlib import Path
+
+# Configure logging FIRST — without this, all logger.info/error calls are lost
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    datefmt="%H:%M:%S",
+    stream=sys.stderr,
+)
+# Quiet noisy libraries
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("telegram").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 # Ensure we're in the right directory
 os.chdir(Path(__file__).parent)
