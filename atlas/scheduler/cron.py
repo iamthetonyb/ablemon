@@ -7,15 +7,32 @@ Every job execution is recorded before delivery — results survive gateway rest
 
 import asyncio
 import logging
+import os
 import sqlite3
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Awaitable
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
+
+
+def _get_tz() -> ZoneInfo:
+    """Get configured timezone from ATLAS_TIMEZONE env var, default to UTC."""
+    tz_name = os.environ.get("ATLAS_TIMEZONE", "UTC")
+    try:
+        return ZoneInfo(tz_name)
+    except Exception:
+        logger.warning(f"Invalid ATLAS_TIMEZONE '{tz_name}', falling back to UTC")
+        return ZoneInfo("UTC")
+
+
+def _now() -> datetime:
+    """Current time in the configured ATLAS timezone."""
+    return datetime.now(_get_tz())
 
 # ── Simple cron expression parser ─────────────────────────────────────────
 
@@ -337,10 +354,23 @@ class CronScheduler:
 
         Only recovers jobs with schedules coarser than every-5-minutes (skip health checks).
         Only recovers if the last successful run is older than the expected interval.
+        If the DB is empty (first boot or wiped), limits lookback to 2 hours to avoid
+        flooding all channels with stale briefings.
         """
-        now = datetime.now()
-        lookback = now - timedelta(hours=max_lookback_hours)
+        tz = _get_tz()
+        now = _now()
         recovered = 0
+
+        # If DB has zero records, this is likely a fresh DB (first boot or wipe).
+        # Limit lookback to 2 hours to avoid recovering stale daily/weekly jobs.
+        total_records = self.db.get_job_stats("__any__", days=9999)["total"]
+        if total_records == 0:
+            effective_lookback = min(max_lookback_hours, 2)
+            logger.info(f"Empty cron DB — limiting recovery lookback to {effective_lookback}h (fresh boot)")
+        else:
+            effective_lookback = max_lookback_hours
+
+        lookback = now - timedelta(hours=effective_lookback)
 
         for name, job in self.jobs.items():
             if not job.enabled:
@@ -353,24 +383,26 @@ class CronScheduler:
             # Find when this job last succeeded
             last_success = self.db.get_last_success(name)
             if last_success:
-                last_dt = datetime.fromtimestamp(last_success)
+                last_dt = datetime.fromtimestamp(last_success, tz=tz)
             else:
                 last_dt = lookback  # never ran — check full lookback
 
             # Find expected runs since last success
-            expected = _expected_runs_since(job.schedule, last_dt, now)
+            expected = _expected_runs_since(job.schedule, last_dt.replace(tzinfo=None), now.replace(tzinfo=None))
             if not expected:
                 continue
 
             # Check if the most recent expected run was missed
             most_recent_expected = expected[-1]
-            if last_success and last_success >= most_recent_expected.timestamp():
+            # Re-attach ATLAS timezone before converting to epoch (naive .timestamp() assumes server tz)
+            most_recent_ts = most_recent_expected.replace(tzinfo=tz).timestamp()
+            if last_success and last_success >= most_recent_ts:
                 continue  # Already ran
 
             # This job missed its last scheduled run — recover it
             logger.warning(
                 f"⚡ Recovering missed job: {name} "
-                f"(last success: {datetime.fromtimestamp(last_success).isoformat() if last_success else 'never'}, "
+                f"(last success: {datetime.fromtimestamp(last_success, tz=tz).isoformat() if last_success else 'never'}, "
                 f"expected: {most_recent_expected.isoformat()})"
             )
             try:
@@ -393,13 +425,14 @@ class CronScheduler:
         to avoid resource contention.
         """
         self._running = True
-        logger.info(f"⏰ Cron scheduler started ({len(self.jobs)} jobs, persistent DB active)")
+        tz = _get_tz()
+        logger.info(f"⏰ Cron scheduler started ({len(self.jobs)} jobs, tz={tz}, persistent DB active)")
 
         # Daily DB cleanup at startup
         self.db.cleanup(max_age_days=90)
 
         while self._running:
-            now = datetime.now()
+            now = _now()
             due = [j for j in self.jobs.values() if j.enabled and cron_matches(j.schedule, now)]
 
             for job in due:
