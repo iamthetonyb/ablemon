@@ -26,6 +26,7 @@ jobs:
           OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
           OLLAMA_BASE_URL: ${{ secrets.OLLAMA_BASE_URL || 'http://localhost:11434' }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_OAUTH_AUTH_JSON: ${{ secrets.OPENAI_OAUTH_AUTH_JSON }}
           ATLAS_TIMEZONE: ${{ secrets.ATLAS_TIMEZONE || 'America/Los_Angeles' }}
           GITHUB_WEBHOOK_SECRET: ${{ secrets.GITHUB_WEBHOOK_SECRET }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
@@ -41,15 +42,15 @@ jobs:
           host: 146.190.142.68
           username: root
           key: ${{ secrets.DO_SSH_KEY }}
-          envs: TELEGRAM_BOT_TOKEN,ATLAS_OWNER_TELEGRAM_ID,ATLAS_OWNER_USERNAME,NVIDIA_API_KEY,OPENROUTER_API_KEY,ANTHROPIC_API_KEY,OLLAMA_API_KEY,OLLAMA_BASE_URL,OPENAI_API_KEY,ATLAS_TIMEZONE,GITHUB_WEBHOOK_SECRET,STRIPE_WEBHOOK_SECRET,NOTION_API_KEY,NOTION_DATABASE_ID,GITHUB_TOKEN,DO_API_TOKEN,VERCEL_TOKEN,BRAVE_SEARCH_API_KEY,PERPLEXITY_API_KEY,GEMINI_API_KEY
+          envs: TELEGRAM_BOT_TOKEN,ATLAS_OWNER_TELEGRAM_ID,ATLAS_OWNER_USERNAME,NVIDIA_API_KEY,OPENROUTER_API_KEY,ANTHROPIC_API_KEY,OLLAMA_API_KEY,OLLAMA_BASE_URL,OPENAI_API_KEY,OPENAI_OAUTH_AUTH_JSON,ATLAS_TIMEZONE,GITHUB_WEBHOOK_SECRET,STRIPE_WEBHOOK_SECRET,NOTION_API_KEY,NOTION_DATABASE_ID,GITHUB_TOKEN,DO_API_TOKEN,VERCEL_TOKEN,BRAVE_SEARCH_API_KEY,PERPLEXITY_API_KEY,GEMINI_API_KEY
           script: |
             set -e
 
             echo "=== Pulling latest code ==="
-            if [ ! -d /opt/atlas/AIDE/.git ]; then
-              git clone https://github.com/iamthetonyb/AIDE.git /opt/atlas/AIDE
+            if [ ! -d /opt/atlas/ABLE/.git ]; then
+              git clone https://github.com/iamthetonyb/ABLE.git /opt/atlas/ABLE
             fi
-            cd /opt/atlas/AIDE
+            cd /opt/atlas/ABLE
             git fetch origin
             git reset --hard origin/main
             echo "✓ Code updated to $(git rev-parse --short HEAD)"
@@ -83,6 +84,16 @@ jobs:
             chmod 600 /home/atlas/.atlas/.env
             echo "✓ .env file updated securely"
 
+            echo "=== Deploying OpenAI OAuth token ==="
+            if [ -n "$OPENAI_OAUTH_AUTH_JSON" ]; then
+              echo "$OPENAI_OAUTH_AUTH_JSON" > /home/atlas/.atlas/auth.json
+              chown atlas:atlas /home/atlas/.atlas/auth.json
+              chmod 600 /home/atlas/.atlas/auth.json
+              echo "✓ OpenAI OAuth token deployed (T1/T2 routing via subscription)"
+            else
+              echo "⚠ OPENAI_OAUTH_AUTH_JSON not set — T1/T2 will fall back to Nemotron/MiMo"
+            fi
+
             echo "=== Ensuring python3-venv is installed ==="
             apt-get update -qq && apt-get install -y -qq python3-venv python3-pip > /dev/null
 
@@ -91,17 +102,17 @@ jobs:
               python3 -m venv /home/atlas/.atlas/venv
               chown -R atlas:atlas /home/atlas/.atlas/venv
             fi
-            /home/atlas/.atlas/venv/bin/pip install -r /opt/atlas/AIDE/atlas/requirements.txt --quiet --upgrade
+            /home/atlas/.atlas/venv/bin/pip install -r /opt/atlas/ABLE/atlas/requirements.txt --quiet --upgrade
 
             echo "=== Updating ATLAS files ==="
-            rsync -av --delete /opt/atlas/AIDE/atlas/ /home/atlas/.atlas/atlas/
-            rsync -av /opt/atlas/AIDE/config/ /home/atlas/.atlas/config/
-            cp /opt/atlas/AIDE/ATLAS.md /home/atlas/.atlas/ATLAS.md
-            cp /opt/atlas/AIDE/SOUL.md /home/atlas/.atlas/SOUL.md
+            rsync -av --delete /opt/atlas/ABLE/atlas/ /home/atlas/.atlas/atlas/
+            rsync -av /opt/atlas/ABLE/config/ /home/atlas/.atlas/config/
+            cp /opt/atlas/ABLE/ATLAS.md /home/atlas/.atlas/ATLAS.md
+            cp /opt/atlas/ABLE/SOUL.md /home/atlas/.atlas/SOUL.md
             chown -R atlas:atlas /home/atlas/.atlas/
 
             echo "=== Updating systemd service ==="
-            cp /opt/atlas/AIDE/atlas/atlas.service /etc/systemd/system/atlas.service
+            cp /opt/atlas/ABLE/atlas/atlas.service /etc/systemd/system/atlas.service
             systemctl daemon-reload
 
             echo "=== Restarting ATLAS ==="
