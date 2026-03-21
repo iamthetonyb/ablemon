@@ -15,8 +15,8 @@ ATLAS uses a **complexity-scored 5-tier routing system** (see `docs/ROUTING.md` 
 
 | Score | Tier | Provider | Cost |
 |-------|------|----------|------|
-| < 0.4 | 1 | GPT 5.4 Nano (OpenAI OAuth) → Nemotron 120B (NIM free fallback) | $0 (subscription) |
-| 0.4–0.7 | 2 | GPT 5.4 (OpenAI OAuth) → MiMo-V2-Pro (OpenRouter fallback) | $0 (subscription) |
+| < 0.4 | 1 | GPT 5.4 Mini xhigh (OAuth) → Nemotron 120B (NIM free fallback) | $0 (subscription) |
+| 0.4–0.7 | 2 | GPT 5.4 xhigh (OAuth) → MiMo-V2-Pro (OpenRouter fallback) | $0 (subscription) |
 | > 0.7 | 4 | Claude Opus 4.6 (budget-gated) | $15/$75 per M |
 | background | 3 | MiniMax M2.7 (evolution daemon only, OpenRouter) | $0.30/$1.20 per M |
 | offline | 5 | Ollama Llama 3.1 (local) | FREE |

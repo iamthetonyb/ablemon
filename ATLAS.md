@@ -92,16 +92,17 @@ User Input → TrustGate → Scanner → Auditor → PromptEnricher → Complexi
 
 | Tier | Model | Provider | Reasoning | Context | Use Case |
 |------|-------|----------|-----------|---------|----------|
-| 1 | **GPT 5.4 Nano** | ChatGPT sub (OAuth) | `none` | 128K | Default — 70-80% of requests |
-| 1 (fallback) | Nemotron 120B | NVIDIA NIM (free) | — | 262K | Nano unavailable / trivial tasks |
-| 2 | **GPT 5.4** | ChatGPT sub (OAuth) | **`xhigh`** | 1M | Moderate+ complexity, deep reasoning |
+| 1 | **GPT 5.4 Mini** | ChatGPT sub (OAuth) | **`xhigh`** | 400K | Default — 70-80% of requests |
+| 1 (fallback) | Nemotron 120B | NVIDIA NIM (free) | — | 262K | Mini unavailable |
+| 2 | **GPT 5.4** | ChatGPT sub (OAuth) | **`xhigh`** | 1M | Complex tasks, deep reasoning |
 | 2 (fallback) | MiMo-V2-Pro | OpenRouter ($1/$3/M) | — | 131K | GPT 5.4 unavailable |
 | 3 | MiniMax M2.7 | OpenRouter ($0.30/$1.20/M) | — | 1M | **Background-only** — evolution daemon |
 | 4 | **Claude Opus 4.6** | Anthropic ($15/$75/M) | — | 200K | Premium — budget-gated |
 | 5 | Qwen 3.5 27B (Q3) → 9B | Ollama (local, free) | — | 131K | Offline fallback |
 
 **T1 and T2 cost $0 per token** — routed through your ChatGPT subscription via OAuth PKCE.
-**T2 runs at `xhigh` reasoning effort** — maximum thinking depth on every request. No reason to hold back on subscription.
+**Both tiers run at `xhigh` reasoning effort** — maximum thinking depth on every request.
+**Note**: GPT 5.4 Nano is not available on WHAM (subscription endpoint). Mini is the lightest model available — and it scored 100% on shootout, so no quality loss.
 
 **M2.7 is never user-facing.** It only runs as the evolution daemon's analysis brain.
 
@@ -134,8 +135,8 @@ Plus domain-specific adjustments:
 
 | Score | Tier | Primary Provider |
 |-------|------|-----------------|
-| < 0.4 | 1 | GPT 5.4 Nano |
-| 0.4 - 0.7 | 2 | GPT 5.4 |
+| < 0.4 | 1 | GPT 5.4 Mini (xhigh) |
+| 0.4 - 0.7 | 2 | GPT 5.4 (xhigh) |
 | > 0.7 | 4 | Claude Opus 4.6 (budget-gated) |
 
 When Opus budget is exhausted, Tier 4 tasks cap at Tier 2.

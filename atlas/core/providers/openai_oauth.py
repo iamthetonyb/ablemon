@@ -190,17 +190,15 @@ class OpenAIOAuthProvider:
         return self.tokens
 
 class OpenAIChatGPTProvider(LLMProvider):
-    """ATLAS-compatible provider using ChatGPT OAuth (Subscription BYOK)
+    """ATLAS-compatible provider using ChatGPT OAuth (Subscription BYOK).
 
-    Supports GPT 5.4 reasoning.effort parameter:
-        none    — fastest, no reasoning tokens (T1 default)
-        low     — light reasoning boost
-        medium  — balanced
-        high    — deep reasoning (T2 default)
-        xhigh   — maximum reasoning depth (use when evals justify the latency)
+    Routes through the WHAM backend (chatgpt.com/backend-api/wham).
+    WHAM requires: stream=true, store=false, instructions field.
+    Available models: gpt-5.4, gpt-5.4-mini (NOT nano, o-series, or gpt-4o).
+
+    Supports reasoning.effort: none, minimal, low, medium, high, xhigh.
     """
 
-    # Reasoning effort levels supported by GPT 5.4
     VALID_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
 
     def __init__(self, config: ProviderConfig, auth_manager=None, reasoning_effort: str = "none"):
@@ -214,6 +212,77 @@ class OpenAIChatGPTProvider(LLMProvider):
     def name(self) -> str:
         return "openai_oauth"
 
+    def _build_payload(
+        self,
+        messages: List[Message],
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+        tools: Optional[List[Dict]] = None,
+        tool_choice: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+        instructions: Optional[str] = None,
+    ) -> Dict:
+        """Build WHAM-compatible Responses API payload."""
+        effort = reasoning_effort or self.reasoning_effort
+        if effort not in self.VALID_EFFORTS:
+            effort = self.reasoning_effort
+
+        # Separate system messages into instructions, rest into input
+        system_parts = []
+        input_msgs = []
+        for m in messages:
+            content = m.content if isinstance(m.content, str) else json.dumps(m.content)
+            if m.role == Role.SYSTEM:
+                system_parts.append(content)
+            else:
+                input_msgs.append({"role": m.role.value, "content": content})
+
+        payload = {
+            "model": self.model or "gpt-5.4",
+            "instructions": instructions or "\n".join(system_parts) or "You are a helpful assistant.",
+            "input": input_msgs,
+            "stream": True,   # WHAM requires streaming
+            "store": False,   # WHAM requires store=false
+        }
+
+        if effort and effort != "none":
+            payload["reasoning"] = {"effort": effort}
+
+        # temperature not supported when reasoning is active
+        if effort in ("none", "minimal", "") or not effort:
+            payload["temperature"] = temperature
+
+        # Note: WHAM does not support max_output_tokens — omit it
+        if tools:
+            payload["tools"] = tools
+        if tool_choice:
+            payload["tool_choice"] = tool_choice
+
+        return payload
+
+    def _consume_sse(self, response) -> tuple:
+        """Parse SSE stream from WHAM, return (content, usage_dict)."""
+        full_text = ""
+        usage = {}
+        for raw_line in response.iter_lines():
+            line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
+            if not line or not line.startswith("data: "):
+                continue
+            data_str = line[6:]
+            if data_str.strip() == "[DONE]":
+                break
+            try:
+                event = json.loads(data_str)
+                etype = event.get("type", "")
+                if etype == "response.output_text.delta":
+                    full_text += event.get("delta", "")
+                elif etype == "response.completed":
+                    resp = event.get("response", {})
+                    usage = resp.get("usage", {})
+            except (json.JSONDecodeError, KeyError):
+                pass
+        return full_text, usage
+
     async def complete(
         self,
         messages: List[Message],
@@ -223,42 +292,17 @@ class OpenAIChatGPTProvider(LLMProvider):
         tool_choice: Optional[str] = None,
         **kwargs
     ) -> CompletionResult:
-        token = self.auth_manager.get_provider_token('openai_oauth')
+        token = self.auth_manager.get_provider_token("openai_oauth")
         if not token:
             raise ProviderError(self.name, "Not authenticated with OpenAI OAuth", retryable=False)
 
-        # Allow per-request override of reasoning effort
-        effort = kwargs.pop("reasoning_effort", self.reasoning_effort)
-        if effort not in self.VALID_EFFORTS:
-            effort = self.reasoning_effort
+        effort = kwargs.pop("reasoning_effort", None)
+        instructions = kwargs.pop("instructions", None)
+        payload = self._build_payload(
+            messages, temperature, max_tokens, tools, tool_choice, effort, instructions
+        )
 
-        # Responses API format (WHAM backend)
-        payload = {
-            "model": self.model or "gpt-5.4",
-            "input": [
-                {
-                    "role": m.role.value,
-                    "content": m.content if isinstance(m.content, str) else json.dumps(m.content)
-                } for m in messages
-            ],
-            "stream": False,
-        }
-
-        # Add reasoning effort (skip for "none" to keep payload clean)
-        if effort and effort != "none":
-            payload["reasoning"] = {"effort": effort}
-
-        # temperature is not supported when reasoning is active
-        if effort in ("none", "minimal") or not effort:
-            payload["temperature"] = temperature
-
-        if max_tokens:
-            payload["max_output_tokens"] = max_tokens
-
-        if tools:
-            payload["tools"] = tools
-        if tool_choice:
-            payload["tool_choice"] = tool_choice
+        timeout = kwargs.pop("timeout", 180)
 
         try:
             loop = asyncio.get_event_loop()
@@ -271,47 +315,84 @@ class OpenAIChatGPTProvider(LLMProvider):
                         "Authorization": f"Bearer {token}",
                         "Content-Type": "application/json",
                     },
-                    timeout=120,  # longer timeout for reasoning
+                    timeout=timeout,
+                    stream=True,
                 )
             )
             response.raise_for_status()
-            data = response.json()
 
-            # Parse Responses API output format
-            content = ""
-            for output_item in data.get("output", []):
-                if output_item.get("type") == "message":
-                    for block in output_item.get("content", []):
-                        if block.get("type") == "output_text":
-                            content += block.get("text", "")
+            content, usage_data = await loop.run_in_executor(
+                None, lambda: self._consume_sse(response)
+            )
 
-            # Extract usage if available
-            usage_data = data.get("usage", {})
             usage = UsageStats(
-                prompt_tokens=usage_data.get("input_tokens", 0),
-                completion_tokens=usage_data.get("output_tokens", 0),
+                input_tokens=usage_data.get("input_tokens", 0),
+                output_tokens=usage_data.get("output_tokens", 0),
                 total_tokens=usage_data.get("total_tokens", 0),
             )
 
             return CompletionResult(
                 content=content,
-                finish_reason=data.get("status", "completed"),
+                finish_reason="completed",
                 usage=usage,
                 provider=self.name,
                 model=self.model,
-                raw_response=data
+                raw_response=usage_data,
             )
         except requests.exceptions.HTTPError as e:
             status = e.response.status_code if e.response else 0
+            body = ""
+            try:
+                body = e.response.json().get("detail", "")
+            except Exception:
+                body = e.response.text[:200] if e.response else ""
             retryable = status in (429, 500, 502, 503)
-            raise ProviderError(self.name, f"HTTP {status}: {e}", retryable=retryable)
+            raise ProviderError(self.name, f"HTTP {status}: {body}", retryable=retryable)
         except Exception as e:
             raise ProviderError(self.name, str(e))
 
     async def stream(self, messages: List[Message], **kwargs) -> AsyncIterator[str]:
-        # TODO: Implement SSE streaming for WHAM /responses endpoint
-        result = await self.complete(messages, **kwargs)
-        yield result.content
+        """Stream tokens from WHAM SSE endpoint."""
+        token = self.auth_manager.get_provider_token("openai_oauth")
+        if not token:
+            raise ProviderError(self.name, "Not authenticated with OpenAI OAuth", retryable=False)
+
+        effort = kwargs.pop("reasoning_effort", None)
+        instructions = kwargs.pop("instructions", None)
+        payload = self._build_payload(messages, reasoning_effort=effort, instructions=instructions)
+        timeout = kwargs.pop("timeout", 180)
+
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: requests.post(
+                f"{self.base_url}/responses",
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                timeout=timeout,
+                stream=True,
+            )
+        )
+        response.raise_for_status()
+
+        for raw_line in response.iter_lines():
+            line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
+            if not line or not line.startswith("data: "):
+                continue
+            data_str = line[6:]
+            if data_str.strip() == "[DONE]":
+                break
+            try:
+                event = json.loads(data_str)
+                if event.get("type") == "response.output_text.delta":
+                    delta = event.get("delta", "")
+                    if delta:
+                        yield delta
+            except (json.JSONDecodeError, KeyError):
+                pass
 
     def count_tokens(self, text: str) -> int:
         return len(text) // 4

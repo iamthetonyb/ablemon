@@ -13,18 +13,19 @@
 # OpenRouter retained for MiMo fallback and M2.7 evolution daemon.
 
 providers:
-  # ── Tier 1: Primary — GPT 5.4 Nano (ChatGPT Subscription) ────────
-  # Shootout: 4/5 (80%), avg 702ms
-  # Best cost/quality ratio. Fast, no reasoning overhead.
+  # ── Tier 1: Primary — GPT 5.4 Mini (ChatGPT Subscription) ────────
+  # WHAM doesn't support Nano — Mini is the lightest available model.
+  # Shootout: 5/5 (100%) — perfect score, faster than MiMo.
+  # xhigh reasoning on subscription = best quality at $0.
   # Auth: ChatGPT subscription via OAuth PKCE (python scripts/atlas-auth.py)
-  - name: "gpt-5.4-nano"
+  - name: "gpt-5.4-mini"
     tier: 1
     provider_type: "openai_oauth"
     endpoint: "https://chatgpt.com/backend-api/wham"
-    model_id: "gpt-5.4-nano"
+    model_id: "gpt-5.4-mini"
     cost_per_m_input: 0.00
     cost_per_m_output: 0.00
-    max_context: 128000
+    max_context: 400000
     supports_tools: true
     supports_vision: true
     throughput_tps: 80
@@ -32,7 +33,8 @@ providers:
     fallback_to: "nemotron-120b-nim"
     api_key_env: ""
     extra:
-      reasoning_effort: "none"
+      reasoning_effort: "xhigh"
+      timeout: 180.0
 
   # ── Tier 1: Fallback — Nemotron on NIM (free) ──────────────────
   # Shootout: 1/5 (20%) — poor quality but FREE. Used when Nano is down
