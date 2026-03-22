@@ -77,7 +77,7 @@ def _get_harvesters(project_root: Path) -> list:
     if db_path.exists():
         harvesters.append(("able_interaction", ABLEInteractionHarvester(db_path=str(db_path))))
 
-    # Priority 3-7: OpenCLI adapters (Codex, ChatGPT, Antigravity, Cowork, Grok)
+    # Priority 3-4: OpenCLI adapters (Codex, ChatGPT, Cowork, Grok)
     try:
         from atlas.core.distillation.harvesters.opencli_harvester import OpenCLIHarvester
         adapters_dir = project_root / "atlas" / "core" / "distillation" / "harvesters" / "opencli_adapters"
@@ -86,6 +86,13 @@ def _get_harvesters(project_root: Path) -> list:
             harvesters.append(("opencli", opencli))
     except Exception as e:
         logger.warning("OpenCLI harvester unavailable: %s", e)
+
+    # Priority 5: Antigravity brain artifacts (readable markdown plans/walkthroughs)
+    try:
+        from atlas.core.distillation.harvesters.antigravity_harvester import AntigravityHarvester
+        harvesters.append(("antigravity", AntigravityHarvester()))
+    except Exception as e:
+        logger.warning("Antigravity harvester unavailable: %s", e)
 
     # Priority 8: Inbox (manually saved conversations)
     inbox_dir = Path.home() / "atlas-corpus-inbox"
