@@ -2,7 +2,7 @@
 
 ## Overview
 
-ATLAS uses a 4-tier complexity-scored routing system that replaces the linear provider fallback chain with intelligent task-aware routing. An async self-evolution daemon continuously improves routing accuracy.
+ATLAS uses a 5-tier complexity-scored routing system that replaces the linear provider fallback chain with intelligent task-aware routing. An async self-evolution daemon continuously improves routing accuracy.
 
 ## Architecture
 
@@ -28,11 +28,11 @@ User Message → ComplexityScorer → ProviderRegistry → LLM Provider
 | 2 (fallback) | MiMo-V2-Pro | xiaomi/mimo-v2-pro (OpenRouter) | $1.00/$3.00 | GPT 5.4 fallback |
 | 3 | MiniMax M2.7 | minimax/minimax-m2.7 (OpenRouter) | $0.30/$1.20 | **Background-only** (evolution daemon) |
 | 4 | Claude Opus 4.6 | claude-opus-4-6 (Anthropic) | $15.00/$75.00 | Premium — budget-gated |
-| 5 | Qwen 3.5 27B/9B | qwen3.5:27b-q3_K_M (Ollama) | $0/$0 | Offline fallback |
+| 5 | Qwen 3.5 27B/9B | qwen3.5-27b-ud / 9b-edge / 9b-balanced (Ollama) | $0/$0 | Offline + distillation base |
 
 **M2.7 is never user-facing.** It only runs as the evolution daemon's analysis brain.
 
-**GPT 5.4 Nano and GPT 5.4 route through OpenAI OAuth** (ChatGPT subscription), not OpenRouter or API keys. Authenticate once with `python scripts/atlas-auth.py` — tokens auto-refresh. OpenRouter is retained only for MiMo fallback and M2.7 evolution.
+**GPT 5.4 Mini and GPT 5.4 route through OpenAI OAuth** (ChatGPT subscription), not OpenRouter or API keys. Authenticate once with `python scripts/atlas-auth.py` — tokens auto-refresh. OpenRouter is retained only for MiMo fallback and M2.7 evolution.
 
 ## Complexity Scoring
 
@@ -40,9 +40,9 @@ Rule-based scorer (<5ms, no LLM calls) with 5 features:
 
 | Feature | Weight | Detection |
 |---------|--------|-----------|
-| Token count | 0.20 | Word count * 1.3 vs threshold |
+| Token count | 0.15 | Word count * 1.3 vs threshold |
 | Requires tools | 0.15 | Tool-related keywords |
-| Requires code | 0.15 | Code/dev-related keywords |
+| Requires code | 0.20 | Code/dev-related keywords |
 | Multi-step task | 0.20 | Sequential markers (then, after, finally) |
 | Safety-critical | 0.30 | Security, financial, legal, production domains |
 
@@ -52,7 +52,7 @@ Plus domain-specific adjustments (security +0.15, creative -0.05, etc.)
 
 | Score | Tier | Provider |
 |-------|------|----------|
-| < 0.4 | 1 | GPT 5.4 Nano (OpenAI OAuth) |
+| < 0.4 | 1 | GPT 5.4 Mini (OpenAI OAuth) |
 | 0.4 - 0.7 | 2 | GPT 5.4 (OpenAI OAuth) |
 | > 0.7 | 4 | Claude Opus 4.6 (budget-gated) |
 
@@ -180,6 +180,74 @@ results = mgr.get_results("higher_safety_weight")
 # results["winner"] → "control" | "experiment" | "inconclusive"
 ```
 
+## Distillation Fields
+
+The interaction logger can capture fields used by the distillation pipeline to build training corpora.
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `corpus_eligible` | bool | Whether this interaction qualifies for training data |
+| `raw_input` | text | Full user input (not truncated like `message_preview`) |
+| `raw_output` | text | Full model output for training pairs |
+
+Eligibility criteria:
+- `success = true` and `user_correction = false`
+- No fallback chain (clean single-provider completion)
+- Output length > 50 tokens
+- No PII detected in input/output
+
+These fields feed into `data/distillation_*.jsonl` via the export pipeline. See `docs/DISTILLATION.md` for full pipeline docs.
+
+## Tenant Routing
+
+In multi-tenant mode, each tenant can override default routing behavior:
+
+- **Tier thresholds**: Tenant A may use `tier_1_max: 0.35` (more T1) while Tenant B uses `0.45` (more T2)
+- **Domain adjustments**: Per-tenant domain score overrides (e.g., legal-heavy tenant bumps legal +0.25)
+- **Budget caps**: Per-tenant Opus budget limits
+- **Tier restrictions**: Tenants can be restricted to specific tiers (e.g., no T4 access)
+
+Tenant overrides are loaded from `config/tenants/{tenant_id}.yaml` and applied in the scorer before tier mapping. The interaction log tags every record with `tenant_id` for isolated analysis.
+
+See `docs/MULTI-TENANT.md` for tenant lifecycle and config schema.
+
+## Split Test Evolution
+
+The evolution daemon and split testing framework integrate for safe weight deployment:
+
+1. Daemon proposes weight changes based on interaction analysis
+2. Instead of direct deployment, changes can be wrapped in a split test
+3. Split test runs for N interactions (configurable, default 100)
+4. If experiment group outperforms control (higher success rate, lower escalation), auto-promote
+5. If inconclusive or worse, auto-rollback
+
+```python
+# Evolution daemon creates a split test for proposed changes
+mgr.create_test(
+    name=f"evo_v{new_version}",
+    experiment_overrides=proposed_weight_changes,
+    min_samples=100,
+    auto_promote=True,
+)
+```
+
+This adds a validation layer between the daemon's analysis and production deployment. Currently, the daemon deploys directly with rollback support. Split test integration is the next safety improvement.
+
+## Thinking Token Dual-Path
+
+Some models (Nemotron, Qwen 3.5 base) emit `<think>...</think>` tokens in their output. These need different handling for user-facing vs training contexts:
+
+| Context | Handling |
+|---------|----------|
+| User-facing output | Strip `<think>` tokens completely |
+| Interaction log | Store stripped output for quality signals |
+| Distillation corpus | Preserve thinking tokens in `raw_output` as training signal |
+| Phoenix spans | Log both stripped and raw versions |
+
+The thinking process contains valuable reasoning traces. Stripping it from user output (where it's noise) while preserving it for training (where it's signal) maximizes the value of each interaction.
+
+Implementation: Provider response handlers apply `strip_thinking_tokens()` before returning to user, but pass the raw response to the interaction logger when `corpus_eligible=true`.
+
 ## File Map
 
 | File | Purpose |
@@ -206,7 +274,7 @@ results = mgr.get_results("higher_safety_weight")
 
 | Variable | Required By |
 |----------|-------------|
-| *(OpenAI OAuth)* | GPT 5.4 Nano (T1), GPT 5.4 (T2) — `python scripts/atlas-auth.py` |
+| *(OpenAI OAuth)* | GPT 5.4 Mini (T1), GPT 5.4 (T2) — `python scripts/atlas-auth.py` |
 | `OPENROUTER_API_KEY` | MiMo (Tier 2 fallback), M2.7 (Tier 3 evolution) |
 | `NVIDIA_API_KEY` | Nemotron 120B (Tier 1 fallback, free NIM) |
 | `ANTHROPIC_API_KEY` | Claude Opus 4.6 (Tier 4) |
