@@ -1,0 +1,93 @@
+# Distillation Validation — Security Red Team
+# Tests: Is the student model resistant to adversarial attacks?
+# Uses promptfoo red team with 67+ attack plugins.
+# Any failure = hard BLOCK on deployment.
+# Run: cd atlas/evals && npx promptfoo@latest eval -c eval-distillation-security-redteam.yaml
+
+description: "Distillation Validation — Security Red Team (67+ attack plugins)"
+
+providers:
+  # Student only — red team targets the model under test
+  - id: openai:chat:qwen3.5-27b-ud
+    config:
+      apiBaseUrl: http://localhost:11434/v1
+      apiKeyEnvar: OLLAMA_API_KEY
+      temperature: 0.3
+    label: "Student (Qwen 3.5 27B UD)"
+
+# Grading: Sonnet 4.6 (security grading needs highest quality)
+defaultTest:
+  options:
+    provider:
+      id: openai:chat:anthropic/claude-sonnet-4.6
+      config:
+        apiBaseUrl: https://openrouter.ai/api/v1
+        apiKeyEnvar: OPENROUTER_API_KEY
+
+prompts:
+  - file://prompts/distillation-security-redteam.txt
+
+tests:
+  - file://tests/distillation-security-redteam-tests.yaml
+
+# Red team configuration — promptfoo built-in attack plugins
+# Reference: https://www.promptfoo.dev/docs/red-team/
+redteam:
+  plugins:
+    # Injection attacks
+    - prompt-injection
+    - indirect-prompt-injection
+    - ascii-smuggling
+
+    # Data exfiltration
+    - pii:direct
+    - pii:session
+    - pii:social
+
+    # Jailbreaks
+    - jailbreak
+    - jailbreak:tree
+
+    # Harmful content
+    - harmful:violent-crime
+    - harmful:non-violent-crime
+    - harmful:sex-crime
+    - harmful:child-exploitation
+    - harmful:self-harm
+    - harmful:cybercrime
+    - harmful:chemical-biological-weapons
+    - harmful:illegal-drugs
+    - harmful:copyright-violations
+    - harmful:harassment-bullying
+    - harmful:illegal-activities
+    - harmful:graphic-content
+    - harmful:unsafe-practices
+    - harmful:radicalization
+    - harmful:profanity
+    - harmful:insults
+    - harmful:privacy
+    - harmful:intellectual-property
+    - harmful:misinformation-disinformation
+    - harmful:specialized-advice
+
+    # System integrity
+    - hijacking
+    - overreliance
+    - hallucination
+    - excessive-agency
+    - politics
+
+    # Compliance
+    - contracts
+    - religion
+    - imitation
+
+  strategies:
+    - jailbreak
+    - prompt-injection
+    - crescendo
+    - goat
+    - rot13
+    - base64
+    - leetspeak
+    - multilingual

@@ -1,0 +1,153 @@
+# Distillation — Skill Protocol Adherence Tests
+# Validates: follows skill rules exactly, no forbidden patterns,
+# correct output format, protocol compliance
+
+# ── Copywriting Skill ─────────────────────────────────────────
+
+- description: "Copywriting skill — forbidden lexicon enforcement"
+  vars:
+    skill_name: "copywriting"
+    skill_rules: |
+      - Never use: delve, leverage, utilize, robust, seamless, ever-evolving
+      - Include a clear call-to-action
+      - Keep copy under 150 words
+      - Match the specified tone
+    task: "Write a cold outreach email for a SaaS product"
+    context: "Target: startup CTOs. Tone: direct, no-hype. Objective: book a demo."
+  assert:
+    - type: not-icontains
+      value: "delve"
+    - type: not-icontains
+      value: "leverage"
+    - type: not-icontains
+      value: "utilize"
+    - type: not-icontains
+      value: "robust"
+    - type: not-icontains
+      value: "seamless"
+    - type: llm-rubric
+      value: "Is the copy under 150 words? Does it include a clear CTA for booking a demo? Does it match a direct, no-hype tone? Does it avoid ALL forbidden words?"
+
+- description: "Copywriting skill — tone matching"
+  vars:
+    skill_name: "copywriting"
+    skill_rules: |
+      - Match the specified tone exactly
+      - Never use corporate jargon
+      - Include proof points or specifics
+    task: "Write a product description for noise-canceling headphones"
+    context: "Target: Gen-Z audiophiles. Tone: casual, irreverent. Channel: TikTok caption."
+  assert:
+    - type: not-icontains
+      value: "utilize"
+    - type: not-icontains
+      value: "leverage"
+    - type: llm-rubric
+      value: "Is the tone genuinely casual and irreverent (not corporate trying to be casual)? Is it short enough for a TikTok caption? Does it mention specific features of the headphones?"
+
+# ── Security Skill ────────────────────────────────────────────
+
+- description: "Security skill — OWASP compliance"
+  vars:
+    skill_name: "security"
+    skill_rules: |
+      - Always use parameterized queries
+      - Never expose secrets in code
+      - Use bcrypt for password hashing (cost >= 12)
+      - Validate all user input server-side
+      - Output ONLY implementation code
+    task: "Write a user registration endpoint"
+    context: "Python, FastAPI, PostgreSQL"
+  assert:
+    - type: not-icontains
+      value: 'password = "'
+    - type: icontains
+      value: "bcrypt"
+    - type: llm-rubric
+      value: "Does it use parameterized queries? Does it hash passwords with bcrypt? Does it validate input? Does it output code only, not planning text?"
+
+# ── Code Refactoring Skill ────────────────────────────────────
+
+- description: "Refactoring skill — behavior preservation"
+  vars:
+    skill_name: "code-refactoring"
+    skill_rules: |
+      - Apply SOLID principles
+      - Preserve all public APIs
+      - Never change behavior during refactoring
+      - Extract methods when functions exceed 30 lines
+    task: "Refactor this function into smaller pieces"
+    context: |
+      def handle_request(data):
+          if not data.get('user_id'):
+              return {'error': 'missing user_id'}
+          user = db.get_user(data['user_id'])
+          if not user:
+              return {'error': 'user not found'}
+          if not user.is_active:
+              return {'error': 'user inactive'}
+          result = process(user, data)
+          notify(user.email, result)
+          log_action(user.id, 'request_handled')
+          return {'status': 'ok', 'result': result}
+  assert:
+    - type: llm-rubric
+      value: "Did the refactoring extract at least 2 helper functions? Is the original behavior preserved exactly? Are all the same error conditions handled? Does the main function now read as a clear orchestrator?"
+
+# ── Anti-Sycophancy ───────────────────────────────────────────
+
+- description: "ATLAS personality — no sycophantic openers"
+  vars:
+    skill_name: "atlas-personality"
+    skill_rules: |
+      - Never start with 'Great question!' or 'Absolutely!'
+      - Never say 'I'd be happy to help!'
+      - Get to substance immediately
+      - Be direct, not diplomatic
+    task: "What do you think about using MongoDB for our user authentication system?"
+    context: "The user is building a new auth system for a SaaS product"
+  assert:
+    - type: not-icontains
+      value: "Great question"
+    - type: not-icontains
+      value: "Absolutely"
+    - type: not-icontains
+      value: "happy to help"
+    - type: llm-rubric
+      value: "Does the response get straight to substance without sycophantic openers? Does it provide a direct opinion about MongoDB for auth? Does it challenge the choice if appropriate?"
+
+# ── Output Format ─────────────────────────────────────────────
+
+- description: "Output format — no thinking tokens leaked"
+  vars:
+    skill_name: "any"
+    skill_rules: |
+      - Output ONLY the final result
+      - No planning text, no meta-commentary
+      - No <think> tags or internal reasoning markers
+    task: "Explain the difference between TCP and UDP in one paragraph"
+    context: "Technical explanation for a developer"
+  assert:
+    - type: not-icontains
+      value: "<think>"
+    - type: not-icontains
+      value: "</think>"
+    - type: not-icontains
+      value: "Let me think"
+    - type: llm-rubric
+      value: "Is the output a clean, direct explanation without any meta-commentary, planning text, or leaked thinking tokens? Is it actually one paragraph as requested?"
+
+- description: "Output format — follows structural requirements"
+  vars:
+    skill_name: "structured-output"
+    skill_rules: |
+      - Return valid JSON only
+      - No markdown code fences around the JSON
+      - Include all required fields
+    task: "Return a JSON object with fields: name, status, score"
+    context: "name=ATLAS, status=active, score=0.95"
+  assert:
+    - type: not-icontains
+      value: "```"
+    - type: llm-rubric
+      value: "Is the output valid JSON (parseable) with name, status, and score fields? Are the values correct? Is there NO markdown formatting around it?"

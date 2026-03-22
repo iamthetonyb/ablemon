@@ -1,0 +1,37 @@
+# Distillation Validation — Tool Use Accuracy
+# Tests: Can the student model correctly invoke tools with proper arguments?
+# Run: cd atlas/evals && npx promptfoo@latest eval -c eval-distillation-tool-use.yaml
+
+description: "Distillation Validation — Tool Use Accuracy (Student vs Teacher)"
+
+providers:
+  # Teacher (gold standard)
+  - id: openai:chat:anthropic/claude-sonnet-4.6
+    config:
+      apiBaseUrl: https://openrouter.ai/api/v1
+      apiKeyEnvar: OPENROUTER_API_KEY
+      temperature: 0.3
+    label: "Teacher (Sonnet 4.6)"
+
+  # Student (local distilled model via Ollama-compatible endpoint)
+  - id: openai:chat:qwen3.5-27b-ud
+    config:
+      apiBaseUrl: http://localhost:11434/v1
+      apiKeyEnvar: OLLAMA_API_KEY
+      temperature: 0.3
+    label: "Student (Qwen 3.5 27B UD)"
+
+# Grading: Sonnet 4.6 (same rule as existing evals)
+defaultTest:
+  options:
+    provider:
+      id: openai:chat:anthropic/claude-sonnet-4.6
+      config:
+        apiBaseUrl: https://openrouter.ai/api/v1
+        apiKeyEnvar: OPENROUTER_API_KEY
+
+prompts:
+  - file://prompts/distillation-tool-use.txt
+
+tests:
+  - file://tests/distillation-tool-use-tests.yaml

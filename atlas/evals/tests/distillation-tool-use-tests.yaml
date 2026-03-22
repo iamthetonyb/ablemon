@@ -1,0 +1,89 @@
+# Distillation — Tool Use Accuracy Tests
+# Validates: correct tool selection, proper argument formatting,
+# no fabricated tools, multi-tool orchestration
+
+# ── Single Tool Selection ─────────────────────────────────────
+
+- description: "Web search — correct tool for information lookup"
+  vars:
+    task: "Find the current weather in San Francisco"
+    context: "User needs real-time information"
+  assert:
+    - type: icontains
+      value: "web_search"
+    - type: not-icontains
+      value: "read_file"
+    - type: llm-rubric
+      value: "Does the response use the web_search tool with a reasonable query string? Does it NOT try to fabricate weather data without searching?"
+
+- description: "File read — correct tool for disk access"
+  vars:
+    task: "Show me the contents of config/routing_config.yaml"
+    context: "User wants to inspect a config file"
+  assert:
+    - type: icontains
+      value: "read_file"
+    - type: not-icontains
+      value: "web_search"
+    - type: llm-rubric
+      value: "Does it use read_file with the correct path? Does it NOT fabricate file contents?"
+
+- description: "Shell command — correct tool for system operations"
+  vars:
+    task: "Check how much disk space is available"
+    context: "System maintenance check"
+  assert:
+    - type: icontains
+      value: "run_command"
+    - type: llm-rubric
+      value: "Does it use run_command with a sensible disk-checking command like 'df -h' or 'du'? Does it NOT make up disk usage numbers?"
+
+# ── Argument Quality ──────────────────────────────────────────
+
+- description: "Proper argument formatting for write_file"
+  vars:
+    task: "Create a Python script at /tmp/hello.py that prints 'Hello, World!'"
+    context: "User wants to create a simple script"
+  assert:
+    - type: icontains
+      value: "write_file"
+    - type: icontains
+      value: "/tmp/hello.py"
+    - type: llm-rubric
+      value: "Does it use write_file with both 'path' and 'content' arguments? Is the content valid Python that prints 'Hello, World!'? Are the arguments properly structured as JSON?"
+
+- description: "Message sending with correct channel"
+  vars:
+    task: "Send a status update to the #general channel saying deployment is complete"
+    context: "Post-deployment notification"
+  assert:
+    - type: icontains
+      value: "send_message"
+    - type: llm-rubric
+      value: "Does it use send_message with channel='general' (or '#general') and a text argument about deployment completion?"
+
+# ── No Fabrication ────────────────────────────────────────────
+
+- description: "Refuses to use non-existent tools"
+  vars:
+    task: "Deploy the application to Kubernetes"
+    context: "Production deployment request"
+  assert:
+    - type: not-icontains
+      value: "deploy_kubernetes"
+    - type: not-icontains
+      value: "kubectl_apply"
+    - type: llm-rubric
+      value: "Does the response work within the available tools (run_command for kubectl) rather than inventing a 'deploy_kubernetes' or 'kubectl_apply' tool? Does it NOT fabricate tool names?"
+
+- description: "Multi-step task with correct tool sequence"
+  vars:
+    task: "Read the config file at config/app.yaml, then create a backup at /tmp/app.yaml.bak"
+    context: "Configuration backup workflow"
+  assert:
+    - type: icontains
+      value: "read_file"
+    - type: icontains
+      value: "write_file"
+    - type: llm-rubric
+      value: "Does it call read_file first to get the config, then write_file to create the backup? Is the sequence logical? Does it reference the correct paths?"

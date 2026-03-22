@@ -1,0 +1,37 @@
+# Distillation Validation — Skill Adherence
+# Tests: Does the student follow ATLAS skill protocols correctly?
+# Run: cd atlas/evals && npx promptfoo@latest eval -c eval-distillation-skill-adherence.yaml
+
+description: "Distillation Validation — Skill Protocol Adherence (Student vs Teacher)"
+
+providers:
+  # Teacher (gold standard)
+  - id: openai:chat:anthropic/claude-sonnet-4.6
+    config:
+      apiBaseUrl: https://openrouter.ai/api/v1
+      apiKeyEnvar: OPENROUTER_API_KEY
+      temperature: 0.3
+    label: "Teacher (Sonnet 4.6)"
+
+  # Student (local distilled model)
+  - id: openai:chat:qwen3.5-27b-ud
+    config:
+      apiBaseUrl: http://localhost:11434/v1
+      apiKeyEnvar: OLLAMA_API_KEY
+      temperature: 0.3
+    label: "Student (Qwen 3.5 27B UD)"
+
+# Grading: Sonnet 4.6
+defaultTest:
+  options:
+    provider:
+      id: openai:chat:anthropic/claude-sonnet-4.6
+      config:
+        apiBaseUrl: https://openrouter.ai/api/v1
+        apiKeyEnvar: OPENROUTER_API_KEY
+
+prompts:
+  - file://prompts/distillation-skill-adherence.txt
+
+tests:
+  - file://tests/distillation-skill-adherence-tests.yaml

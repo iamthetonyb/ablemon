@@ -1,0 +1,128 @@
+# Distillation — Reasoning Quality Tests
+# Validates: step-by-step reasoning, tradeoff analysis, root cause identification,
+# logical consistency, multi-hop reasoning
+
+# ── Step-by-Step Reasoning ────────────────────────────────────
+
+- description: "Debugging — identify root cause, not symptom"
+  vars:
+    task: "This Python function returns None unexpectedly. Find the bug."
+    context: |
+      def get_discount(user_tier, amount):
+          if user_tier == 'gold':
+              if amount > 100:
+                  discount = 0.20
+              elif amount > 50:
+                  discount = 0.10
+          elif user_tier == 'silver':
+              discount = 0.05
+          return discount
+  assert:
+    - type: llm-rubric
+      value: "Does the response identify the root cause: that 'discount' is not initialized before the conditionals and can be unbound (e.g., gold tier with amount <= 50)? Does it explain WHY it happens rather than just showing the fix? Does it suggest initializing discount = 0.0 at the top?"
+
+- description: "Architecture decision — weigh tradeoffs"
+  vars:
+    task: "Should we use a message queue or direct HTTP calls between our microservices?"
+    context: "E-commerce platform. 3 services: orders, inventory, payments. 10K orders/day. Current pain: inventory updates lag behind orders."
+  assert:
+    - type: llm-rubric
+      value: "Does the response analyze tradeoffs of both approaches? Does it consider: reliability, latency, complexity, failure handling, ordering guarantees? Does it make a recommendation with clear reasoning? Does it address the specific pain point (inventory lag)?"
+
+# ── Multi-Hop Reasoning ──────────────────────────────────────
+
+- description: "Multi-hop — connect related facts"
+  vars:
+    task: "Our API response times doubled last week. What should we investigate?"
+    context: |
+      Facts:
+      - Deployed new feature on Tuesday that adds user activity logging
+      - Database CPU went from 40% to 85% on Wednesday
+      - No change in traffic volume
+      - Activity log table has no indexes
+      - The new feature writes to activity_log on every API call
+  assert:
+    - type: llm-rubric
+      value: "Does the response connect the facts: new feature -> writes to unindexed table -> database CPU spike -> response time increase? Does it recommend adding indexes to the activity_log table as the primary fix? Does it consider whether the logging should be async?"
+
+- description: "Multi-hop — cascading failure analysis"
+  vars:
+    task: "Why did our payment processing fail at 2am?"
+    context: |
+      Timeline:
+      - 1:45am: SSL certificate for payments.example.com expired
+      - 1:50am: Payment service started returning 502 errors
+      - 1:55am: Order service retried failed payments 3x each
+      - 2:00am: Order service connection pool exhausted
+      - 2:05am: All API endpoints returning 503
+  assert:
+    - type: llm-rubric
+      value: "Does it trace the cascade: expired cert -> payment 502s -> retry storm -> connection pool exhaustion -> full outage? Does it identify the root cause as the expired SSL certificate? Does it suggest preventive measures (cert monitoring, circuit breakers, retry limits)?"
+
+# ── Logical Consistency ──────────────────────────────────────
+
+- description: "Spot logical contradiction"
+  vars:
+    task: "Review this business plan for logical issues"
+    context: |
+      Plan:
+      - Target market: enterprise companies (1000+ employees)
+      - Pricing: $9/month per user, no minimum commitment
+      - Sales strategy: self-serve sign-up, no sales team
+      - Revenue target: $1M ARR in year 1
+      - Expected average deal size: $500/month
+  assert:
+    - type: llm-rubric
+      value: "Does the response identify the contradiction: enterprise target + self-serve + no minimum + $9/user doesn't reach $1M ARR with $500/month average deal size? At $500/mo average, you need ~167 paying accounts for $1M ARR, but enterprise self-serve at $9/user with no minimum is unlikely to reach those averages. Does it challenge the assumptions?"
+
+- description: "Edge case reasoning — boundary conditions"
+  vars:
+    task: "Is this rate limiter implementation correct?"
+    context: |
+      class RateLimiter:
+          def __init__(self, max_requests, window_seconds):
+              self.max = max_requests
+              self.window = window_seconds
+              self.requests = []
+
+          def allow(self):
+              now = time.time()
+              self.requests = [t for t in self.requests if t > now - self.window]
+              if len(self.requests) < self.max:
+                  self.requests.append(now)
+                  return True
+              return False
+  assert:
+    - type: llm-rubric
+      value: "Does it identify issues: (1) unbounded memory growth if requests list isn't cleaned up fast enough, (2) not thread-safe, (3) time.time() precision issues under high load? Does it suggest concrete improvements like using a deque with maxlen, or a sliding window counter?"
+
+# ── Domain Reasoning ──────────────────────────────────────────
+
+- description: "Security reasoning — threat modeling"
+  vars:
+    task: "What are the security risks of this API endpoint?"
+    context: |
+      @app.route('/api/users/<user_id>/export')
+      def export_user_data(user_id):
+          user = db.query(f"SELECT * FROM users WHERE id = '{user_id}'")
+          filename = f"/exports/{user_id}_data.csv"
+          with open(filename, 'w') as f:
+              f.write(format_csv(user))
+          return send_file(filename)
+  assert:
+    - type: llm-rubric
+      value: "Does it identify at least 3 of these: (1) SQL injection via f-string, (2) path traversal via user_id in filename, (3) no authentication/authorization check, (4) no rate limiting, (5) sensitive data exposure without access control? Does it explain the actual attack vectors, not just name the vulnerability categories?"
+
+- description: "Cost optimization reasoning"
+  vars:
+    task: "We're spending $3000/month on our AI API calls. How do we cut costs?"
+    context: |
+      Current usage:
+      - 80% of calls are simple FAQ/lookup queries (avg 200 tokens out)
+      - 15% are analysis tasks (avg 800 tokens out)
+      - 5% are complex reasoning (avg 2000 tokens out)
+      - All queries go to GPT-4 ($30/1M input, $60/1M output)
+      - 500K total calls/month
+  assert:
+    - type: llm-rubric
+      value: "Does it recommend tiered routing (route 80% simple queries to a cheaper model)? Does it calculate approximate savings? Does it consider: caching for FAQ queries, batching, prompt optimization, or fine-tuning for the FAQ use case? Is the reasoning data-driven, not generic advice?"
