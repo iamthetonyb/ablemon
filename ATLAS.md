@@ -98,7 +98,7 @@ User Input → TrustGate → Scanner → Auditor → PromptEnricher → Complexi
 | 2 (fallback) | MiMo-V2-Pro | OpenRouter ($1/$3/M) | — | 131K | GPT 5.4 unavailable |
 | 3 | MiniMax M2.7 | OpenRouter ($0.30/$1.20/M) | — | 1M | **Background-only** — evolution daemon |
 | 4 | **Claude Opus 4.6** | Anthropic ($15/$75/M) | — | 200K | Premium — budget-gated |
-| 5 | Qwen 3.5 27B (Q3) → 9B | Ollama (local, free) | — | 131K | Offline fallback |
+| 5 | Qwen 3.5 27B UD-Q4_K_XL → 9B UD-IQ2_M → 9B UD-Q4_K_XL | Ollama (local, free) | — | 131K | Offline + distillation base |
 
 **T1 and T2 cost $0 per token** — routed through your ChatGPT subscription via OAuth PKCE.
 **Both tiers run at `xhigh` reasoning effort** — maximum thinking depth on every request.
@@ -278,19 +278,42 @@ Run: `scripts/run-evals.sh` | Config: `atlas/evals/`
 
 ## DISTILLATION PIPELINE (H100 Fine-Tuning)
 
-Data accumulation phase — building T4-quality training pairs for a custom T1 model.
+Data accumulation phase — building T4-quality training pairs for custom local models.
+
+### Base Models (Unsloth Dynamic 2.0 Quants)
+
+| Target | Base | Quant | Size | Use Case |
+|--------|------|-------|------|----------|
+| Server | Qwen 3.5 27B | UD-Q4_K_XL | 17.6GB | Primary local T1 replacement |
+| Edge (primary) | Qwen 3.5 9B | UD-IQ2_M | 3.65GB | Mobile/offline deployment |
+| Edge (balanced) | Qwen 3.5 9B | UD-Q4_K_XL | 5.97GB | When device has more room |
 
 ### Pipeline
 1. **CPU phase**: Eval runs generate T4 (gold) vs T1 outputs
 2. **Export**: Distillation JSONL pairs (`data/distillation_*.jsonl`)
-3. **H100 phase**: Fine-tune custom T1 model on Colab (10-20 hours available)
-4. **Deploy**: Replace GPT 5.4 Nano with custom model once trained
+3. **H100 phase**: Fine-tune Qwen 3.5 base models on Colab (10-20 hours available)
+4. **Requant**: Re-quantize fine-tuned model to UD targets via Unsloth
+5. **Deploy**: Register fine-tuned models in Ollama, swap into T5 (then promote to T1)
+
+### Ollama Setup
+```bash
+# Download GGUFs from HuggingFace
+huggingface-cli download unsloth/Qwen3.5-27B-GGUF Qwen3.5-27B-UD-Q4_K_XL.gguf --local-dir ./models
+huggingface-cli download unsloth/Qwen3.5-9B-GGUF Qwen3.5-9B-UD-IQ2_M.gguf --local-dir ./models
+huggingface-cli download unsloth/Qwen3.5-9B-GGUF Qwen3.5-9B-UD-Q4_K_XL.gguf --local-dir ./models
+
+# Create Ollama models
+ollama create qwen3.5-27b-ud -f config/ollama/Modelfile.27b
+ollama create qwen3.5-9b-edge -f config/ollama/Modelfile.9b-edge
+ollama create qwen3.5-9b-balanced -f config/ollama/Modelfile.9b-balanced
+```
 
 ### Current State
 - ~20 pairs collected, need 100-200 before GPU run
 - H100 cluster access available (~10-20 hours per session)
 - Schedule: weekly/bi-weekly fine-tuning after data accumulation
-- Next step: accumulate pairs from new T1 (Nano) eval runs
+- Base models: Qwen 3.5 27B + 9B with Unsloth Dynamic quants
+- Modelfiles: `config/ollama/Modelfile.{27b,9b-edge,9b-balanced}`
 
 ---
 

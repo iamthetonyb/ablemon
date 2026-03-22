@@ -150,14 +150,15 @@ providers:
     fallback_to: null
     api_key_env: "ANTHROPIC_API_KEY"
 
-  # ── Fallback: Ollama (Offline/Local) — Qwen 3.5 27B Q3 ───────────
-  # Pull first: ollama pull qwen3.5:27b-q3_K_M
-  # Falls back to 9B if 27B not available locally.
+  # ── Tier 5: Ollama (Server) — Qwen 3.5 27B UD-Q4_K_XL ──────────
+  # Unsloth Dynamic 2.0 quant — measurably better accuracy than standard Q4.
+  # 17.6GB VRAM. Distillation base model for custom T1 fine-tuning.
+  # Setup: ollama create qwen3.5-27b-ud -f config/ollama/Modelfile.27b
   - name: "ollama-local"
     tier: 5
     provider_type: "ollama"
     endpoint: "http://localhost:11434"
-    model_id: "qwen3.5:27b-q3_K_M"
+    model_id: "qwen3.5-27b-ud"
     cost_per_m_input: 0.00
     cost_per_m_output: 0.00
     max_context: 131072
@@ -165,15 +166,35 @@ providers:
     supports_vision: false
     throughput_tps: 25
     enabled: true
-    fallback_to: "ollama-local-small"
+    fallback_to: "ollama-edge"
 
-  # ── Fallback: Ollama (Lighter) — Qwen 3.5 9B ──────────────────
-  # Pull first: ollama pull qwen3.5:9b
-  - name: "ollama-local-small"
+  # ── Tier 5: Ollama (Edge/Mobile) — Qwen 3.5 9B UD-IQ2_M ──────
+  # Ultra-compact 3.65GB — primary edge target for mobile/offline.
+  # Distillation target: fine-tune on H100, deploy to edge devices.
+  # Setup: ollama create qwen3.5-9b-edge -f config/ollama/Modelfile.9b-edge
+  - name: "ollama-edge"
     tier: 5
     provider_type: "ollama"
     endpoint: "http://localhost:11434"
-    model_id: "qwen3.5:9b"
+    model_id: "qwen3.5-9b-edge"
+    cost_per_m_input: 0.00
+    cost_per_m_output: 0.00
+    max_context: 131072
+    supports_tools: true
+    supports_vision: false
+    throughput_tps: 50
+    enabled: true
+    fallback_to: "ollama-edge-balanced"
+    api_key_env: ""
+
+  # ── Tier 5: Ollama (Edge Balanced) — Qwen 3.5 9B UD-Q4_K_XL ──
+  # 5.97GB — balanced option when edge device has more room.
+  # Setup: ollama create qwen3.5-9b-balanced -f config/ollama/Modelfile.9b-balanced
+  - name: "ollama-edge-balanced"
+    tier: 5
+    provider_type: "ollama"
+    endpoint: "http://localhost:11434"
+    model_id: "qwen3.5-9b-balanced"
     cost_per_m_input: 0.00
     cost_per_m_output: 0.00
     max_context: 131072

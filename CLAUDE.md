@@ -19,7 +19,7 @@ ATLAS uses a **complexity-scored 5-tier routing system** (see `docs/ROUTING.md` 
 | 0.4–0.7 | 2 | GPT 5.4 xhigh (OAuth) → MiMo-V2-Pro (OpenRouter fallback) | $0 (subscription) |
 | > 0.7 | 4 | Claude Opus 4.6 (budget-gated) | $15/$75 per M |
 | background | 3 | MiniMax M2.7 (evolution daemon only, OpenRouter) | $0.30/$1.20 per M |
-| offline | 5 | Ollama Llama 3.1 (local) | FREE |
+| offline | 5 | Ollama Qwen 3.5 27B/9B UD (local, distillation base) | FREE |
 
 Pipeline: User → TrustGate → Scanner → Auditor → **Enricher** → Scorer → Provider
 

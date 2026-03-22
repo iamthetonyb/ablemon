@@ -88,8 +88,9 @@ MODEL_SHORT_NAMES = {
     "xiaomi/mimo-v2-pro": "MiMo-V2-Pro",
     "minimax/minimax-m2.7": "MiniMax M2.7",
     "claude-opus-4-6": "Claude Opus",
-    "qwen3.5:27b-q3_K_M": "Qwen 3.5 27B (local)",
-    "qwen3.5:9b": "Qwen 3.5 9B (local)",
+    "qwen3.5-27b-ud": "Qwen 3.5 27B UD (local)",
+    "qwen3.5-9b-edge": "Qwen 3.5 9B Edge (local)",
+    "qwen3.5-9b-balanced": "Qwen 3.5 9B Balanced (local)",
 }
 
 
