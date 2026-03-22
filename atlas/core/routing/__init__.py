@@ -10,7 +10,7 @@ from .complexity_scorer import ComplexityScorer, ScoringResult
 from .interaction_log import InteractionLogger, InteractionRecord
 from .log_queries import LogQueries
 from .metrics import MetricsDashboard
-from .split_test import SplitTestManager, SplitTest, SplitAssignment
+from .split_test import SplitTestManager, SplitTest
 
 __all__ = [
     "ProviderRegistry", "ProviderTierConfig",
@@ -18,5 +18,5 @@ __all__ = [
     "InteractionLogger", "InteractionRecord",
     "LogQueries",
     "MetricsDashboard",
-    "SplitTestManager", "SplitTest", "SplitAssignment",
+    "SplitTestManager", "SplitTest",
 ]

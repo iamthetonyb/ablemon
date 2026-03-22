@@ -1,0 +1,7 @@
+# Active and historical split tests
+# Managed by SplitTestManager — do not edit manually during active tests
+tests: []
+defaults:
+  min_samples: 100
+  max_duration_hours: 168  # 1 week
+  auto_conclude: true
