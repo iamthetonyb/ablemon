@@ -1,0 +1,20 @@
+tenant_id: "acme-legal"
+name: "ACME Legal Corp"
+domain: "legal"
+personality: "Professional legal assistant with expertise in contract review and compliance."
+channels:
+  telegram:
+    bot_token_secret: "ACME_TELEGRAM_TOKEN"
+routing:
+  tier_0_enabled: false
+  opus_monthly_budget_usd: 50.00
+  max_tier: 4
+distillation:
+  training_threshold: 500
+  auto_retrain: true
+billing:
+  plan: "standard"
+  markup_percentage: 40
+data:
+  cross_tenant_training: false  # NEVER mix tenant data
+status: "active"
