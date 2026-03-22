@@ -521,6 +521,24 @@ skills:
     created: "2026-02-22"
     use_count: 0
 
+  # ══════════════════════════════════════════════════════════════
+  # DISTILLATION SKILLS
+  # ══════════════════════════════════════════════════════════════
+
+  corpus-generator:
+    description: "Generate training data for model distillation by running prompts from the prompt bank through a teacher model and saving responses in ChatML format."
+    triggers:
+      - "generate corpus"
+      - "generate training data"
+      - "build corpus"
+      - "distillation data"
+      - "run distillation prompts"
+    type: "hybrid"
+    trust_level: "L3_ACT"
+    requires_approval: false
+    created: "2026-03-21"
+    use_count: 0
+
 # ══════════════════════════════════════════════════════════════
 # SKILL TYPES
 # ══════════════════════════════════════════════════════════════

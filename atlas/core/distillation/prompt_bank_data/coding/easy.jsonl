@@ -1,0 +1,7 @@
+{"prompt": "Write a Python function that checks if a string is a valid email address using regex.", "domain": "coding", "difficulty": "easy", "tags": ["python", "regex"]}
+{"prompt": "Create a function to find the two numbers in a list that sum to a target value.", "domain": "coding", "difficulty": "easy", "tags": ["python", "algorithms"]}
+{"prompt": "Write a Python function that flattens a nested list of arbitrary depth into a single list.", "domain": "coding", "difficulty": "easy", "tags": ["python", "recursion"]}
+{"prompt": "Implement a function that converts a Roman numeral string to an integer.", "domain": "coding", "difficulty": "easy", "tags": ["python", "parsing"]}
+{"prompt": "Write a decorator that retries a function up to N times if it raises an exception.", "domain": "coding", "difficulty": "easy", "tags": ["python", "decorators"]}
+{"prompt": "Create a Python class that implements a basic stack with push, pop, peek, and is_empty methods.", "domain": "coding", "difficulty": "easy", "tags": ["python", "data-structures"]}
+{"prompt": "Write a function that groups a list of strings by their first character into a dictionary.", "domain": "coding", "difficulty": "easy", "tags": ["python", "collections"]}

@@ -14,6 +14,8 @@ venv/
 # Runtime
 *.log
 *.jsonl
+# Prompt bank data is source-controlled (templates, not runtime output)
+!core/distillation/prompt_bank_data/**/*.jsonl
 audit/logs/*.jsonl
 audit/traces/*.jsonl
 clients/transcripts/**/*.jsonl
