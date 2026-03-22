@@ -1,0 +1,13 @@
+platform: grok
+description: "Extract Grok conversations from exported data"
+model_name: "grok-3"
+harvest_method: "file"
+file_patterns:
+  - "~/Downloads/grok-export/*.json"
+  - "~/.grok/conversations/*.json"
+message_path: "messages"
+role_mapping:
+  human: user
+  assistant: assistant
+  system: system
+thinking_field: "thinking"

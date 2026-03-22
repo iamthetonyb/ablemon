@@ -1,0 +1,13 @@
+platform: antigravity
+description: "Extract Antigravity AI conversations from session data"
+model_name: "antigravity"
+harvest_method: "file"
+file_patterns:
+  - "~/.antigravity/sessions/*.json"
+  - "~/.antigravity/conversations/*.jsonl"
+message_path: "messages"
+role_mapping:
+  user: user
+  ai: assistant
+  system: system
+thinking_field: null

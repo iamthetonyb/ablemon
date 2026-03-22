@@ -1,0 +1,13 @@
+platform: cowork
+description: "Extract Cowork AI pair-programming conversations"
+model_name: "cowork"
+harvest_method: "file"
+file_patterns:
+  - "~/.cowork/sessions/*.json"
+  - "~/.cowork/history/*.jsonl"
+message_path: "messages"
+role_mapping:
+  developer: user
+  copilot: assistant
+  system: system
+thinking_field: "chain_of_thought"

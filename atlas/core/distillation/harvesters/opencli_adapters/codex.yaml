@@ -1,0 +1,13 @@
+platform: codex
+description: "Extract Codex CLI conversations from session logs"
+model_name: "codex"
+harvest_method: "file"
+file_patterns:
+  - "~/.codex/sessions/*.jsonl"
+  - "~/.codex/history/*.json"
+message_path: "messages"
+role_mapping:
+  user: user
+  assistant: assistant
+  system: system
+thinking_field: "reasoning"

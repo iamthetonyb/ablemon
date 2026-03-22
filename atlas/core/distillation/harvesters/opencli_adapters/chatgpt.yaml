@@ -1,0 +1,13 @@
+platform: chatgpt
+description: "Extract ChatGPT conversations via exported data"
+model_name: "gpt-5.4"
+harvest_method: "file"
+file_patterns:
+  - "~/Downloads/chatgpt-export/*.json"
+  - "~/.chatgpt/conversations/*.json"
+message_path: "mapping.*.message"
+role_mapping:
+  human: user
+  assistant: assistant
+  system: system
+thinking_field: null  # ChatGPT doesn't expose thinking tokens
