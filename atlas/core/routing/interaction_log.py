@@ -128,6 +128,7 @@ class InteractionLogger:
         ("enrichment_level", "TEXT DEFAULT ''"),
         ("split_test_group", "TEXT DEFAULT ''"),
         ("thinking_tokens_preserved", "INTEGER DEFAULT 0"),
+        ("quality_score", "REAL"),
     ]
 
     def __init__(self, db_path: str = DEFAULT_DB_PATH):
@@ -263,6 +264,7 @@ class InteractionLogger:
         enrichment_level: Optional[str] = None,
         split_test_group: Optional[str] = None,
         thinking_tokens_preserved: Optional[bool] = None,
+        quality_score: Optional[float] = None,
     ):
         """
         Update execution results after a provider responds.
@@ -289,6 +291,7 @@ class InteractionLogger:
             ("enrichment_level", enrichment_level),
             ("split_test_group", split_test_group),
             ("thinking_tokens_preserved", int(thinking_tokens_preserved) if thinking_tokens_preserved is not None else None),
+            ("quality_score", quality_score),
         ]:
             if val is not None:
                 updates.append(f"{col} = ?")

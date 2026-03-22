@@ -579,6 +579,31 @@ class ATLASGateway:
                 except Exception as e:
                     logger.warning(f"Failed to build chain for tier {tier}: {e}")
 
+        # ── Observability: Phoenix + ATLAS Tracer + Evaluators ──
+        self.tracer = None
+        self.phoenix = None
+        self.evaluator = None
+        try:
+            from core.observability.instrumentors import ATLASTracer, JSONLExporter
+            from core.observability.evaluators import ABLEEvaluator
+            traces_path = str(_PROJECT_ROOT / "data" / "traces.jsonl")
+            self.tracer = ATLASTracer(exporter=JSONLExporter(path=traces_path))
+            self.evaluator = ABLEEvaluator()
+            logger.info("ATLASTracer + ABLEEvaluator initialized (JSONL → %s)", traces_path)
+
+            # Try to start Phoenix dashboard (localhost:6006)
+            from core.observability.phoenix_setup import PhoenixObserver
+            self.phoenix = PhoenixObserver(
+                project_name="atlas",
+                fallback_path=traces_path,
+            )
+            if self.phoenix.is_available:
+                logger.info("Phoenix dashboard live at http://localhost:6006")
+            else:
+                logger.info("Phoenix unavailable — JSONL tracing active as fallback")
+        except Exception as e:
+            logger.warning(f"Observability init failed (non-fatal): {e}")
+
         # Evolution daemon (started in _start_background_tasks)
         self.evolution_daemon = None
 
@@ -912,6 +937,20 @@ class ATLASGateway:
 
             for loop_iteration in range(15):
                 _iter_start = _time.monotonic()
+                # ── Trace span for provider call ──
+                _span = None
+                if self.tracer:
+                    _span = self.tracer.start_span(
+                        name=f"provider.complete.iter{loop_iteration}",
+                        kind="llm",
+                        attributes={
+                            "tier": scoring_result.selected_tier if scoring_result else 0,
+                            "domain": scoring_result.domain if scoring_result else "unknown",
+                            "complexity_score": scoring_result.score if scoring_result else 0,
+                            "tenant_id": client_id or "master",
+                            "iteration": loop_iteration,
+                        },
+                    )
                 # Route to a vision-capable provider if message is multimodal (only needed for first pass)
                 if isinstance(message, list) and loop_iteration == 0:
                     result = await self.vision_chain.complete(
@@ -927,15 +966,15 @@ class ATLASGateway:
                         if isinstance(msg.content, list):
                             extracted_text = next((item.get("text", "") for item in msg.content if item.get("type") == "text"), "")
                             text_only_msgs.append(Message(
-                                role=msg.role, 
-                                content=extracted_text, 
-                                name=msg.name, 
-                                tool_call_id=msg.tool_call_id, 
+                                role=msg.role,
+                                content=extracted_text,
+                                name=msg.name,
+                                tool_call_id=msg.tool_call_id,
                                 tool_calls=msg.tool_calls
                             ))
                         else:
                             text_only_msgs.append(msg)
-                            
+
                     result = await selected_chain.complete(
                         text_only_msgs,
                         tools=authorized_tools,
@@ -949,6 +988,20 @@ class ATLASGateway:
                 _model_name = getattr(result, 'model', '?')
                 _tok = result.usage.total_tokens if hasattr(result, 'usage') and result.usage else 0
                 _tool_names = [tc.name for tc in result.tool_calls] if result.tool_calls else []
+
+                # ── End trace span with result metadata ──
+                if _span and self.tracer:
+                    _span.attributes["provider"] = _provider_name
+                    _span.attributes["model"] = _model_name
+                    _span.attributes["latency_ms"] = _iter_ms
+                    _span.attributes["total_tokens"] = _tok
+                    if hasattr(result, 'usage') and result.usage:
+                        _span.attributes["input_tokens"] = getattr(result.usage, 'input_tokens', 0)
+                        _span.attributes["output_tokens"] = getattr(result.usage, 'output_tokens', 0)
+                    if _tool_names:
+                        _span.attributes["tool_calls"] = _tool_names
+                    self.tracer.end_span(_span)
+
                 logger.info(
                     f"[PIPELINE] Iter {loop_iteration} — provider={_provider_name} model={_model_name} "
                     f"tokens={_tok} tools={_tool_names} ({_iter_ms:.0f}ms)"
@@ -999,6 +1052,22 @@ class ATLASGateway:
                     f"[PIPELINE] ── DONE ── provider={_provider_name} iterations={loop_iteration + 1} "
                     f"total={_total_ms:.0f}ms"
                 )
+                # ── Run quality evaluators (feeds corpus builder + dashboard) ──
+                _quality_scores = None
+                if self.evaluator and final_text and isinstance(text_content, str):
+                    try:
+                        _quality_scores = self.evaluator.score_for_training(
+                            input_text=text_content,
+                            output_text=final_text,
+                        )
+                        if _quality_scores.get("eligible"):
+                            logger.debug(
+                                "[PIPELINE] Quality: %.2f (eligible for corpus)",
+                                _quality_scores["average"],
+                            )
+                    except Exception as _eval_e:
+                        logger.debug(f"Evaluator scoring failed (non-fatal): {_eval_e}")
+
                 # Save to HybridMemory
                 if hasattr(self, 'memory') and self.memory:
                     try:
@@ -1065,7 +1134,8 @@ class ATLASGateway:
                             raw_input=_raw_input[:10000],
                             raw_output=_raw_output_for_log[:10000] if _raw_output_for_log else None,
                             thinking_tokens_preserved=_has_thinking,
-                            corpus_eligible=True,  # ABLEInteractionHarvester filters further
+                            corpus_eligible=_quality_scores.get("eligible", True) if _quality_scores else True,
+                            quality_score=_quality_scores.get("average", 0.0) if _quality_scores else None,
                         )
                     except Exception as log_e:
                         logger.warning(f"Failed to update interaction log: {log_e}")
@@ -1778,6 +1848,14 @@ class ATLASGateway:
         except Exception as e:
             logger.warning(f"Evolution daemon failed to start: {e}")
             print(f"⚠️ Evolution daemon not started: {e}")
+
+        # Report observability status
+        if self.phoenix and self.phoenix.is_available:
+            print(f"🔭 Phoenix dashboard: http://localhost:6006 (project: atlas)")
+        elif self.tracer:
+            print(f"🔭 Tracing: JSONL fallback (data/traces.jsonl)")
+        if self.evaluator:
+            print(f"📊 Quality evaluators: hallucination, correctness, skill_adherence, tone")
 
         # Report routing status
         if self.complexity_scorer:

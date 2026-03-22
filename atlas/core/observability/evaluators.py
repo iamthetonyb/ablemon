@@ -15,7 +15,10 @@ import re
 import logging
 from typing import Dict, Optional
 
-from atlas.core.factcheck.checker import HALLUCINATION_MARKERS
+try:
+    from atlas.core.factcheck.checker import HALLUCINATION_MARKERS
+except ImportError:
+    from core.factcheck.checker import HALLUCINATION_MARKERS
 
 logger = logging.getLogger(__name__)
 

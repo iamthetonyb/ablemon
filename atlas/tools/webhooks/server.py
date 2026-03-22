@@ -361,6 +361,14 @@ class WebhookServer:
         failures = totals.get("failures", 0) or 0
         success_rate = round((total - failures) / total * 100, 2) if total > 0 else 0.0
 
+        # Quality score averages (from evaluator)
+        quality = self._db_query_one(
+            """SELECT ROUND(AVG(quality_score), 4) as avg_quality,
+                      SUM(CASE WHEN corpus_eligible = 1 THEN 1 ELSE 0 END) as corpus_eligible_count
+               FROM interaction_log WHERE timestamp >= ? AND quality_score IS NOT NULL""",
+            (since,),
+        )
+
         return web.json_response({
             "period_hours": hours,
             "total_interactions": total,
@@ -369,6 +377,9 @@ class WebhookServer:
             "avg_latency_ms": totals.get("avg_latency_ms", 0) or 0,
             "total_tokens": (totals.get("total_input_tokens", 0) or 0)
                           + (totals.get("total_output_tokens", 0) or 0),
+            "avg_quality_score": quality.get("avg_quality") if quality else None,
+            "corpus_eligible_count": quality.get("corpus_eligible_count", 0) if quality else 0,
+            "phoenix_dashboard": "http://localhost:6006",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
