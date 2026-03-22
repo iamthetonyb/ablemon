@@ -62,6 +62,16 @@ class InteractionRecord:
     session_id: str = ""
     conversation_turn: int = 0
 
+    # ── Multi-tenant & Distillation ──────────────────────────
+    tenant_id: str = "default"
+    corpus_eligible: bool = False
+    corpus_version: Optional[str] = None
+    raw_input: Optional[str] = None
+    raw_output: Optional[str] = None
+    enrichment_level: str = ""  # none/light/standard/deep
+    split_test_group: str = ""
+    thinking_tokens_preserved: bool = False
+
 
 class InteractionLogger:
     """
@@ -108,10 +118,23 @@ class InteractionLogger:
     CREATE INDEX IF NOT EXISTS idx_log_scorer_version ON interaction_log(scorer_version);
     """
 
+    # Columns added by _migrate_schema for multi-tenant + distillation support.
+    _MIGRATION_COLUMNS = [
+        ("tenant_id", "TEXT DEFAULT 'default'"),
+        ("corpus_eligible", "INTEGER DEFAULT 0"),
+        ("corpus_version", "TEXT"),
+        ("raw_input", "TEXT"),
+        ("raw_output", "TEXT"),
+        ("enrichment_level", "TEXT DEFAULT ''"),
+        ("split_test_group", "TEXT DEFAULT ''"),
+        ("thinking_tokens_preserved", "INTEGER DEFAULT 0"),
+    ]
+
     def __init__(self, db_path: str = DEFAULT_DB_PATH):
         self._db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
+        self._migrate_schema()
 
     def _init_db(self):
         """Create tables and indices if they don't exist."""
@@ -120,6 +143,31 @@ class InteractionLogger:
             conn.executescript(self.SCHEMA)
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _migrate_schema(self):
+        """Add new columns if they don't already exist (idempotent)."""
+        conn = sqlite3.connect(self._db_path)
+        try:
+            for col_name, col_def in self._MIGRATION_COLUMNS:
+                try:
+                    conn.execute(
+                        f"ALTER TABLE interaction_log ADD COLUMN {col_name} {col_def}"
+                    )
+                except sqlite3.OperationalError:
+                    # Column already exists — expected on subsequent runs.
+                    pass
+            # Add indices for frequently filtered new columns.
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_log_tenant_id "
+                "ON interaction_log(tenant_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_log_corpus_eligible "
+                "ON interaction_log(corpus_eligible)"
+            )
             conn.commit()
         finally:
             conn.close()
@@ -145,9 +193,13 @@ class InteractionLogger:
                     input_tokens, output_tokens, cost_usd,
                     success, error_type, user_correction,
                     user_satisfaction, escalated, channel,
-                    session_id, conversation_turn
+                    session_id, conversation_turn,
+                    tenant_id, corpus_eligible, corpus_version,
+                    raw_input, raw_output, enrichment_level,
+                    split_test_group, thinking_tokens_preserved
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?, ?, ?, ?
                 )""",
                 (
@@ -176,6 +228,14 @@ class InteractionLogger:
                     record.channel,
                     record.session_id,
                     record.conversation_turn,
+                    record.tenant_id,
+                    int(record.corpus_eligible),
+                    record.corpus_version,
+                    record.raw_input,
+                    record.raw_output,
+                    record.enrichment_level,
+                    record.split_test_group,
+                    int(record.thinking_tokens_preserved),
                 ),
             )
             conn.commit()
@@ -196,6 +256,13 @@ class InteractionLogger:
         cost_usd: Optional[float] = None,
         success: Optional[bool] = None,
         error_type: Optional[str] = None,
+        corpus_eligible: Optional[bool] = None,
+        corpus_version: Optional[str] = None,
+        raw_input: Optional[str] = None,
+        raw_output: Optional[str] = None,
+        enrichment_level: Optional[str] = None,
+        split_test_group: Optional[str] = None,
+        thinking_tokens_preserved: Optional[bool] = None,
     ):
         """
         Update execution results after a provider responds.
@@ -215,6 +282,13 @@ class InteractionLogger:
             ("cost_usd", cost_usd),
             ("success", int(success) if success is not None else None),
             ("error_type", error_type),
+            ("corpus_eligible", int(corpus_eligible) if corpus_eligible is not None else None),
+            ("corpus_version", corpus_version),
+            ("raw_input", raw_input),
+            ("raw_output", raw_output),
+            ("enrichment_level", enrichment_level),
+            ("split_test_group", split_test_group),
+            ("thinking_tokens_preserved", int(thinking_tokens_preserved) if thinking_tokens_preserved is not None else None),
         ]:
             if val is not None:
                 updates.append(f"{col} = ?")
