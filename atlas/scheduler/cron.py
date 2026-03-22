@@ -103,6 +103,7 @@ EVERY_5_MINUTES = "*/5 * * * *"
 EVERY_15_MINUTES = "*/15 * * * *"
 EVERY_HOUR = "0 * * * *"
 DAILY_3AM = "0 3 * * *"
+DAILY_7AM = "0 7 * * *"
 DAILY_9AM = "0 9 * * *"
 WEEKDAYS_9AM = "0 9 * * 1-5"
 WEEKLY_SUNDAY_6PM = "0 18 * * 0"
@@ -620,4 +621,64 @@ def register_default_jobs(
         MONTHLY_1ST,
         rotate_audit_log,
         description="Rotate and archive audit logs",
+    )
+
+    # ── Evolution daemon — nightly at 3am ───────────────────────
+    async def run_evolution_daemon():
+        from atlas.core.evolution.daemon import EvolutionDaemon, EvolutionConfig
+        from atlas.core.evolution.self_scheduler import SelfScheduler
+
+        config = EvolutionConfig()
+        daemon = EvolutionDaemon(config=config)
+        result = await daemon.run_cycle()
+
+        # Feed results into self-scheduler if the cycle produced analysis
+        if result.success and result.problems_found > 0:
+            self_sched = SelfScheduler(
+                scheduler=scheduler,
+                audit_trail=audit_log,
+            )
+            analysis_data = {
+                "problems_found": result.problems_found,
+                "improvements_proposed": result.improvements_proposed,
+                "improvements_deployed": result.improvements_deployed,
+                "problems": [],
+                "recommendations": [],
+                "failures_by_tier": [],
+                "health_indicators": {"overall": "healthy", "alerts": []},
+            }
+            await self_sched.run_cycle(analysis_data, cycle_id=result.cycle_id)
+
+        return {
+            "cycle_id": result.cycle_id,
+            "success": result.success,
+            "improvements_deployed": result.improvements_deployed,
+        }
+
+    scheduler.add_job(
+        "evolution-daemon",
+        DAILY_3AM,
+        run_evolution_daemon,
+        description="Nightly evolution daemon — M2.7 tunes routing weights",
+        timeout=600.0,
+        max_retries=2,
+    )
+
+    # ── Morning report — daily at 7am ───────────────────────────
+    async def generate_morning_report():
+        from atlas.core.evolution.morning_report import MorningReporter
+
+        reporter = MorningReporter()
+        report = await reporter.generate(period_hours=24)
+        text = reporter.format_telegram(report)
+        logger.info(f"Morning report generated ({len(text)} chars)")
+        return {"report": text, "total_requests": report.total_requests}
+
+    scheduler.add_job(
+        "morning-report",
+        DAILY_7AM,
+        generate_morning_report,
+        description="Daily morning report — Telegram-deliverable summary",
+        timeout=120.0,
+        max_retries=2,
     )
