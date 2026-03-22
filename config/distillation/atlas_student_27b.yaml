@@ -1,0 +1,57 @@
+# ATLAS Student 27B — QLoRA fine-tuning config
+# Target: Qwen 3.5 27B → atlas-student-27b
+# Primary deployment: UD-Q4_K_XL (17.6 GB)
+#
+# Training estimate: ~0.9 h per 1K examples on H100 80 GB
+
+model:
+  name: atlas-student-27b
+  base_model: Qwen/Qwen3.5-27B
+  role: server
+
+qlora:
+  adapter: qlora
+  lora_r: 32
+  lora_alpha: 64
+  lora_target_linear: true
+  load_in_4bit: true
+
+training:
+  sequence_len: 8192
+  micro_batch_size: 1
+  gradient_accumulation_steps: 8
+  learning_rate: 1.5e-4
+  num_epochs: 3
+  warmup_steps: 10
+  weight_decay: 0.01
+  bf16: true
+  tf32: true
+  save_strategy: epoch
+
+data:
+  train_on_inputs: false
+  chat_template: chatml
+  corpus_format: chatml
+
+quantization_targets:
+  - type: UD-Q4_K_XL
+    size_gb: 17.6
+    primary: true
+    description: "Unsloth Dynamic 2.0 — default server deployment"
+  - type: Q5_K_M
+    size_gb: 19.6
+    primary: false
+    description: "Higher fidelity, ~11% larger"
+  - type: Q8_0
+    size_gb: 28.6
+    primary: false
+    description: "Near-lossless, evaluation only"
+
+hardware:
+  min_gpu_memory_gb: 24
+  recommended: H100-80GB
+  estimated_hours_per_1k: 0.9
+
+ollama:
+  model_name: atlas-27b
+  modelfile_template: config/ollama/Modelfile.27b
