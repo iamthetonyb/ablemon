@@ -15,6 +15,8 @@ from .analyzer import EvolutionAnalyzer, AnalysisResult
 from .improver import WeightImprover, Improvement
 from .validator import ChangeValidator, ValidationResult
 from .deployer import ChangeDeployer, DeployResult
+from .self_scheduler import SelfScheduler, ScheduledAction, SchedulerCycleReport
+from .morning_report import MorningReporter, MorningReportData
 
 __all__ = [
     "EvolutionDaemon", "EvolutionConfig", "CycleResult",
@@ -23,4 +25,6 @@ __all__ = [
     "WeightImprover", "Improvement",
     "ChangeValidator", "ValidationResult",
     "ChangeDeployer", "DeployResult",
+    "SelfScheduler", "ScheduledAction", "SchedulerCycleReport",
+    "MorningReporter", "MorningReportData",
 ]
