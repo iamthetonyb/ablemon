@@ -28,6 +28,7 @@ from .improver import WeightImprover, Improvement
 from .validator import ChangeValidator, ValidationResult
 from .deployer import ChangeDeployer, DeployResult
 from .auto_improve import AutoImprover, run_from_evals
+from .split_test_integration import EvolutionSplitTestPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -96,11 +97,13 @@ class EvolutionDaemon:
         self,
         config: Optional[EvolutionConfig] = None,
         m27_provider=None,
+        split_policy: Optional[EvolutionSplitTestPolicy] = None,
     ):
         self.config = config or EvolutionConfig()
         self._collector = MetricsCollector(db_path=self.config.interaction_db)
         self._analyzer = EvolutionAnalyzer(provider=m27_provider)
         self._deployer = ChangeDeployer(weights_path=self.config.weights_path)
+        self.split_policy = split_policy
         self._running = False
         self._cycles_completed = 0
         self._daily_spend = 0.0
@@ -187,6 +190,41 @@ class EvolutionDaemon:
                     return result
             else:
                 result.improvements_approved = len(improvements)
+
+            # ── Step 4b: Split Test Gate ─────────────────────
+            if self.split_policy and improvements:
+                # Check if any running tests can be concluded first
+                concluded = self.split_policy.check_running_tests()
+                for test_result in concluded:
+                    if test_result.get("winner") == "experiment":
+                        logger.info(
+                            f"Split test {test_result['id']} won — "
+                            f"deploying experiment weights"
+                        )
+                        exp_weights = test_result.get("experiment_config", {})
+                        if exp_weights:
+                            self._deployer.deploy(
+                                exp_weights,
+                                changes_count=len(improvements),
+                            )
+
+                # Decide whether new changes need a split test
+                if self.split_policy.should_split_test(improvements):
+                    analysis_summary = (
+                        f"{len(analysis.problems)} problems, "
+                        f"{len(analysis.recommendations)} recommendations"
+                    )
+                    proposal = self.split_policy.create_proposal(
+                        improvements, current_weights, analysis_summary
+                    )
+                    logger.info(
+                        f"Split test created: {proposal.id} — "
+                        f"monitoring {self.split_policy.min_samples} samples"
+                    )
+                    result.completed_at = datetime.now(timezone.utc).isoformat()
+                    result.duration_ms = (time.perf_counter() - start) * 1000
+                    self._log_cycle(result)
+                    return result
 
             # ── Step 5: Deploy ────────────────────────────────
             if self.config.auto_deploy:
