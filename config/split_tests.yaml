@@ -1,0 +1,38 @@
+# ATLAS Split Test Definitions
+# =============================
+# A/B tests for routing configuration changes.
+# Managed by SplitTestManager (atlas/core/routing/split_test.py).
+#
+# Each test defines:
+#   - control_weight / experiment_weight: traffic split (must sum to 1.0)
+#   - experiment_overrides: weight paths applied to experiment group
+#   - status: active | paused | concluded
+#
+# CLI:
+#   python -m atlas.core.routing.split_test --start <name> --desc "..." --overrides '{}'
+#   python -m atlas.core.routing.split_test --status
+#   python -m atlas.core.routing.split_test --conclude <name>
+
+tests:
+  # Example: test bumping safety_critical_weight from 0.30 to 0.35
+  # security-weight-v3:
+  #   description: "Test safety_critical_weight at 0.35 (up from 0.30)"
+  #   control_weight: 0.5
+  #   experiment_weight: 0.5
+  #   experiment_overrides:
+  #     features.safety_critical_weight: 0.35
+  #   status: active
+  #   created_at: "2026-03-21T00:00:00+00:00"
+  #   concluded_at: null
+  #   control_count: 0
+  #   experiment_count: 0
+  #   control_successes: 0
+  #   experiment_successes: 0
+  #   control_escalations: 0
+  #   experiment_escalations: 0
+  #   control_total_cost: 0.0
+  #   experiment_total_cost: 0.0
+  #   control_total_latency: 0.0
+  #   experiment_total_latency: 0.0
+
+updated_at: "2026-03-21T00:00:00+00:00"

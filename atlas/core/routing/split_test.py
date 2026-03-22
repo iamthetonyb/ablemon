@@ -9,11 +9,20 @@ Design:
     - Traffic is split deterministically by hashing session_id + test_name
     - Results are tracked in the interaction log via the `features` field
     - Tests can be created, paused, concluded, and analyzed
+    - SQLite storage for durable outcome tracking
+    - Statistical significance via chi-squared test (scipy optional, pure-Python fallback)
+
+CLI:
+    python -m atlas.core.routing.split_test --start <name> --desc "..." --overrides '{"k": v}'
+    python -m atlas.core.routing.split_test --status [name]
+    python -m atlas.core.routing.split_test --conclude <name>
 """
 
 import hashlib
 import json
 import logging
+import math
+import sqlite3
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -23,6 +32,8 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_OUTCOMES_DB = "data/split_test_outcomes.db"
 
 
 @dataclass
@@ -345,3 +356,305 @@ class SplitTestManager:
     def active_tests(self) -> List[SplitTest]:
         """Get all active tests."""
         return [t for t in self._tests.values() if t.status == "active"]
+
+    @property
+    def all_tests(self) -> Dict[str, SplitTest]:
+        """Get all tests (any status)."""
+        return dict(self._tests)
+
+    def delete_test(self, name: str):
+        """Remove a test entirely (for cleanup)."""
+        if name in self._tests:
+            del self._tests[name]
+            self._save()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Statistical Significance
+# ─────────────────────────────────────────────────────────────────────────────
+
+def chi_squared_significance(
+    ctrl_successes: int,
+    ctrl_failures: int,
+    exp_successes: int,
+    exp_failures: int,
+    alpha: float = 0.05,
+) -> Dict[str, Any]:
+    """
+    Chi-squared test for independence on a 2x2 contingency table.
+
+    Uses scipy.stats.chi2 if available, otherwise a pure-Python
+    survival function approximation (adequate for 1 degree of freedom).
+
+    Returns dict with chi2 statistic, p_value, significant (bool), and alpha.
+    """
+    table = [
+        [ctrl_successes, ctrl_failures],
+        [exp_successes, exp_failures],
+    ]
+    n = sum(sum(row) for row in table)
+    if n == 0:
+        return {"chi2": 0.0, "p_value": 1.0, "significant": False, "alpha": alpha}
+
+    row_totals = [sum(row) for row in table]
+    col_totals = [table[0][j] + table[1][j] for j in range(2)]
+
+    chi2 = 0.0
+    for i in range(2):
+        for j in range(2):
+            expected = row_totals[i] * col_totals[j] / n
+            if expected > 0:
+                chi2 += (table[i][j] - expected) ** 2 / expected
+
+    # Compute p-value
+    try:
+        from scipy.stats import chi2 as chi2_dist
+        p_value = 1.0 - chi2_dist.cdf(chi2, df=1)
+    except ImportError:
+        # Pure-Python approximation for chi2 survival function (df=1)
+        # Uses the complementary error function relationship:
+        # P(X > x) = erfc(sqrt(x/2)) for df=1
+        p_value = math.erfc(math.sqrt(chi2 / 2.0)) if chi2 > 0 else 1.0
+
+    return {
+        "chi2": round(chi2, 4),
+        "p_value": round(p_value, 6),
+        "significant": p_value < alpha,
+        "alpha": alpha,
+    }
+
+
+def compute_significance(test: SplitTest, alpha: float = 0.05) -> Dict[str, Any]:
+    """
+    Compute statistical significance for a split test's success rates.
+
+    Wraps chi_squared_significance with the test's counters.
+    """
+    ctrl_failures = test.control_count - test.control_successes
+    exp_failures = test.experiment_count - test.experiment_successes
+
+    result = chi_squared_significance(
+        ctrl_successes=test.control_successes,
+        ctrl_failures=ctrl_failures,
+        exp_successes=test.experiment_successes,
+        exp_failures=exp_failures,
+        alpha=alpha,
+    )
+    result["min_samples_met"] = (
+        test.control_count >= 30 and test.experiment_count >= 30
+    )
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SQLite Outcome Storage
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SplitTestOutcomeStore:
+    """
+    Durable SQLite store for individual split-test outcomes.
+
+    The YAML file stores aggregate counters; this table stores
+    each individual outcome for post-hoc analysis and audit.
+    """
+
+    SCHEMA = """
+    CREATE TABLE IF NOT EXISTS split_test_outcomes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        test_name TEXT NOT NULL,
+        grp TEXT NOT NULL,
+        session_id TEXT,
+        success INTEGER NOT NULL DEFAULT 1,
+        escalated INTEGER NOT NULL DEFAULT 0,
+        cost_usd REAL NOT NULL DEFAULT 0.0,
+        latency_ms REAL NOT NULL DEFAULT 0.0,
+        recorded_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_sto_test ON split_test_outcomes(test_name);
+    CREATE INDEX IF NOT EXISTS idx_sto_grp ON split_test_outcomes(test_name, grp);
+    """
+
+    def __init__(self, db_path: str = DEFAULT_OUTCOMES_DB):
+        self._db_path = db_path
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+
+    def _init_db(self):
+        conn = sqlite3.connect(self._db_path)
+        try:
+            conn.executescript(self.SCHEMA)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.commit()
+        finally:
+            conn.close()
+
+    def record(
+        self,
+        test_name: str,
+        group: str,
+        session_id: str = "",
+        success: bool = True,
+        escalated: bool = False,
+        cost_usd: float = 0.0,
+        latency_ms: float = 0.0,
+    ):
+        conn = sqlite3.connect(self._db_path)
+        try:
+            conn.execute(
+                """INSERT INTO split_test_outcomes
+                   (test_name, grp, session_id, success, escalated,
+                    cost_usd, latency_ms, recorded_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    test_name,
+                    group,
+                    session_id,
+                    int(success),
+                    int(escalated),
+                    cost_usd,
+                    latency_ms,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_outcomes(
+        self, test_name: str, group: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        conn = sqlite3.connect(self._db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            if group:
+                rows = conn.execute(
+                    "SELECT * FROM split_test_outcomes WHERE test_name=? AND grp=?",
+                    (test_name, group),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM split_test_outcomes WHERE test_name=?",
+                    (test_name,),
+                ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def count(self, test_name: Optional[str] = None) -> int:
+        conn = sqlite3.connect(self._db_path)
+        try:
+            if test_name:
+                return conn.execute(
+                    "SELECT COUNT(*) FROM split_test_outcomes WHERE test_name=?",
+                    (test_name,),
+                ).fetchone()[0]
+            return conn.execute(
+                "SELECT COUNT(*) FROM split_test_outcomes"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CLI
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _cli():
+    """CLI entry point for split test management."""
+    import argparse
+
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+    )
+
+    parser = argparse.ArgumentParser(
+        description="ATLAS Split Test Manager",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  Start a test:
+    python -m atlas.core.routing.split_test \\
+      --start security-weight-bump \\
+      --desc "Test safety_critical_weight at 0.35" \\
+      --overrides '{"features.safety_critical_weight": 0.35}'
+
+  Check status:
+    python -m atlas.core.routing.split_test --status
+    python -m atlas.core.routing.split_test --status security-weight-bump
+
+  Conclude a test:
+    python -m atlas.core.routing.split_test --conclude security-weight-bump
+        """,
+    )
+    parser.add_argument(
+        "--config",
+        default="config/split_tests.yaml",
+        help="Path to split_tests.yaml (default: config/split_tests.yaml)",
+    )
+    parser.add_argument("--start", metavar="NAME", help="Start a new split test")
+    parser.add_argument("--desc", default="", help="Description for --start")
+    parser.add_argument(
+        "--overrides",
+        default="{}",
+        help="JSON dict of experiment overrides for --start",
+    )
+    parser.add_argument(
+        "--control-weight",
+        type=float,
+        default=0.5,
+        help="Control group weight (default: 0.5)",
+    )
+    parser.add_argument(
+        "--status",
+        nargs="?",
+        const="__all__",
+        metavar="NAME",
+        help="Show status (optionally for a specific test)",
+    )
+    parser.add_argument("--conclude", metavar="NAME", help="Conclude a test")
+
+    args = parser.parse_args()
+    mgr = SplitTestManager(config_path=args.config)
+
+    if args.start:
+        overrides = json.loads(args.overrides)
+        exp_weight = round(1.0 - args.control_weight, 4)
+        test = mgr.create_test(
+            name=args.start,
+            description=args.desc,
+            control_weight=args.control_weight,
+            experiment_weight=exp_weight,
+            experiment_overrides=overrides,
+        )
+        print(f"Created test: {test.name}")
+        print(f"  Control weight:    {test.control_weight}")
+        print(f"  Experiment weight: {test.experiment_weight}")
+        print(f"  Overrides:         {test.experiment_overrides}")
+        return
+
+    if args.status is not None:
+        if args.status == "__all__":
+            results = mgr.get_all_results()
+            print(json.dumps(results, indent=2))
+        else:
+            results = mgr.get_results(args.status)
+            test = mgr.all_tests.get(args.status)
+            if test:
+                results["significance"] = compute_significance(test)
+            print(json.dumps(results, indent=2))
+        return
+
+    if args.conclude:
+        results = mgr.conclude_test(args.conclude)
+        test = mgr.all_tests.get(args.conclude)
+        if test:
+            results["significance"] = compute_significance(test)
+        print(json.dumps(results, indent=2))
+        return
+
+    parser.print_help()
+
+
+if __name__ == "__main__":
+    _cli()
