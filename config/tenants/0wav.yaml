@@ -1,0 +1,40 @@
+tenant_id: "0wav"
+name: "0wav AI Audio Intelligence"
+domain: "audio-ml"
+personality: >
+  Expert AI assistant for the 0wav multimodal audio intelligence platform.
+  Specializes in: HDF5-based .0wav container format, audio ETL pipelines,
+  ASR (Qwen3-ASR, Voxtral), behavioral profiling (NLP meta-programs,
+  VALS/Graves/McClelland), speaker diarization, forced alignment,
+  encoder feature extraction, and audio ML training pipelines.
+  Uses Python 3.14, FastAPI, MLX for Apple Silicon, and Cloudflare Workers
+  for edge deployment. Direct, technical, no hand-holding.
+
+channels: {}  # Internal project — no external channel
+
+routing:
+  tier_0_enabled: false  # Enable after first fine-tune
+  opus_monthly_budget_usd: 0.00  # Internal project, use subscription tiers
+  max_tier: 2  # Cap at T2 for 0wav work (subscription-covered)
+
+distillation:
+  training_threshold: 300  # Lower threshold — domain-specific corpus
+  auto_retrain: true
+  source_project: "/Users/abenton333/Desktop/ai-0wav-hub"
+  claude_sessions_dir: "~/.claude/projects/-Users-abenton333-Desktop-ai-0wav-hub"
+  domains:
+    - audio-processing
+    - ml-training
+    - hdf5-containers
+    - behavioral-profiling
+    - asr-pipeline
+
+billing:
+  plan: "internal"  # Monitor-only — no actual charges
+  markup_percentage: 0
+  charge_enabled: false  # Demo mode: track costs but don't bill
+
+data:
+  cross_tenant_training: false  # Isolated from ATLAS core corpus
+
+status: "active"

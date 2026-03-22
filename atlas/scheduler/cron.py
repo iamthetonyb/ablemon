@@ -668,17 +668,44 @@ def register_default_jobs(
     # ── Nightly distillation harvest — 2am daily ────────────────
     async def run_nightly_distillation():
         from atlas.core.distillation.harvest_runner import run_harvest
+
+        # Harvest for default (ATLAS core)
         result = await run_harvest(since_hours=24, tenant_id="default")
         logger.info(
-            f"Distillation harvest: {result.total_conversations} convos → "
+            f"Distillation harvest [default]: {result.total_conversations} convos → "
             f"{result.total_formatted} pairs, corpus={result.corpus_tier}"
         )
+
+        # Harvest for all active tenants with configured sessions
+        tenant_results = {}
+        try:
+            from atlas.core.tenants.tenant_manager import TenantManager
+            tm = TenantManager()
+            for tenant in tm.list_tenants(status="active"):
+                tid = tenant.tenant_id
+                sessions_dir = tenant.distillation.get("claude_sessions_dir")
+                if sessions_dir:
+                    try:
+                        t_result = await run_harvest(
+                            since_hours=24, tenant_id=tid,
+                        )
+                        tenant_results[tid] = t_result.total_formatted
+                        logger.info(
+                            f"Distillation harvest [{tid}]: {t_result.total_conversations} convos → "
+                            f"{t_result.total_formatted} pairs"
+                        )
+                    except Exception as te:
+                        logger.warning(f"Tenant {tid} harvest failed: {te}")
+        except Exception as e:
+            logger.debug(f"Tenant harvest skipped: {e}")
+
         return {
             "conversations": result.total_conversations,
             "formatted": result.total_formatted,
             "corpus_version": result.corpus_version,
             "corpus_tier": result.corpus_tier,
             "errors": result.errors,
+            "tenant_results": tenant_results,
         }
 
     scheduler.add_job(
