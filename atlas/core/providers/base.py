@@ -23,6 +23,10 @@ _THINK_PATTERN = re.compile(
     r'<think>.*?</think>\s*',
     re.DOTALL | re.IGNORECASE
 )
+_THINK_EXTRACT = re.compile(
+    r'<think>(.*?)</think>',
+    re.DOTALL
+)
 _THINK_UNCLOSED = re.compile(
     r'^(?:Thinking:?\s*|<think>).*?\n\n',
     re.DOTALL | re.IGNORECASE
@@ -120,6 +124,7 @@ class CompletionResult:
     latency_ms: float = 0.0
     cost: float = 0.0
     raw_response: Optional[Dict] = None
+    thinking_content: Optional[str] = None  # Raw thinking tokens preserved for distillation
 
     def to_message(self) -> Message:
         """Convert result to assistant message"""
@@ -130,9 +135,18 @@ class CompletionResult:
         )
 
     def strip_thinking(self) -> "CompletionResult":
-        """Strip <think>...</think> tokens from model output (Nemotron, Qwen, etc.)."""
-        self.content = strip_thinking_tokens(self.content)
+        """Strip thinking tokens from content, preserving them in thinking_content for distillation."""
+        if self.content:
+            think_matches = _THINK_EXTRACT.findall(self.content)
+            if think_matches:
+                self.thinking_content = '\n'.join(think_matches)
+            self.content = strip_thinking_tokens(self.content)
         return self
+
+    @property
+    def has_thinking(self) -> bool:
+        """Whether this result had thinking tokens that were preserved."""
+        return bool(self.thinking_content)
 
 
 @dataclass
