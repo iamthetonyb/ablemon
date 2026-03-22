@@ -9,7 +9,10 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
-from core.routing.log_queries import LogQueries
+try:
+    from atlas.core.routing.log_queries import LogQueries
+except ImportError:
+    from core.routing.log_queries import LogQueries
 
 logger = logging.getLogger(__name__)
 

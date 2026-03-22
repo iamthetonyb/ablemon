@@ -119,6 +119,9 @@ class GPUBudget:
             with open(self.budget_path) as f:
                 data = yaml.safe_load(f)
             if isinstance(data, dict):
+                data.setdefault("entries", [])
+                data.setdefault("history", [])
+                data.setdefault("month", _current_month())
                 return data
         return {"month": _current_month(), "entries": [], "history": []}
 

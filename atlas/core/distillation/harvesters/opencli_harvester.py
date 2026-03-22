@@ -138,6 +138,10 @@ class OpenCLIHarvester(BaseHarvester):
                 path = Path(filepath)
                 if since:
                     mtime = datetime.fromtimestamp(path.stat().st_mtime)
+                    # Normalize timezone awareness for comparison
+                    if since.tzinfo is not None and mtime.tzinfo is None:
+                        from datetime import timezone as _tz
+                        mtime = mtime.replace(tzinfo=_tz.utc)
                     if mtime < since:
                         continue
                 try:
@@ -160,14 +164,33 @@ class OpenCLIHarvester(BaseHarvester):
         message_path: str,
         thinking_field: str | None,
     ) -> list[HarvestedConversation]:
-        """Parse a platform export file into conversations."""
-        with open(path, "r", encoding="utf-8", errors="replace") as fh:
-            data = json.load(fh)
+        """Parse a platform export file (JSON or JSONL) into conversations."""
+        data = self._load_file(path)
+        if not data:
+            return []
 
-        # Normalise to list
-        if isinstance(data, dict):
-            data = [data]
+        # For JSONL session files (e.g. Codex), records are individual events.
+        # Collect message-bearing records into a single conversation.
+        if path.suffix == ".jsonl":
+            messages, thinking = self._collect_jsonl_session(
+                data, role_map, thinking_field,
+            )
+            if not messages or self._is_meta_conversation(messages):
+                return []
+            return [
+                HarvestedConversation(
+                    id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{platform}:{path}")),
+                    source=f"opencli:{platform}",
+                    messages=messages,
+                    model=model_name,
+                    timestamp=datetime.fromtimestamp(path.stat().st_mtime),
+                    domain=self._detect_domain(messages),
+                    thinking_blocks=thinking,
+                    metadata={"file": str(path), "platform": platform},
+                )
+            ]
 
+        # Standard JSON export — may contain one or many conversations
         results: list[HarvestedConversation] = []
         for item in data:
             if not isinstance(item, dict):
@@ -199,6 +222,90 @@ class OpenCLIHarvester(BaseHarvester):
                 )
             )
         return results
+
+    @staticmethod
+    def _load_file(path: Path) -> list[dict]:
+        """Load a JSON or JSONL file, returning a list of records."""
+        records: list[dict] = []
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            if path.suffix == ".jsonl":
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        records.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+            else:
+                try:
+                    data = json.load(fh)
+                    if isinstance(data, list):
+                        records = data
+                    elif isinstance(data, dict):
+                        records = [data]
+                except json.JSONDecodeError:
+                    pass
+        return records
+
+    @staticmethod
+    def _collect_jsonl_session(
+        records: list[dict],
+        role_map: dict,
+        thinking_field: str | None,
+    ) -> tuple[list[dict], list[str]]:
+        """Collect messages from a JSONL session log (e.g. Codex format).
+
+        Codex records have ``type: "response_item"`` with a ``payload`` dict
+        containing ``role`` and ``content``.  Other platforms may use different
+        record shapes — we try common patterns.
+        """
+        messages: list[dict] = []
+        thinking: list[str] = []
+
+        for record in records:
+            # Skip non-message records (session_meta, tool calls, etc.)
+            rec_type = record.get("type", "")
+
+            # Codex format: type=response_item, payload has role+content
+            payload = record.get("payload", record)
+            if not isinstance(payload, dict):
+                continue
+
+            role = payload.get("role", "")
+            content = payload.get("content", "")
+
+            if not role:
+                continue
+
+            # Map role via adapter config
+            mapped_role = role_map.get(role, role)
+            if mapped_role not in ("user", "assistant", "system"):
+                continue
+
+            # Content can be a list of content blocks or a string
+            if isinstance(content, list):
+                text_parts = []
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") in ("input_text", "output_text", "text"):
+                        text_parts.append(block.get("text", ""))
+                    elif block.get("type") == "thinking" and thinking_field:
+                        thinking.append(block.get("thinking", ""))
+                content = "\n".join(text_parts)
+
+            if isinstance(content, str) and content.strip():
+                # Skip very short system/permission messages
+                if mapped_role == "system" and len(content) < 50:
+                    continue
+                messages.append({"role": mapped_role, "content": content.strip()})
+
+            # Extract thinking from field if present
+            if thinking_field and isinstance(payload.get(thinking_field), str):
+                thinking.append(payload[thinking_field])
+
+        return messages, thinking
 
     @staticmethod
     def _extract_messages(obj: dict, message_path: str) -> list[dict]:

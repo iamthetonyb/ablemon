@@ -1,13 +1,13 @@
 platform: codex
-description: "Extract Codex CLI conversations from session logs"
+description: "Extract OpenAI Codex CLI conversations from session JSONL logs"
 model_name: "codex"
 harvest_method: "file"
 file_patterns:
-  - "~/.codex/sessions/*.jsonl"
-  - "~/.codex/history/*.json"
-message_path: "messages"
+  - "~/.codex/sessions/**/*.jsonl"
+  - "~/.codex/archived_sessions/*.jsonl"
+message_path: ""
 role_mapping:
-  user: user
+  developer: user
   assistant: assistant
   system: system
 thinking_field: "reasoning"
