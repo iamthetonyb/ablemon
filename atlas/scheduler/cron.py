@@ -571,6 +571,7 @@ def register_default_jobs(
     memory=None,
     billing=None,
     audit_log=None,
+    send_telegram: Optional[Callable] = None,
 ) -> None:
     """Register all default ATLAS maintenance jobs."""
 
@@ -697,6 +698,15 @@ def register_default_jobs(
         report = await reporter.generate(period_hours=24)
         text = reporter.format_telegram(report)
         logger.info(f"Morning report generated ({len(text)} chars)")
+
+        # Deliver via Telegram if callback is available
+        if send_telegram:
+            try:
+                await send_telegram(text)
+                logger.info("Morning report sent via Telegram")
+            except Exception as e:
+                logger.warning(f"Morning report Telegram delivery failed: {e}")
+
         return {"report": text, "total_requests": report.total_requests}
 
     scheduler.add_job(

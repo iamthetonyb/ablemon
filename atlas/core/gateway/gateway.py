@@ -41,7 +41,7 @@ from core.approval.workflow import ApprovalWorkflow, ApprovalStatus
 from tools.github.client import GitHubClient
 from tools.digitalocean.client import DigitalOceanClient
 from tools.vercel.client import VercelClient
-from scheduler.cron import CronScheduler
+from scheduler.cron import CronScheduler, register_default_jobs
 from core.gateway.initiative import InitiativeEngine
 from memory.hybrid_memory import HybridMemory, MemoryType
 
@@ -1711,6 +1711,29 @@ class ATLASGateway:
         
         # Start the Persistence Layer (Proactive AGI)
         self.initiative.register_jobs(self.scheduler)
+
+        # Register default ATLAS jobs (evolution, distillation, morning report)
+        async def _send_telegram(text: str):
+            """Send a message to the owner via Telegram (used by morning report)."""
+            if self.master_bot and self.owner_telegram_id:
+                try:
+                    await self.master_bot.bot.send_message(
+                        chat_id=self.owner_telegram_id,
+                        text=text,
+                        parse_mode="Markdown",
+                    )
+                except Exception:
+                    await self.master_bot.bot.send_message(
+                        chat_id=self.owner_telegram_id,
+                        text=text,
+                    )
+
+        register_default_jobs(
+            self.scheduler,
+            memory=self.memory,
+            audit_log=None,
+            send_telegram=_send_telegram,
+        )
         print(f"🕰️ ATLAS Persistent Scheduler started with {len(self.scheduler.jobs)} autonomous missions")
 
         # Recover any jobs missed during downtime (up to 48h lookback)
@@ -1739,9 +1762,19 @@ class ATLASGateway:
                     m27_provider = self.provider_registry._instantiate_provider(m27_config)
                     logger.info("Evolution daemon connected to MiniMax M2.7")
 
-            self.evolution_daemon = EvolutionDaemon(config=evo_config, m27_provider=m27_provider)
+            # Wire split test policy for A/B testing weight changes
+            split_policy = None
+            try:
+                from core.evolution.split_test_integration import EvolutionSplitTestPolicy
+                split_policy = EvolutionSplitTestPolicy()
+            except Exception as e:
+                logger.warning(f"Split test policy unavailable: {e}")
+
+            self.evolution_daemon = EvolutionDaemon(
+                config=evo_config, m27_provider=m27_provider, split_policy=split_policy,
+            )
             asyncio.create_task(self.evolution_daemon.run_continuous())
-            print(f"🧬 Evolution Daemon started (6h cycle, M2.7 {'connected' if m27_provider else 'rule-based fallback'})")
+            print(f"🧬 Evolution Daemon started (6h cycle, M2.7 {'connected' if m27_provider else 'rule-based fallback'}, split_test={'on' if split_policy else 'off'})")
         except Exception as e:
             logger.warning(f"Evolution daemon failed to start: {e}")
             print(f"⚠️ Evolution daemon not started: {e}")
