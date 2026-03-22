@@ -664,6 +664,31 @@ def register_default_jobs(
         max_retries=2,
     )
 
+    # ── Nightly distillation harvest — 2am daily ────────────────
+    async def run_nightly_distillation():
+        from atlas.core.distillation.harvest_runner import run_harvest
+        result = await run_harvest(since_hours=24, tenant_id="default")
+        logger.info(
+            f"Distillation harvest: {result.total_conversations} convos → "
+            f"{result.total_formatted} pairs, corpus={result.corpus_tier}"
+        )
+        return {
+            "conversations": result.total_conversations,
+            "formatted": result.total_formatted,
+            "corpus_version": result.corpus_version,
+            "corpus_tier": result.corpus_tier,
+            "errors": result.errors,
+        }
+
+    scheduler.add_job(
+        "nightly-distillation",
+        "0 2 * * *",
+        run_nightly_distillation,
+        description="Harvest conversations from all platforms, build training corpus",
+        timeout=600.0,
+        max_retries=2,
+    )
+
     # ── Morning report — daily at 7am ───────────────────────────
     async def generate_morning_report():
         from atlas.core.evolution.morning_report import MorningReporter

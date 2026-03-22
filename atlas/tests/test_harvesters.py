@@ -123,8 +123,11 @@ class TestClaudeCodeHarvester:
     def test_parse_basic_jsonl(self, tmp_path):
         session_file = tmp_path / "session.jsonl"
         records = [
-            {"role": "user", "content": "Explain how Python decorators work with practical examples."},
-            {"role": "assistant", "content": "Decorators are functions that modify other functions. Here is a practical example using functools.wraps."},
+            {"type": "user", "uuid": "u1", "timestamp": "2026-03-22T00:00:00Z",
+             "message": {"content": "Explain how Python decorators work with practical examples."}},
+            {"type": "assistant", "uuid": "a1", "timestamp": "2026-03-22T00:00:01Z",
+             "message": {"model": "claude-opus-4-6", "role": "assistant",
+                         "content": [{"type": "text", "text": "Decorators are functions that modify other functions. Here is a practical example using functools.wraps."}]}},
         ]
         session_file.write_text(
             "\n".join(json.dumps(r) for r in records), encoding="utf-8"
@@ -140,8 +143,14 @@ class TestClaudeCodeHarvester:
     def test_extracts_thinking_blocks(self, tmp_path):
         session_file = tmp_path / "session.jsonl"
         records = [
-            {"role": "user", "content": "Explain quantum computing and its real-world applications in cryptography."},
-            {"role": "assistant", "content": "<think>User wants quantum computing explained</think>Quantum computing uses qubits instead of classical bits for computation."},
+            {"type": "user", "uuid": "u1", "timestamp": "2026-03-22T00:00:00Z",
+             "message": {"content": "Explain quantum computing and its real-world applications in cryptography."}},
+            {"type": "assistant", "uuid": "a1", "timestamp": "2026-03-22T00:00:01Z",
+             "message": {"model": "claude-opus-4-6", "role": "assistant",
+                         "content": [
+                             {"type": "thinking", "thinking": "User wants quantum computing explained"},
+                             {"type": "text", "text": "Quantum computing uses qubits instead of classical bits for computation."},
+                         ]}},
         ]
         session_file.write_text(
             "\n".join(json.dumps(r) for r in records), encoding="utf-8"
@@ -157,14 +166,14 @@ class TestClaudeCodeHarvester:
         """Anthropic-style content blocks with type: text / thinking."""
         session_file = tmp_path / "session.jsonl"
         records = [
-            {"role": "user", "content": "Explain the difference between TCP and UDP protocols in networking."},
-            {
-                "role": "assistant",
-                "content": [
-                    {"type": "thinking", "thinking": "Compare TCP and UDP"},
-                    {"type": "text", "text": "TCP provides reliable ordered delivery, while UDP is connectionless and faster."},
-                ],
-            },
+            {"type": "user", "uuid": "u1", "timestamp": "2026-03-22T00:00:00Z",
+             "message": {"content": "Explain the difference between TCP and UDP protocols in networking."}},
+            {"type": "assistant", "uuid": "a1", "timestamp": "2026-03-22T00:00:01Z",
+             "message": {"model": "claude-opus-4-6", "role": "assistant",
+                         "content": [
+                             {"type": "thinking", "thinking": "Compare TCP and UDP"},
+                             {"type": "text", "text": "TCP provides reliable ordered delivery, while UDP is connectionless and faster."},
+                         ]}},
         ]
         session_file.write_text(
             "\n".join(json.dumps(r) for r in records), encoding="utf-8"
@@ -179,8 +188,11 @@ class TestClaudeCodeHarvester:
     def test_skips_meta_conversation(self, tmp_path):
         session_file = tmp_path / "session.jsonl"
         records = [
-            {"role": "user", "content": "ok"},
-            {"role": "assistant", "content": "sure"},
+            {"type": "user", "uuid": "u1", "isMeta": True, "timestamp": "2026-03-22T00:00:00Z",
+             "message": {"content": "ok"}},
+            {"type": "assistant", "uuid": "a1", "timestamp": "2026-03-22T00:00:01Z",
+             "message": {"model": "claude-opus-4-6", "role": "assistant",
+                         "content": [{"type": "text", "text": "sure"}]}},
         ]
         session_file.write_text(
             "\n".join(json.dumps(r) for r in records), encoding="utf-8"
@@ -188,6 +200,7 @@ class TestClaudeCodeHarvester:
 
         harvester = ClaudeCodeHarvester()
         results = harvester.harvest(source_path=str(tmp_path))
+        # Meta messages filtered + remaining too short
         assert len(results) == 0
 
     def test_handles_missing_dir(self):
@@ -198,14 +211,14 @@ class TestClaudeCodeHarvester:
     def test_tool_use_blocks(self, tmp_path):
         session_file = tmp_path / "session.jsonl"
         records = [
-            {"role": "user", "content": "Read the configuration file and explain what each section does in detail."},
-            {
-                "role": "assistant",
-                "content": [
-                    {"type": "tool_use", "name": "read_file", "input": {"path": "config.yaml"}},
-                    {"type": "text", "text": "The configuration file has three sections: database, cache, and logging."},
-                ],
-            },
+            {"type": "user", "uuid": "u1", "timestamp": "2026-03-22T00:00:00Z",
+             "message": {"content": "Read the configuration file and explain what each section does in detail."}},
+            {"type": "assistant", "uuid": "a1", "timestamp": "2026-03-22T00:00:01Z",
+             "message": {"model": "claude-opus-4-6", "role": "assistant",
+                         "content": [
+                             {"type": "tool_use", "name": "read_file", "input": {"path": "config.yaml"}},
+                             {"type": "text", "text": "The configuration file has three sections: database, cache, and logging."},
+                         ]}},
         ]
         session_file.write_text(
             "\n".join(json.dumps(r) for r in records), encoding="utf-8"

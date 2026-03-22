@@ -988,8 +988,12 @@ class ATLASGateway:
                     continue
 
                 _total_ms = (_time.monotonic() - _pipeline_start) * 1000
+                # Preserve raw output for distillation BEFORE stripping
+                _raw_output_for_log = result.content
                 # Strip thinking tokens (<think>, "Thinking:") from model output
+                # thinking_content is preserved on the CompletionResult for distillation
                 result.strip_thinking()
+                _has_thinking = result.has_thinking
                 final_text = result.content or "⚠️ ATLAS exceeded the maximum internal thinking steps (15 turns)."
                 logger.info(
                     f"[PIPELINE] ── DONE ── provider={_provider_name} iterations={loop_iteration + 1} "
@@ -1044,6 +1048,7 @@ class ATLASGateway:
                 if self.interaction_logger and interaction_id:
                     try:
                         _usage = result.usage if hasattr(result, 'usage') else None
+                        _raw_input = text_content if isinstance(text_content, str) else str(text_content)
                         self.interaction_logger.update_result(
                             interaction_id,
                             actual_provider=result.provider if hasattr(result, 'provider') else "",
@@ -1056,6 +1061,11 @@ class ATLASGateway:
                             output_tokens=_usage.output_tokens if _usage else 0,
                             cost_usd=result.cost if hasattr(result, 'cost') else 0,
                             success=True,
+                            # Distillation fields — preserve full output for training
+                            raw_input=_raw_input[:10000],
+                            raw_output=_raw_output_for_log[:10000] if _raw_output_for_log else None,
+                            thinking_tokens_preserved=_has_thinking,
+                            corpus_eligible=True,  # ABLEInteractionHarvester filters further
                         )
                     except Exception as log_e:
                         logger.warning(f"Failed to update interaction log: {log_e}")

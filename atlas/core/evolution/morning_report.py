@@ -18,7 +18,7 @@ import logging
 import sqlite3
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -380,27 +380,39 @@ class MorningReporter:
                     continue
 
     def _collect_corpus_stats(self, report: MorningReportData) -> None:
-        """Count distillation training pairs."""
-        data_dir = _PROJECT_ROOT / "data"
-        if not data_dir.exists():
-            return
-
+        """Count distillation training pairs from DB and legacy JSONL."""
         total = 0
         recent = 0
-        cutoff_24h = time.time() - 86400
 
-        for path in data_dir.glob("distillation_*.jsonl"):
-            try:
-                stat = path.stat()
-                is_recent = stat.st_mtime > cutoff_24h
-                with open(path) as f:
-                    for raw_line in f:
-                        if raw_line.strip():
-                            total += 1
-                            if is_recent:
-                                recent += 1
-            except OSError:
-                continue
+        # Try the distillation SQLite store first (primary source)
+        try:
+            from atlas.core.distillation.store import DistillationStore
+            store = DistillationStore()
+            stats = store.stats()
+            total = stats.get("total_pairs", 0)
+            # Estimate recent from last cron run
+            recent_pairs = store.get_pairs(since=datetime.now(timezone.utc) - timedelta(hours=24))
+            recent = len(recent_pairs) if recent_pairs else 0
+        except Exception:
+            pass
+
+        # Fall back to legacy JSONL files if DB is empty
+        if total == 0:
+            data_dir = _PROJECT_ROOT / "data"
+            if data_dir.exists():
+                cutoff_24h = time.time() - 86400
+                for path in data_dir.glob("distillation_*.jsonl"):
+                    try:
+                        stat = path.stat()
+                        is_recent = stat.st_mtime > cutoff_24h
+                        with open(path) as f:
+                            for raw_line in f:
+                                if raw_line.strip():
+                                    total += 1
+                                    if is_recent:
+                                        recent += 1
+                    except OSError:
+                        continue
 
         report.corpus_pairs_total = total
         report.corpus_pairs_last_24h = recent

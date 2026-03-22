@@ -80,6 +80,10 @@ class ClaudeCodeHarvester(BaseHarvester):
         model_name = "claude"
         timestamp = datetime.fromtimestamp(path.stat().st_mtime)
 
+        # Normalize timezone awareness for comparison
+        if since and since.tzinfo is not None and timestamp.tzinfo is None:
+            from datetime import timezone
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
         if since and timestamp < since:
             return []
 
@@ -98,8 +102,11 @@ class ClaudeCodeHarvester(BaseHarvester):
                     file_extensions_seen,
                 )
 
-                if "model" in record:
-                    model_name = record["model"]
+                # Extract model name from assistant message
+                if record.get("type") == "assistant" and "message" in record:
+                    _msg = record["message"]
+                    if isinstance(_msg, dict) and "model" in _msg:
+                        model_name = _msg["model"]
 
         if not messages:
             return []
@@ -133,19 +140,37 @@ class ClaudeCodeHarvester(BaseHarvester):
         tool_uses: list[dict],
         file_extensions_seen: set[str],
     ) -> None:
-        """Process a single JSONL record into messages / metadata."""
-        role = record.get("role", "")
-        if role not in ("user", "assistant", "system"):
-            # May be a tool_use or tool_result block
-            if record.get("type") == "tool_use":
-                tool_uses.append(record)
-                self._collect_extensions(record, file_extensions_seen)
-                return
-            if record.get("type") == "tool_result":
-                return
+        """Process a single JSONL record into messages / metadata.
+
+        Claude Code JSONL format has top-level ``type`` field
+        (``user`` / ``assistant`` / ``system``), with assistant records
+        containing a nested ``message`` dict that holds the API-style
+        ``content`` list (text / thinking / tool_use blocks).
+        """
+        record_type = record.get("type", "")
+
+        # Skip non-conversation records
+        if record_type not in ("user", "assistant", "system"):
             return
 
-        content = record.get("content", "")
+        # Skip meta messages (session bookkeeping)
+        if record.get("isMeta"):
+            return
+
+        role = record_type  # user/assistant/system map directly
+
+        # For assistant records, content lives inside record["message"]["content"]
+        if role == "assistant" and "message" in record:
+            msg = record["message"]
+            content = msg.get("content", "")
+        else:
+            # User/system messages: content is in record["message"]["content"]
+            # or sometimes directly in record["content"]
+            msg = record.get("message", {})
+            if isinstance(msg, dict):
+                content = msg.get("content", record.get("content", ""))
+            else:
+                content = record.get("content", "")
 
         # Content can be a list of content blocks (Anthropic format)
         if isinstance(content, list):
