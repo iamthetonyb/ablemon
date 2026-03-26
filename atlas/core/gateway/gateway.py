@@ -426,6 +426,19 @@ ATLAS_TOOL_DEFS: List[Dict] = [
     },
 ]
 
+# ── Tenant + distillation tools (imported from tool_defs module) ──────────────
+try:
+    from atlas.core.gateway.tool_defs.tenant_tools import (
+        TENANT_ONBOARD, TENANT_LIST, TENANT_STATUS,
+        DISTILLATION_STATUS, DISTILLATION_HARVEST, DISTILLATION_BUILD_CORPUS,
+    )
+    ATLAS_TOOL_DEFS.extend([
+        TENANT_ONBOARD, TENANT_LIST, TENANT_STATUS,
+        DISTILLATION_STATUS, DISTILLATION_HARVEST, DISTILLATION_BUILD_CORPUS,
+    ])
+except ImportError:
+    logger.warning("Tenant tools unavailable — tenant_tools.py not found")
+
 
 class ATLASGateway:
     """
@@ -1385,6 +1398,40 @@ class ATLASGateway:
                         f"SSH: `ssh root@{public_ip}`"
                     )
                 return f"⏳ Droplet created (status: {status})\nID: {droplet.get('id')}"
+
+            # ── Tenant + distillation tools ────────────────────────────────
+            if name == "tenant_onboard":
+                approval = await self.approval_workflow.request_approval(
+                    operation="tenant_onboard",
+                    details=args,
+                    requester_id=user_id,
+                    risk_level="medium",
+                    context=f"Onboard tenant '{args.get('name')}' ({args.get('tenant_id')}) — domain: {args.get('domain')}",
+                )
+                if approval.status.value != "approved":
+                    return f"❌ Denied ({approval.status.value})"
+                from atlas.core.gateway.tool_defs.tenant_tools import handle_tenant_onboard
+                return await handle_tenant_onboard(**args)
+
+            if name == "tenant_list":
+                from atlas.core.gateway.tool_defs.tenant_tools import handle_tenant_list
+                return await handle_tenant_list(**args)
+
+            if name == "tenant_status":
+                from atlas.core.gateway.tool_defs.tenant_tools import handle_tenant_status
+                return await handle_tenant_status(**args)
+
+            if name == "distillation_status":
+                from atlas.core.gateway.tool_defs.tenant_tools import handle_distillation_status
+                return await handle_distillation_status(**args)
+
+            if name == "distillation_harvest":
+                from atlas.core.gateway.tool_defs.tenant_tools import handle_distillation_harvest
+                return await handle_distillation_harvest(**args)
+
+            if name == "distillation_build_corpus":
+                from atlas.core.gateway.tool_defs.tenant_tools import handle_distillation_build_corpus
+                return await handle_distillation_build_corpus(**args)
 
             return f"❓ Unknown tool: {name}"
 

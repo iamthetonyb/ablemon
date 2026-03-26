@@ -1,16 +1,19 @@
 # ATLAS Multi-Model Routing Configuration
 # =========================================
 # 5-tier routing system with complexity-based provider selection.
+# ALL primary models use subscriptions ($0 per token):
+#   T1/T2: GPT 5.4 via ChatGPT subscription (OAuth PKCE)
+#   T4: Claude Opus via Claude Max subscription (Claude Code SDK)
 #
-# Tier 1: Default (70-80% of requests) — fast, cheap, high quality
-# Tier 2: Escalation — complex reasoning tasks
-# Tier 3: Background ONLY — self-evolution daemon, never user-facing
-# Tier 4: Premium — gated, budget-capped, highest capability
-# Tier 5: Offline — Ollama for local fallback
+# Tier 1: Default (70-80% of requests) — GPT 5.4 Mini xhigh reasoning
+# Tier 2: Escalation — GPT 5.4 xhigh reasoning, MiMo-V2-Pro fallback
+# Tier 3: Background ONLY — M2.7 for evolution daemon, never user-facing
+# Tier 4: Premium — Claude Opus 4.6 via Max subscription ($0), API fallback
+# Tier 5: Offline — Ollama Qwen 3.5 for local/distillation
 #
-# Updated 2026-03-21: Switched GPT 5.4 Nano/Mini from OpenRouter to OpenAI direct API.
-# Using OpenAI subscription for primary routing (lower latency, same models).
-# OpenRouter retained for MiMo fallback and M2.7 evolution daemon.
+# Updated 2026-03-24: T4 Opus switched from Anthropic API to Claude Code SDK.
+# Uses Claude Max subscription — zero marginal cost. API retained as fallback.
+# All models now running at maximum thinking/reasoning effort.
 
 providers:
   # ── Tier 1: Primary — GPT 5.4 Mini (ChatGPT Subscription) ────────
@@ -97,6 +100,7 @@ providers:
   # ── Tier 2: Fallback — MiMo-V2-Pro ─────────────────────────────
   # Shootout: 5/5 (100%) at $1/$3, avg 1392ms
   # Same quality as Mini but 4x slower. Good backup.
+  # Inherent reasoning model — always uses <think> blocks, no config needed.
   - name: "mimo-v2-pro"
     tier: 2
     provider_type: "openrouter"
@@ -115,6 +119,7 @@ providers:
       timeout: 600.0
 
   # ── Tier 3: Background Only (Evolution Daemon) ──────────────────
+  # Inherent reasoning model — 1M context, always max thinking. Never user-facing.
   - name: "minimax-m2.7"
     tier: 3
     provider_type: "openrouter"
@@ -134,8 +139,32 @@ providers:
       background_only: true
       description: "Self-evolution daemon ONLY. Never user-facing."
 
-  # ── Tier 4: Premium (Budget-Gated) ──────────────────────────────
+  # ── Tier 4: Premium — Claude Opus 4.6 (Max Subscription via CLI) ─
+  # Routed through Claude Code SDK → uses Claude Max subscription ($0 per token).
+  # Extended thinking enabled by default via CLI.
+  # Fallback: Anthropic API if CLI unavailable.
   - name: "claude-opus-4-6"
+    tier: 4
+    provider_type: "claude_code"
+    endpoint: "cli://claude"
+    model_id: "claude-opus-4-6"
+    cost_per_m_input: 0.00
+    cost_per_m_output: 0.00
+    max_context: 200000
+    supports_tools: true
+    supports_vision: true
+    throughput_tps: 30
+    enabled: true
+    fallback_to: "claude-opus-4-6-api"
+    api_key_env: ""
+    extra:
+      description: "Premium tier via Claude Max subscription — zero marginal cost"
+      timeout: 300.0
+
+  # ── Tier 4: Fallback — Opus via Anthropic API (budget-gated) ────
+  # Only used if Claude CLI is unavailable or not authenticated.
+  # Extended thinking enabled — max reasoning effort when paying for API.
+  - name: "claude-opus-4-6-api"
     tier: 4
     provider_type: "anthropic"
     endpoint: "https://api.anthropic.com"
@@ -149,6 +178,10 @@ providers:
     enabled: true
     fallback_to: null
     api_key_env: "ANTHROPIC_API_KEY"
+    extra:
+      extended_thinking: true
+      thinking_budget_tokens: 16000
+      timeout: 300.0
 
   # ── Tier 5: Ollama (Server) — Qwen 3.5 27B UD-Q4_K_XL ──────────
   # Unsloth Dynamic 2.0 quant — measurably better accuracy than standard Q4.
@@ -206,12 +239,15 @@ providers:
     api_key_env: ""
 
 # ── Budget Caps ────────────────────────────────────────────────
+# Primary routing uses subscriptions (GPT via OAuth, Opus via Claude Max) = $0.
+# Budget caps apply to API fallbacks and OpenRouter models only.
 budget:
-  opus_daily_usd: 15.00
-  opus_monthly_usd: 100.00
-  evolution_daily_usd: 5.00
+  opus_api_daily_usd: 25.00     # Anthropic API fallback only (primary is $0 via Max)
+  opus_api_monthly_usd: 150.00  # Anthropic API fallback only
+  evolution_daily_usd: 5.00     # M2.7 on OpenRouter (background daemon)
   evolution_monthly_usd: 50.00
-  total_monthly_cap_usd: 200.00
+  openrouter_monthly_usd: 75.00 # MiMo fallback + M2.7
+  total_monthly_cap_usd: 250.00
 
 # ── Tier Routing Thresholds ────────────────────────────────────
 # These map complexity scores to tiers (overridden by scorer_weights.yaml)

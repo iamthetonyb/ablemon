@@ -131,8 +131,19 @@ class CorpusBuilder:
 
     # ── Core build pipeline ──────────────────────────────────────────
 
-    def _build(self, pairs: list[dict], tenant_id: str) -> CorpusBuildResult:
-        """Core build: filter -> deduplicate -> balance -> split -> write."""
+    def _build(
+        self,
+        pairs: list[dict],
+        tenant_id: str,
+        max_domain_pct: float | None = None,
+    ) -> CorpusBuildResult:
+        """Core build: filter -> deduplicate -> balance -> split -> write.
+
+        Args:
+            max_domain_pct: Override domain cap for this build. None uses
+                self.max_domain_pct (0.30). Tenant builds should pass a
+                higher value so the tenant's core domain isn't trimmed.
+        """
         if not pairs:
             version = self._next_version(tenant_id)
             output_dir = str(self.corpus_dir / tenant_id / version)
@@ -150,7 +161,8 @@ class CorpusBuilder:
 
         filtered = self._filter_pairs(pairs)
         deduped = self._deduplicate(filtered)
-        balanced = self._balance_domains(deduped)
+        cap = max_domain_pct if max_domain_pct is not None else self.max_domain_pct
+        balanced = self._balance_domains(deduped, max_pct=cap)
         enriched = self._enrich_reasoning(balanced)
 
         train, val, test = self._split_dataset(enriched)
@@ -209,17 +221,21 @@ class CorpusBuilder:
                 result.append(p)
         return result
 
-    def _balance_domains(self, pairs: list[dict]) -> list[dict]:
+    def _balance_domains(
+        self, pairs: list[dict], max_pct: float | None = None
+    ) -> list[dict]:
         """Enforce max domain percentage. Over-represented domains are sampled down."""
         if not pairs:
             return pairs
+
+        pct = max_pct if max_pct is not None else self.max_domain_pct
 
         by_domain: dict[str, list[dict]] = defaultdict(list)
         for p in pairs:
             domain = p.get("domain", "default")
             by_domain[domain].append(p)
 
-        max_per_domain = int(len(pairs) * self.max_domain_pct)
+        max_per_domain = int(len(pairs) * pct)
         if max_per_domain < 1:
             max_per_domain = 1
 
@@ -419,6 +435,195 @@ class CorpusBuilder:
         for p in pairs:
             counts[p.get("domain", "default")] += 1
         return dict(counts)
+
+    def build_tenant_with_atlas_base(
+        self,
+        tenant_id: str,
+        atlas_share: float = 0.20,
+        atlas_domains: list[str] | None = None,
+    ) -> CorpusBuildResult:
+        """Build a tenant corpus enriched with relevant ATLAS core pairs.
+
+        Following the Jackrong distillation approach:
+        - Tenant's own data is the majority (~80%)
+        - High-quality ATLAS reasoning (self-improvement, AGI, security,
+          coding) supplements general capability (~20%)
+        - train_on_responses_only is enforced downstream by Axolotl config
+        - Only pairs with quality >= threshold are included
+
+        Args:
+            tenant_id: The tenant to build corpus for.
+            atlas_share: Max fraction of ATLAS core pairs (default 0.20).
+            atlas_domains: Which ATLAS domains to include. Default: all.
+        """
+        from atlas.core.distillation.store import DistillationStore
+
+        store = DistillationStore()
+
+        # Get tenant's own high-quality pairs
+        tenant_pairs = store.get_pairs(
+            tenant_id=tenant_id,
+            min_quality=self.quality_threshold,
+            limit=100_000,
+        )
+
+        # Get ATLAS core high-quality pairs
+        atlas_pairs = store.get_pairs(
+            tenant_id="default",
+            min_quality=self.quality_threshold,
+            limit=100_000,
+        )
+
+        # Filter ATLAS by relevant domains if specified
+        if atlas_domains:
+            atlas_pairs = [p for p in atlas_pairs if p.domain in atlas_domains]
+
+        # Calculate how many ATLAS pairs to include
+        tenant_count = len(tenant_pairs)
+        if tenant_count == 0:
+            logger.warning("No tenant pairs for %s, using ATLAS core only", tenant_id)
+            max_atlas = len(atlas_pairs)
+        else:
+            max_atlas = int(tenant_count * (atlas_share / (1 - atlas_share)))
+
+        # Take best ATLAS pairs by quality score
+        atlas_pairs.sort(key=lambda p: p.quality_score, reverse=True)
+        selected_atlas = atlas_pairs[:max_atlas]
+
+        # Convert to dict format for build pipeline
+        all_pairs = []
+        for p in tenant_pairs:
+            all_pairs.append({
+                "prompt": p.prompt,
+                "response": p.gold_response,
+                "domain": p.domain,
+                "quality_score": p.quality_score,
+                "model": p.gold_model,
+                "tenant_id": tenant_id,
+                "source": "tenant",
+            })
+        for p in selected_atlas:
+            all_pairs.append({
+                "prompt": p.prompt,
+                "response": p.gold_response,
+                "domain": p.domain,
+                "quality_score": p.quality_score,
+                "model": p.gold_model,
+                "tenant_id": tenant_id,  # tagged as tenant for isolation
+                "source": "atlas_base",
+            })
+
+        logger.info(
+            "Building %s corpus: %d tenant + %d ATLAS base = %d total",
+            tenant_id, len(tenant_pairs), len(selected_atlas), len(all_pairs),
+        )
+        # Tenant's primary domain shouldn't be capped — that's the whole
+        # point of the tenant.  Use 0.80 so the domain can be up to 80% of
+        # the corpus while still leaving room for ATLAS enrichment diversity.
+        return self._build(all_pairs, tenant_id, max_domain_pct=0.80)
+
+    # ── Reverse flow: tenant → ATLAS core ──────────────────────────
+
+    def promote_to_core(
+        self,
+        tenant_id: str,
+        min_quality: float = 0.90,
+        relevant_domains: list[str] | None = None,
+        max_pairs: int = 200,
+    ) -> dict:
+        """Promote high-quality tenant pairs into the ATLAS core corpus.
+
+        Bidirectional flow: ATLAS enriches tenants (build_tenant_with_atlas_base)
+        and tenants contribute discoveries back to ATLAS (this method).
+
+        Works at the corpus level, not the store level — tenant pairs are
+        included directly into the next ATLAS core corpus build. The store
+        uses content_hash dedup across all tenants (same content = one row),
+        so this method queries tenant pairs and mixes them into a core build.
+
+        Args:
+            tenant_id: Source tenant.
+            min_quality: Quality floor for promotion (default 0.90 — stricter
+                than the 0.80 training threshold so only the best flows back).
+            relevant_domains: If set, only promote pairs from these domains.
+                None means all domains are eligible.
+            max_pairs: Cap on pairs promoted per call to avoid flooding core.
+
+        Returns:
+            Dict with promotion stats and the resulting corpus build.
+        """
+        from atlas.core.distillation.store import DistillationStore
+
+        store = DistillationStore()
+
+        # Get ATLAS core pairs
+        core_pairs = store.get_pairs(
+            tenant_id="default",
+            min_quality=self.quality_threshold,
+            limit=100_000,
+        )
+
+        # Get the tenant's best pairs
+        tenant_best = store.get_pairs(
+            tenant_id=tenant_id,
+            min_quality=min_quality,
+            limit=max_pairs * 2,
+        )
+
+        if relevant_domains:
+            tenant_best = [
+                p for p in tenant_best if p.domain in relevant_domains
+            ]
+
+        tenant_best.sort(key=lambda p: p.quality_score, reverse=True)
+        promoted = tenant_best[:max_pairs]
+
+        # Build combined corpus: all core + best tenant contributions
+        all_pairs = []
+        for p in core_pairs:
+            all_pairs.append({
+                "prompt": p.prompt,
+                "response": p.gold_response,
+                "domain": p.domain,
+                "quality_score": p.quality_score,
+                "model": p.gold_model,
+                "tenant_id": "default",
+                "source": "atlas_core",
+            })
+        for p in promoted:
+            all_pairs.append({
+                "prompt": p.prompt,
+                "response": p.gold_response,
+                "domain": p.domain,
+                "quality_score": p.quality_score,
+                "model": p.gold_model,
+                "tenant_id": "default",
+                "source": f"promoted_from:{tenant_id}",
+            })
+
+        logger.info(
+            "Building ATLAS core corpus with %d core + %d promoted from %s",
+            len(core_pairs), len(promoted), tenant_id,
+        )
+        result = self._build(all_pairs, tenant_id="default")
+
+        return {
+            "core_pairs": len(core_pairs),
+            "promoted_from_tenant": len(promoted),
+            "promoted_domains": self._count_domains(
+                [{"domain": p.domain} for p in promoted]
+            ),
+            "corpus": {
+                "version": result.version,
+                "total": result.total,
+                "train": result.train_count,
+                "val": result.val_count,
+                "test": result.test_count,
+                "tier": result.tier,
+                "avg_quality": result.avg_quality,
+                "domains": result.domains,
+            },
+        }
 
     @staticmethod
     def _classify_tier(total: int) -> str:

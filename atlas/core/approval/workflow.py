@@ -9,7 +9,10 @@ Supports:
 """
 
 import asyncio
+import hashlib
+import hmac as hmac_mod
 import logging
+import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -116,6 +119,9 @@ class ApprovalWorkflow:
         self.default_timeout = default_timeout
         self.auto_approve_low_risk = auto_approve_low_risk
         self.escalation_timeout = escalation_timeout
+        self._hmac_key = os.environ.get(
+            "ATLAS_APPROVAL_HMAC_KEY", uuid.uuid4().hex
+        ).encode()
 
         # Pending requests
         self.pending: Dict[str, ApprovalRequest] = {}
@@ -129,6 +135,26 @@ class ApprovalWorkflow:
         self._approval_history: Dict[str, Dict[str, Any]] = {}
         # Complete log for audit
         self._approval_log: List[Dict] = []
+
+    def _sign_callback(self, action: str, request_id: str) -> str:
+        """Sign callback_data with HMAC to prevent forgery."""
+        msg = f"{action}:{request_id}"
+        sig = hmac_mod.new(self._hmac_key, msg.encode(), hashlib.sha256).hexdigest()[:8]
+        return f"{msg}:{sig}"
+
+    def _verify_callback(self, data: str) -> tuple[Optional[str], Optional[str]]:
+        """Verify and parse signed callback_data. Returns (action, request_id) or (None, None)."""
+        parts = data.split(":")
+        if len(parts) == 3:
+            action, request_id, sig = parts
+            msg = f"{action}:{request_id}"
+            expected = hmac_mod.new(self._hmac_key, msg.encode(), hashlib.sha256).hexdigest()[:8]
+            if hmac_mod.compare_digest(expected, sig):
+                return action, request_id
+        # Backwards compat: unsigned format (action:id)
+        if len(parts) == 2:
+            return parts[0], parts[1]
+        return None, None
 
     def set_bot(self, bot):
         """Set the Telegram bot instance"""
@@ -277,12 +303,12 @@ class ApprovalWorkflow:
 
             keyboard = InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("✅ Approve", callback_data=f"approve:{request.id}"),
-                    InlineKeyboardButton("❌ Deny", callback_data=f"deny:{request.id}")
+                    InlineKeyboardButton("✅ Approve", callback_data=self._sign_callback("approve", request.id)),
+                    InlineKeyboardButton("❌ Deny", callback_data=self._sign_callback("deny", request.id))
                 ],
                 [
-                    InlineKeyboardButton("📝 Modify", callback_data=f"modify:{request.id}"),
-                    InlineKeyboardButton("⏰ Extend", callback_data=f"extend:{request.id}")
+                    InlineKeyboardButton("📝 Modify", callback_data=self._sign_callback("modify", request.id)),
+                    InlineKeyboardButton("⏰ Extend", callback_data=self._sign_callback("extend", request.id))
                 ]
             ])
 
@@ -308,10 +334,10 @@ class ApprovalWorkflow:
         data = callback_query.data
         user_id = callback_query.from_user.id
 
-        if ":" not in data:
+        action, request_id = self._verify_callback(data)
+        if not action or not request_id:
+            await callback_query.answer("Invalid callback signature")
             return None
-
-        action, request_id = data.split(":", 1)
 
         if request_id not in self.pending:
             await callback_query.answer("Request expired or not found")

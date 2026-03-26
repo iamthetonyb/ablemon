@@ -155,8 +155,8 @@ class ComplexityScorer:
                 "tier_1_max": 0.4,
                 "tier_2_max": 0.7,
             },
-            "opus_daily_budget_usd": 15.00,
-            "opus_monthly_budget_usd": 100.00,
+            "opus_daily_budget_usd": 25.00,
+            "opus_monthly_budget_usd": 150.00,
             "version": 1,
         }
 

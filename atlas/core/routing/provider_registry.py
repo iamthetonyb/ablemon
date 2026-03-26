@@ -62,6 +62,10 @@ class ProviderTierConfig:
                 return AuthManager().is_authenticated("openai_oauth")
             except Exception:
                 return False
+        # Claude Code uses CLI + Max subscription — check CLI exists
+        if self.provider_type == "claude_code":
+            import shutil
+            return shutil.which("claude") is not None
         return self.api_key is not None
 
 
@@ -255,13 +259,28 @@ class ProviderRegistry:
         elif ptype == "anthropic":
             if not key:
                 return None
-            return AnthropicProvider(api_key=key, model=config.model_id)
+            extended_thinking = config.extra.get("extended_thinking", False)
+            thinking_budget = config.extra.get("thinking_budget_tokens", 16000)
+            return AnthropicProvider(
+                api_key=key,
+                model=config.model_id,
+                extended_thinking=extended_thinking,
+                thinking_budget_tokens=thinking_budget,
+            )
 
         elif ptype == "ollama":
             return OllamaProvider(
                 model=config.model_id,
                 base_url=config.endpoint or "http://localhost:11434",
             )
+
+        elif ptype == "claude_code":
+            try:
+                from core.providers.claude_code_provider import ClaudeCodeProvider
+                return ClaudeCodeProvider(model=config.model_id)
+            except ImportError as e:
+                logger.warning(f"Claude Code provider deps missing for {config.name}: {e}")
+                return None
 
         elif ptype == "openai_oauth":
             try:

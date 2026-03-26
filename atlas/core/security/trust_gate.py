@@ -3,9 +3,11 @@ Trust Gate - Multi-stage security pipeline
 All inputs pass through here before reaching executor agents
 """
 
+import base64
 import re
 import hashlib
 import json
+import unicodedata
 from enum import Enum
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Any
@@ -40,7 +42,7 @@ INJECTION_PATTERNS = [
     # Direct instruction override
     (r'ignore\s+(all\s+)?(previous\s+)?instructions?', ThreatLevel.CRITICAL),
     (r'disregard\s+(your\s+)?(previous\s+)?instructions?', ThreatLevel.CRITICAL),
-    (r'forget\s+(everything|all|your\s+instructions?)', ThreatLevel.CRITICAL),
+    (r'forget\s+(everything|all|your\s+(instructions?|system\s+prompt|rules?|prompt))', ThreatLevel.CRITICAL),
     (r'override\s+(your\s+)?(system|instructions?|rules?)', ThreatLevel.CRITICAL),
     (r'new\s+instructions?:', ThreatLevel.CRITICAL),
 
@@ -54,12 +56,13 @@ INJECTION_PATTERNS = [
     (r'jailbreak', ThreatLevel.CRITICAL),
     (r'DAN\s+mode', ThreatLevel.CRITICAL),
 
-    # Prompt extraction attempts
-    (r'(show|print|display|reveal|output|repeat)\s+(your\s+)?(system\s+)?(prompt|instructions?)', ThreatLevel.CRITICAL),
-    (r'what\s+(are|is)\s+your\s+(system\s+)?(prompt|instructions?)', ThreatLevel.HIGH),
+    # Prompt extraction attempts (flexible — allows filler words between verb and target)
+    (r'(show|print|display|reveal|output|repeat)\s+.{0,30}(system\s+)?(prompt|instructions?|config|rules?)', ThreatLevel.CRITICAL),
+    (r'what\s+(are|is)\s+your\s+(system\s+)?(prompt|instructions?|config|rules?)', ThreatLevel.HIGH),
     (r'(beginning|start)\s+of\s+(the\s+)?(conversation|prompt)', ThreatLevel.HIGH),
-    (r'(dump|leak|extract)\s+(your\s+)?(prompt|instructions?|config)', ThreatLevel.CRITICAL),
+    (r'(dump|leak|extract)\s+.{0,20}(prompt|instructions?|config)', ThreatLevel.CRITICAL),
     (r'verbatim', ThreatLevel.MEDIUM),
+    (r'(reveal|expose)\s+.{0,20}(configuration|rules?|directives?)', ThreatLevel.CRITICAL),
 
     # Delimiter/format attacks
     (r'\[INST\]|\[/INST\]', ThreatLevel.CRITICAL),
@@ -88,6 +91,24 @@ INJECTION_PATTERNS = [
     (r'ADMIN\s*OVERRIDE', ThreatLevel.CRITICAL),
     (r'SYSTEM\s*MESSAGE', ThreatLevel.CRITICAL),
     (r'BEGIN\s*HIDDEN\s*INSTRUCTION', ThreatLevel.CRITICAL),
+
+    # Semantic evasion — paraphrased instruction overrides
+    (r'discard\s+.{0,20}(directives?|guidelines?|rules?)', ThreatLevel.HIGH),
+    (r'start\s+fresh', ThreatLevel.MEDIUM),
+    (r'no\s+prior\s+context', ThreatLevel.MEDIUM),
+    (r'previous\s+(conversation\s+)?context\s+is\s+(irrelevant|invalid)', ThreatLevel.HIGH),
+    (r'step\s*\d+\s*:\s*(forget|ignore|disregard)', ThreatLevel.CRITICAL),
+    (r'begin\s+new\s+task', ThreatLevel.MEDIUM),
+
+    # Base64-encoded instruction detection
+    (r'(decode|execute|run|eval)\s+.{0,10}[A-Za-z0-9+/]{20,}={0,2}', ThreatLevel.HIGH),
+
+    # Path traversal
+    (r'\.\./\.\./|\.\.\\\.\.\\', ThreatLevel.CRITICAL),
+    (r'/etc/(passwd|shadow|hosts)', ThreatLevel.CRITICAL),
+    (r'~/\.ssh/', ThreatLevel.CRITICAL),
+    (r'%2e%2e%2f', ThreatLevel.HIGH),
+    (r'\.\./(\.env|\.secrets?|\.ssh)', ThreatLevel.HIGH),
 ]
 
 # Command patterns that require elevated trust
@@ -100,7 +121,7 @@ SENSITIVE_COMMAND_PATTERNS = [
     (r'>\s*/etc/', ThreatLevel.CRITICAL),
     (r'dd\s+if=', ThreatLevel.CRITICAL),
     (r'mkfs', ThreatLevel.CRITICAL),
-    (r':(){.*};:', ThreatLevel.CRITICAL),  # Fork bomb
+    (r':\(\)\s*\{.*?\}\s*;\s*:', ThreatLevel.CRITICAL),  # Fork bomb
 ]
 
 class TrustGate:
@@ -122,12 +143,59 @@ class TrustGate:
         hash_input = f"{timestamp}:{content_str[:100]}"
         return hashlib.sha256(hash_input.encode()).hexdigest()[:16]
 
+    @staticmethod
+    def _normalize_unicode(text: str) -> str:
+        """Strip unicode tricks before injection detection.
+
+        Handles: zero-width chars, homoglyphs, fullwidth, RTL overrides,
+        leet speak (common substitutions).
+        """
+        # Strip zero-width characters (ZWJ, ZWSP, ZWNJ, word joiner, etc.)
+        text = re.sub(r'[\u200b-\u200f\u2028-\u202f\u2060\ufeff]', '', text)
+
+        # Normalize fullwidth → ASCII (ｉｇｎｏｒｅ → ignore)
+        text = unicodedata.normalize('NFKC', text)
+
+        # Map common Cyrillic/Greek homoglyphs to Latin equivalents
+        _homoglyph_map = str.maketrans({
+            '\u0430': 'a', '\u0435': 'e', '\u043e': 'o', '\u0440': 'p',
+            '\u0441': 'c', '\u0443': 'y', '\u0445': 'x', '\u0456': 'i',
+            '\u0410': 'A', '\u0415': 'E', '\u041e': 'O', '\u0420': 'P',
+            '\u0421': 'C', '\u0423': 'Y', '\u0425': 'X',
+        })
+        text = text.translate(_homoglyph_map)
+
+        # Common leet speak: 0→o, 1→i/l, 3→e, 4→a, 5→s, 7→t
+        _leet_map = str.maketrans('013457', 'oieast')
+        text = text.translate(_leet_map)
+
+        return text
+
     def _detect_injection(self, text: str) -> tuple[ThreatLevel, List[str]]:
         """Detect prompt injection attempts"""
         max_threat = ThreatLevel.SAFE
         flags = []
 
-        text_lower = text.lower()
+        # Pre-normalization checks (patterns that leet/unicode normalization would corrupt)
+        # Base64 encoded instructions
+        if re.search(r'(decode|execute|run|eval)\s+.{0,20}[A-Za-z0-9+/]{20,}={0,2}', text, re.IGNORECASE):
+            flags.append("INJECTION:base64_encoded_payload")
+            max_threat = max(max_threat, ThreatLevel.HIGH, key=lambda t: t.value)
+
+        # RTL override characters (used to visually hide reversed text)
+        if re.search(r'[\u202a-\u202e]', text):
+            flags.append("UNICODE:rtl_override_detected")
+            max_threat = max(max_threat, ThreatLevel.MEDIUM, key=lambda t: t.value)
+
+        # Normalize unicode tricks before pattern matching
+        normalized = self._normalize_unicode(text)
+        text_lower = normalized.lower()
+
+        # Flag if normalization changed the text significantly (smuggling attempt)
+        if len(text) - len(normalized) > 3:
+            flags.append("UNICODE:smuggling_detected")
+            if max_threat.value < ThreatLevel.MEDIUM.value:
+                max_threat = ThreatLevel.MEDIUM
 
         for pattern, threat_level in INJECTION_PATTERNS:
             if re.search(pattern, text_lower, re.IGNORECASE | re.DOTALL):
@@ -185,6 +253,9 @@ class TrustGate:
 
         # Remove null bytes and control characters
         sanitized = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', sanitized)
+
+        # Strip zero-width and RTL override characters
+        sanitized = re.sub(r'[\u200b-\u200f\u2028-\u202f\u2060\ufeff]', '', sanitized)
 
         # Neutralize delimiter attacks by escaping
         sanitized = re.sub(r'\[INST\]', '[_INST_]', sanitized)

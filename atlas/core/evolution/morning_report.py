@@ -63,9 +63,9 @@ class MorningReportData:
 
     # Budget
     opus_daily_spend_usd: float = 0.0
-    opus_daily_budget_usd: float = 15.0
+    opus_daily_budget_usd: float = 25.0
     opus_monthly_spend_usd: float = 0.0
-    opus_monthly_budget_usd: float = 100.0
+    opus_monthly_budget_usd: float = 150.0
     evolution_daily_spend_usd: float = 0.0
 
     # Pending actions
@@ -176,8 +176,8 @@ class MorningReporter:
                 count = report.tier_distribution[tier]
                 dist_parts.append(f"T{tier}:{count}")
             lines.append(f"Distribution: {' | '.join(dist_parts)}")
-        lines.append(f"Failures: {report.failure_count} ({report.failure_rate_pct:.1f}%)")
-        lines.append(f"Escalations: {report.escalation_count} (override: {report.override_rate_pct:.1f}%)")
+        lines.append(f"Failures: {report.failure_count} ({(report.failure_rate_pct or 0):.1f}%)")
+        lines.append(f"Escalations: {report.escalation_count} (override: {(report.override_rate_pct or 0):.1f}%)")
         lines.append("")
 
         # Cost
@@ -259,14 +259,14 @@ class MorningReporter:
         try:
             # Total requests
             row = conn.execute(
-                "SELECT COUNT(*) FROM interactions WHERE timestamp > ?",
+                "SELECT COUNT(*) FROM interaction_log WHERE timestamp > ?",
                 (cutoff,),
             ).fetchone()
             report.total_requests = row[0] if row else 0
 
             # Tier distribution
             rows = conn.execute(
-                "SELECT selected_tier, COUNT(*) FROM interactions WHERE timestamp > ? GROUP BY selected_tier",
+                "SELECT selected_tier, COUNT(*) FROM interaction_log WHERE timestamp > ? GROUP BY selected_tier",
                 (cutoff,),
             ).fetchall()
             for tier, count in rows:
@@ -274,26 +274,30 @@ class MorningReporter:
 
             # Failures
             row = conn.execute(
-                "SELECT COUNT(*) FROM interactions WHERE timestamp > ? AND success = 0",
+                "SELECT COUNT(*) FROM interaction_log WHERE timestamp > ? AND success = 0",
                 (cutoff,),
             ).fetchone()
-            report.failure_count = row[0] if row else 0
+            report.failure_count = (row[0] or 0) if row else 0
             if report.total_requests > 0:
                 report.failure_rate_pct = round(report.failure_count / report.total_requests * 100, 1)
+            else:
+                report.failure_rate_pct = 0.0
 
-            # Escalations (overrides)
+            # Escalations
             row = conn.execute(
-                "SELECT COUNT(*) FROM interactions WHERE timestamp > ? AND override_tier IS NOT NULL",
+                "SELECT COUNT(*) FROM interaction_log WHERE timestamp > ? AND escalated = 1",
                 (cutoff,),
             ).fetchone()
-            report.escalation_count = row[0] if row else 0
+            report.escalation_count = (row[0] or 0) if row else 0
             if report.total_requests > 0:
                 report.override_rate_pct = round(report.escalation_count / report.total_requests * 100, 1)
+            else:
+                report.override_rate_pct = 0.0
 
             # Cost by provider
             rows = conn.execute(
                 """SELECT selected_provider, SUM(cost_usd)
-                   FROM interactions WHERE timestamp > ?
+                   FROM interaction_log WHERE timestamp > ?
                    GROUP BY selected_provider""",
                 (cutoff,),
             ).fetchall()
@@ -308,7 +312,7 @@ class MorningReporter:
             day_cutoff = time.time() - 86400
             row = conn.execute(
                 """SELECT COALESCE(SUM(cost_usd), 0)
-                   FROM interactions
+                   FROM interaction_log
                    WHERE timestamp > ? AND selected_provider LIKE '%opus%'""",
                 (day_cutoff,),
             ).fetchone()
@@ -317,7 +321,7 @@ class MorningReporter:
             month_cutoff = time.time() - (30 * 86400)
             row = conn.execute(
                 """SELECT COALESCE(SUM(cost_usd), 0)
-                   FROM interactions
+                   FROM interaction_log
                    WHERE timestamp > ? AND selected_provider LIKE '%opus%'""",
                 (month_cutoff,),
             ).fetchone()
@@ -325,7 +329,7 @@ class MorningReporter:
 
             row = conn.execute(
                 """SELECT COALESCE(SUM(cost_usd), 0)
-                   FROM interactions
+                   FROM interaction_log
                    WHERE timestamp > ? AND selected_provider LIKE '%minimax%'""",
                 (day_cutoff,),
             ).fetchone()
@@ -426,8 +430,8 @@ class MorningReporter:
             with open(self._routing_config) as f:
                 config = yaml.safe_load(f) or {}
             budget = config.get("budget", {})
-            report.opus_daily_budget_usd = budget.get("opus_daily_usd", 15.0)
-            report.opus_monthly_budget_usd = budget.get("opus_monthly_usd", 100.0)
+            report.opus_daily_budget_usd = budget.get("opus_api_daily_usd", budget.get("opus_daily_usd", 25.0))
+            report.opus_monthly_budget_usd = budget.get("opus_api_monthly_usd", budget.get("opus_monthly_usd", 150.0))
         except Exception:
             pass
 

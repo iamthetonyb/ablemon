@@ -24,14 +24,39 @@ logger = logging.getLogger(__name__)
 # ── Source priority (lower = higher priority, harvested first) ────────
 SOURCE_PRIORITY: dict[str, int] = {
     "claude_code": 1,      # Claude Max subscription — richest reasoning traces
+    "cowork": 1,            # Claude Cowork sessions — same quality as Claude Code
     "able_interaction": 2,  # ABLE's own high-quality responses
-    "codex": 3,             # OpenAI Codex CLI (bundled w/ GPT sub, clean transcripts)
-    "chatgpt": 4,           # ChatGPT web (GPT sub, good reasoning)
-    "antigravity": 5,       # Antigravity Pro sessions
-    "cowork": 6,            # Claude Cowork mobile sessions
+    "0wav_ml": 3,           # 0wav labeled behavioral profiles (domain-specific)
+    "0wav_claude_code": 3,  # 0wav Claude Code sessions (domain-specific)
+    "codex": 4,             # OpenAI Codex CLI (bundled w/ GPT sub, clean transcripts)
+    "chatgpt": 5,           # ChatGPT web (GPT sub, good reasoning)
+    "antigravity": 6,       # Antigravity Pro sessions
     "grok": 7,              # Grok free tier (thinner reasoning)
     "inbox": 8,             # Manually saved conversations
 }
+
+
+class _CoworkHarvester:
+    """Thin wrapper that points ClaudeCodeHarvester at the Cowork sessions dir.
+
+    Cowork uses the same JSONL format as Claude Code but stores sessions in
+    ``~/Library/Application Support/Claude/local-agent-mode-sessions/``.
+    """
+
+    source_name = "cowork"
+
+    def __init__(self, cowork_dir: Path):
+        self._dir = cowork_dir
+
+    def harvest(self, since: datetime | None = None, **kwargs) -> list:
+        from atlas.core.distillation.harvesters.claude_code_harvester import ClaudeCodeHarvester
+        h = ClaudeCodeHarvester()
+        convos = h.harvest(source_path=str(self._dir), since=since)
+        # Re-tag source as cowork
+        for c in convos:
+            c.source = "cowork"
+            c.metadata["original_source"] = "claude_cowork"
+        return convos
 
 
 @dataclass
@@ -61,23 +86,40 @@ class FullHarvestResult:
     errors: list[str] = field(default_factory=list)
 
 
-def _get_harvesters(project_root: Path) -> list:
-    """Build harvester list in priority order."""
+def _get_harvesters(project_root: Path, tenant_id: str = "default") -> list:
+    """Build harvester list in priority order.
+
+    When ``tenant_id`` is a known tenant with a dedicated harvester
+    (e.g. ``0wav``), that harvester is included automatically.
+    """
     from atlas.core.distillation.harvesters.claude_code_harvester import ClaudeCodeHarvester
     from atlas.core.distillation.harvesters.able_interaction_harvester import ABLEInteractionHarvester
     from atlas.core.distillation.harvesters.inbox_harvester import InboxHarvester
 
     harvesters = []
 
-    # Priority 1: Claude Code sessions
+    # Priority 1: Claude Code sessions (CLI)
     harvesters.append(("claude_code", ClaudeCodeHarvester()))
+
+    # Priority 1b: Claude Cowork sessions (same JSONL format, different dir)
+    cowork_dir = Path.home() / "Library" / "Application Support" / "Claude" / "local-agent-mode-sessions"
+    if cowork_dir.exists():
+        harvesters.append(("cowork", _CoworkHarvester(cowork_dir)))
 
     # Priority 2: ABLE's own interaction log
     db_path = project_root / "data" / "interaction_log.db"
     if db_path.exists():
         harvesters.append(("able_interaction", ABLEInteractionHarvester(db_path=str(db_path))))
 
-    # Priority 3-4: OpenCLI adapters (Codex, ChatGPT, Cowork, Grok)
+    # Priority 3: 0wav ML harvester (labeled profiles + 0wav Claude sessions)
+    if tenant_id == "0wav":
+        try:
+            from atlas.core.distillation.harvesters.owav_ml_harvester import OwavMLHarvester
+            harvesters.append(("0wav_ml", OwavMLHarvester()))
+        except Exception as e:
+            logger.warning("0wav ML harvester unavailable: %s", e)
+
+    # Priority 4-5: OpenCLI adapters (Codex, ChatGPT, Cowork, Grok)
     try:
         from atlas.core.distillation.harvesters.opencli_harvester import OpenCLIHarvester
         adapters_dir = project_root / "atlas" / "core" / "distillation" / "harvesters" / "opencli_adapters"
@@ -87,14 +129,14 @@ def _get_harvesters(project_root: Path) -> list:
     except Exception as e:
         logger.warning("OpenCLI harvester unavailable: %s", e)
 
-    # Priority 5: Antigravity brain artifacts (readable markdown plans/walkthroughs)
+    # Priority 6: Antigravity brain artifacts (readable markdown plans/walkthroughs)
     try:
         from atlas.core.distillation.harvesters.antigravity_harvester import AntigravityHarvester
         harvesters.append(("antigravity", AntigravityHarvester()))
     except Exception as e:
         logger.warning("Antigravity harvester unavailable: %s", e)
 
-    # Priority 8: Inbox (manually saved conversations)
+    # Priority 9: Inbox (manually saved conversations)
     inbox_dir = Path.home() / "atlas-corpus-inbox"
     inbox_dir.mkdir(exist_ok=True)
     harvesters.append(("inbox", InboxHarvester(inbox_dir=inbox_dir)))
@@ -152,7 +194,7 @@ async def run_harvest(
 
     # ── 1. Harvest from all sources ──────────────────────────────
     all_conversations = []
-    harvesters = _get_harvesters(project_root)
+    harvesters = _get_harvesters(project_root, tenant_id=tenant_id)
 
     for source_name, harvester in harvesters:
         h_start = time.monotonic()
@@ -252,6 +294,26 @@ async def run_harvest(
         logger.info("[harvest] Stored %d/%d pairs to distillation DB", saved, len(formatted))
     except Exception as e:
         logger.warning("[harvest] DB store failed (non-fatal): %s", e)
+
+    # ── 6. Reverse flow: promote best tenant pairs to ATLAS core ─
+    if tenant_id != "default" and not dry_run:
+        try:
+            from atlas.core.distillation.corpus_builder import CorpusBuilder
+            builder = CorpusBuilder()
+            promo = builder.promote_to_core(
+                tenant_id=tenant_id,
+                min_quality=0.90,
+            )
+            promoted_count = promo.get("promoted_from_tenant", 0)
+            if promoted_count > 0:
+                logger.info(
+                    "[harvest] Promoted %d high-quality %s pairs → ATLAS core "
+                    "(domains: %s)",
+                    promoted_count, tenant_id,
+                    promo.get("promoted_domains", {}),
+                )
+        except Exception as e:
+            logger.warning("[harvest] Reverse promotion failed (non-fatal): %s", e)
 
     result.duration_ms = (time.monotonic() - start) * 1000
     result.completed_at = datetime.now(timezone.utc).isoformat()

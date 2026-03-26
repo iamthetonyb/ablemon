@@ -744,3 +744,31 @@ def register_default_jobs(
         timeout=120.0,
         max_retries=2,
     )
+
+    # ── Nightly research scan — 1am daily ───────────────────────
+    async def run_nightly_research_scan():
+        from atlas.core.evolution.weekly_research import run_nightly_research
+        return await run_nightly_research(send_telegram=send_telegram)
+
+    scheduler.add_job(
+        "nightly-research",
+        "0 1 * * *",
+        run_nightly_research_scan,
+        description="Nightly scan — breaking AI news, patches, releases",
+        timeout=300.0,
+        max_retries=2,
+    )
+
+    # ── Weekly deep research — Sunday 10am ──────────────────────
+    async def run_weekly_research_scan():
+        from atlas.core.evolution.weekly_research import run_weekly_research
+        return await run_weekly_research(send_telegram=send_telegram)
+
+    scheduler.add_job(
+        "weekly-research",
+        "0 10 * * 0",
+        run_weekly_research_scan,
+        description="Weekly deep scan — AI ecosystem, Claude updates, agentic systems, improvements",
+        timeout=600.0,
+        max_retries=2,
+    )

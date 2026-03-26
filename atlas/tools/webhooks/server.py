@@ -5,9 +5,12 @@ Receives events from external services and routes them to the appropriate handle
 
 Endpoints:
     POST /webhook/github      → GitHub push, PR, issue events
-    POST /webhook/stripe      → Stripe payment events
     POST /webhook/telegram    → Telegram updates (alternative to polling)
+    POST /webhook/stripe      → Stripe payment events (if STRIPE_ENABLED)
     POST /webhook/custom      → Generic webhook receiver
+    POST /api/billing/checkout  → Create Stripe checkout session (if enabled)
+    POST /api/billing/subscribe → Create Stripe subscription (if enabled)
+    GET  /api/billing/status    → Client billing status (if enabled)
     GET  /metrics             → JSON summary of all metrics
     GET  /metrics/routing     → Per-tier routing breakdown
     GET  /metrics/evolution   → Evolution daemon history
@@ -52,7 +55,7 @@ except ImportError:
 @dataclass
 class WebhookEvent:
     """A normalized webhook event from any source"""
-    source: str                          # "github", "stripe", "telegram", "custom"
+    source: str                          # "github", "telegram", "custom"
     event_type: str                      # e.g. "push", "pull_request", "payment.succeeded"
     payload: Dict[str, Any]             # Raw payload from the source
     headers: Dict[str, str]             # Request headers
@@ -76,26 +79,6 @@ def verify_github_signature(payload_bytes: bytes, signature: str, secret: str) -
     return hmac.compare_digest(expected, signature)
 
 
-def verify_stripe_signature(payload_bytes: bytes, signature: str, secret: str) -> bool:
-    """Verify Stripe webhook signature"""
-    if not signature or not secret:
-        return False
-    try:
-        # Stripe uses timestamp+signature format
-        parts = {k: v for k, v in (p.split("=", 1) for p in signature.split(","))}
-        timestamp = parts.get("t", "")
-        sig = parts.get("v1", "")
-        signed_payload = f"{timestamp}.{payload_bytes.decode()}"
-        expected = hmac.new(
-            secret.encode(),
-            signed_payload.encode(),
-            hashlib.sha256,
-        ).hexdigest()
-        return hmac.compare_digest(expected, sig)
-    except Exception:
-        return False
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Webhook Server
 # ─────────────────────────────────────────────────────────────────────────────
@@ -113,19 +96,26 @@ class WebhookServer:
         self.port = port
         self.host = host
         self.db_path = db_path
+        self._service_token = os.environ.get("ATLAS_SERVICE_TOKEN", "")
+        self._custom_webhook_secret = os.environ.get("ATLAS_WEBHOOK_SECRET", "")
         self.handlers: Dict[str, List[Callable]] = {
             "github": [],
-            "stripe": [],
             "telegram": [],
             "custom": [],
         }
-        self.event_log: List[WebhookEvent] = []
-
-        # Secrets from environment
         self.secrets = {
             "github": os.environ.get("GITHUB_WEBHOOK_SECRET", ""),
-            "stripe": os.environ.get("STRIPE_WEBHOOK_SECRET", ""),
         }
+        self.event_log: List[WebhookEvent] = []
+
+    def _verify_bearer_token(self, request) -> bool:
+        """Check Authorization: Bearer <token> header against ATLAS_SERVICE_TOKEN."""
+        if not self._service_token:
+            return True  # No token configured = open (dev mode)
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            return hmac.compare_digest(auth[7:], self._service_token)
+        return False
 
     def on(self, source: str, handler: Callable):
         """Register a handler for webhook events from a source"""
@@ -177,32 +167,6 @@ class WebhookServer:
         asyncio.create_task(self._dispatch(event))
         return web.Response(text="OK")
 
-    async def _handle_stripe(self, request) -> "web.Response":
-        body = await request.read()
-        signature = request.headers.get("Stripe-Signature", "")
-
-        verified = verify_stripe_signature(body, signature, self.secrets["stripe"])
-        if self.secrets["stripe"] and not verified:
-            logger.warning("Stripe webhook signature verification failed")
-            return web.Response(status=401, text="Signature verification failed")
-
-        try:
-            payload = json.loads(body)
-        except json.JSONDecodeError:
-            return web.Response(status=400, text="Invalid JSON")
-
-        event = WebhookEvent(
-            source="stripe",
-            event_type=payload.get("type", "unknown"),
-            payload=payload,
-            headers=dict(request.headers),
-            verified=verified,
-        )
-
-        logger.info(f"Stripe webhook: {event.event_type}")
-        asyncio.create_task(self._dispatch(event))
-        return web.Response(text="OK")
-
     async def _handle_telegram(self, request) -> "web.Response":
         try:
             payload = await request.json()
@@ -222,10 +186,24 @@ class WebhookServer:
         return web.Response(text="OK")
 
     async def _handle_custom(self, request) -> "web.Response":
+        payload_bytes = await request.read()
         try:
-            payload = await request.json()
+            payload = json.loads(payload_bytes) if payload_bytes else {}
         except Exception:
             payload = {}
+
+        # Verify signature if ATLAS_WEBHOOK_SECRET is configured
+        verified = False
+        if self._custom_webhook_secret:
+            sig = request.headers.get("X-Atlas-Signature", "")
+            expected = "sha256=" + hmac.new(
+                self._custom_webhook_secret.encode(),
+                payload_bytes,
+                hashlib.sha256,
+            ).hexdigest()
+            if not sig or not hmac.compare_digest(expected, sig):
+                return web.json_response({"error": "invalid signature"}, status=403)
+            verified = True
 
         event_type = request.match_info.get("event_type", "custom")
         event = WebhookEvent(
@@ -233,10 +211,10 @@ class WebhookServer:
             event_type=event_type,
             payload=payload,
             headers=dict(request.headers),
-            verified=False,
+            verified=verified,
         )
 
-        logger.info(f"Custom webhook: {event_type}")
+        logger.info(f"Custom webhook: {event_type} (verified={verified})")
         asyncio.create_task(self._dispatch(event))
         return web.Response(text="OK")
 
@@ -252,8 +230,10 @@ class WebhookServer:
         Dashboard status endpoint — returns system health, active tasks,
         recent audit entries, skill stats, and provider chain status.
 
-        Popebot-inspired: provides a lightweight API for agent monitoring.
+        Requires Bearer token when ATLAS_SERVICE_TOKEN is set.
         """
+        if not self._verify_bearer_token(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
         atlas_home = Path.home() / ".atlas"
         status = {
             "system": "ATLAS",
@@ -496,8 +476,8 @@ class WebhookServer:
                 with open(weights_path) as f:
                     w = yaml.safe_load(f) or {}
                 caps = {
-                    "opus_daily_usd": w.get("opus_daily_budget_usd", 15.0),
-                    "opus_monthly_usd": w.get("opus_monthly_budget_usd", 100.0),
+                    "opus_daily_usd": w.get("opus_daily_budget_usd", 25.0),
+                    "opus_monthly_usd": w.get("opus_monthly_budget_usd", 150.0),
                 }
             except Exception:
                 pass
@@ -662,12 +642,32 @@ class WebhookServer:
             (tenant_id, since),
         )
 
+        # Distillation stats for this tenant
+        distillation = {}
+        try:
+            from atlas.core.distillation.store import DistillationStore
+            store = DistillationStore()
+            distillation = store.stats(tenant_id=tenant_id)
+        except Exception:
+            pass
+
+        # 0wav-specific ML pipeline stats
+        ml_pipeline = {}
+        if tenant_id == "0wav":
+            try:
+                from atlas.core.distillation.harvesters.owav_ml_harvester import OwavPipelineStats
+                ml_pipeline = OwavPipelineStats().get_stats()
+            except Exception:
+                pass
+
         return web.json_response({
             "tenant_id": tenant_id,
             "period_hours": hours,
             "summary": summary,
             "by_tier": by_tier,
             "recent_interactions": recent,
+            "distillation": distillation,
+            "ml_pipeline": ml_pipeline,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
@@ -676,7 +676,6 @@ class WebhookServer:
     def build_app(self) -> "web.Application":
         app = web.Application()
         app.router.add_post("/webhook/github", self._handle_github)
-        app.router.add_post("/webhook/stripe", self._handle_stripe)
         app.router.add_post("/webhook/telegram", self._handle_telegram)
         app.router.add_post("/webhook/custom", self._handle_custom)
         app.router.add_post("/webhook/custom/{event_type}", self._handle_custom)
@@ -691,6 +690,24 @@ class WebhookServer:
         app.router.add_get("/metrics/corpus", self._handle_metrics_corpus)
         app.router.add_get("/metrics/tenants", self._handle_metrics_tenants)
         app.router.add_get("/tenant/{tenant_id}/dashboard", self._handle_tenant_dashboard)
+
+        # ── Payment integrations ────────────────────────────────
+        # Stripe (credit cards) — adds /webhook/stripe, /api/billing/*
+        try:
+            from billing.stripe_billing import setup_stripe
+            self._stripe_gate = setup_stripe(app)
+        except Exception as e:
+            self._stripe_gate = None
+            logger.debug(f"Stripe not configured: {e}")
+
+        # x402 (crypto/USDC) — adds middleware on /api/chat, /api/completion
+        try:
+            from billing.x402 import setup_x402
+            self._x402_gate = setup_x402(app)
+        except Exception as e:
+            self._x402_gate = None
+            logger.debug(f"x402 not configured: {e}")
+
         return app
 
     async def start(self):
@@ -705,7 +722,6 @@ class WebhookServer:
         logger.info(f"Webhook server listening on {self.host}:{self.port}")
         logger.info(f"Endpoints:")
         logger.info(f"  POST http://{self.host}:{self.port}/webhook/github")
-        logger.info(f"  POST http://{self.host}:{self.port}/webhook/stripe")
         logger.info(f"  POST http://{self.host}:{self.port}/webhook/telegram")
         logger.info(f"  POST http://{self.host}:{self.port}/webhook/custom")
 
@@ -744,6 +760,5 @@ if __name__ == "__main__":
         logger.info(f"Event: {event.source}/{event.event_type} (verified={event.verified})")
 
     server.on("github", log_event)
-    server.on("stripe", log_event)
 
     asyncio.run(server.start())

@@ -77,7 +77,7 @@ class MetricsCollector:
         # Check failure rate
         failures = summary.get("failures_by_tier", [])
         for tier_data in failures:
-            rate = tier_data.get("failure_rate_pct", 0)
+            rate = tier_data.get("failure_rate_pct") or 0
             if rate > 20:
                 health["alerts"].append(
                     f"Tier {tier_data['selected_tier']} failure rate: {rate}%"
@@ -88,7 +88,7 @@ class MetricsCollector:
 
         # Check escalation rate
         escalation = summary.get("escalation_rate", {})
-        override_rate = escalation.get("override_rate_pct", 0)
+        override_rate = escalation.get("override_rate_pct") or 0
         if override_rate > 15:
             health["alerts"].append(
                 f"High override rate: {override_rate}% (scorer may be under-routing)"
@@ -99,7 +99,7 @@ class MetricsCollector:
         # Check fallback frequency
         fallbacks = summary.get("fallback_frequency", [])
         for provider_data in fallbacks:
-            fb_rate = provider_data.get("fallback_rate_pct", 0)
+            fb_rate = provider_data.get("fallback_rate_pct") or 0
             if fb_rate > 30:
                 health["alerts"].append(
                     f"Provider {provider_data['selected_provider']} fallback rate: {fb_rate}%"

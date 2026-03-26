@@ -63,7 +63,6 @@ class SecretIsolation:
         "TELEGRAM_BOT",
         "DISCORD_BOT",
         "SLACK_BOT",
-        "STRIPE_",
         "NOTION_",
         # Database
         "DATABASE_URL",

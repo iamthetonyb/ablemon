@@ -1,7 +1,7 @@
 """
 ATLAS Webhook Server.
 
-Receives events from external services (GitHub, Stripe, Telegram, custom).
+Receives events from external services (GitHub, Telegram, custom).
 """
 
 from .server import WebhookServer, WebhookEvent, start_server

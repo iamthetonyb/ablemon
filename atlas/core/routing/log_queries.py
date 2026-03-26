@@ -87,18 +87,23 @@ class LogQueries:
                 """
                 SELECT
                     COUNT(*) as total,
-                    SUM(CASE WHEN escalated = 1 THEN 1 ELSE 0 END) as escalations,
-                    SUM(CASE WHEN user_correction = 1 THEN 1 ELSE 0 END) as user_corrections,
-                    ROUND(
+                    COALESCE(SUM(CASE WHEN escalated = 1 THEN 1 ELSE 0 END), 0) as escalations,
+                    COALESCE(SUM(CASE WHEN user_correction = 1 THEN 1 ELSE 0 END), 0) as user_corrections,
+                    COALESCE(ROUND(
                         CAST(SUM(CASE WHEN escalated = 1 OR user_correction = 1 THEN 1 ELSE 0 END) AS REAL)
                         / MAX(COUNT(*), 1) * 100, 2
-                    ) as override_rate_pct
+                    ), 0.0) as override_rate_pct
                 FROM interaction_log
                 WHERE timestamp >= ?
                 """,
                 (since,),
             ).fetchone()
-            return dict(row)
+            result = dict(row)
+            # Ensure no None values leak through on empty DB
+            for key in ("total", "escalations", "user_corrections", "override_rate_pct"):
+                if result.get(key) is None:
+                    result[key] = 0 if key != "override_rate_pct" else 0.0
+            return result
         finally:
             conn.close()
 

@@ -44,8 +44,10 @@ tier_thresholds:
   tier_2_max: 0.7
 
 # Budget gating for Opus (T4)
-opus_daily_budget_usd: 15.00
-opus_monthly_budget_usd: 100.00
+# Primary T4 is $0 via Claude Max subscription (Claude Code SDK).
+# These caps apply to the Anthropic API FALLBACK only.
+opus_daily_budget_usd: 25.00
+opus_monthly_budget_usd: 150.00
 
 # Version — incremented by evolution daemon on each weight update
 version: 2

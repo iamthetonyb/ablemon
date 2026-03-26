@@ -57,7 +57,9 @@ class AnthropicProvider(LLMProvider):
         api_key: str,
         model: str = None,
         timeout: float = 180.0,
-        use_premium: bool = False
+        use_premium: bool = False,
+        extended_thinking: bool = False,
+        thinking_budget_tokens: int = 16000,
     ):
         model = model or (self.PREMIUM_MODEL if use_premium else self.DEFAULT_MODEL)
         pricing = self.MODEL_PRICING.get(model, {"input": 5.00, "output": 25.00})
@@ -72,6 +74,8 @@ class AnthropicProvider(LLMProvider):
         )
         super().__init__(config)
         self._session: Optional[aiohttp.ClientSession] = None
+        self.extended_thinking = extended_thinking
+        self.thinking_budget_tokens = thinking_budget_tokens
 
     @property
     def name(self) -> str:
@@ -160,14 +164,27 @@ class AnthropicProvider(LLMProvider):
             "Content-Type": "application/json"
         }
 
+        # Extended thinking requires beta header
+        if self.extended_thinking:
+            headers["anthropic-beta"] = "interleaved-thinking-2025-05-14"
+
         system, converted_messages = self._convert_messages(messages)
 
         payload = {
             "model": self.config.model,
             "messages": converted_messages,
             "max_tokens": max_tokens,
-            "temperature": temperature,
         }
+
+        # Extended thinking: temperature must be 1, add thinking budget
+        if self.extended_thinking:
+            payload["temperature"] = 1
+            payload["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": self.thinking_budget_tokens,
+            }
+        else:
+            payload["temperature"] = temperature
 
         if system:
             payload["system"] = system
@@ -218,11 +235,14 @@ class AnthropicProvider(LLMProvider):
 
                 # Parse content blocks
                 content_text = ""
+                thinking_text = ""
                 tool_calls = []
 
                 for block in data.get("content", []):
                     if block["type"] == "text":
                         content_text += block["text"]
+                    elif block["type"] == "thinking":
+                        thinking_text += block.get("thinking", "")
                     elif block["type"] == "tool_use":
                         tool_calls.append(ToolCall(
                             id=block["id"],
@@ -246,7 +266,8 @@ class AnthropicProvider(LLMProvider):
                     model=data.get("model", self.config.model),
                     tool_calls=tool_calls if tool_calls else None,
                     cost=self.calculate_cost(input_tokens, output_tokens),
-                    raw_response=data
+                    raw_response=data,
+                    thinking_content=thinking_text if thinking_text else None,
                 )
 
                 return result

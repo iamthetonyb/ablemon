@@ -4,9 +4,9 @@
 # These weights are tunable by the M2.7 evolution daemon.
 #
 # Score mapping:
-#   < 0.4  → Tier 1 (GPT 5.4 Nano via OpenAI OAuth)
-#   0.4-0.7 → Tier 2 (GPT 5.4 via OpenAI OAuth)
-#   > 0.7  → Tier 4 (Opus 4.6, with budget gating)
+#   < 0.4  → Tier 1 (GPT 5.4 Mini xhigh via ChatGPT subscription, $0)
+#   0.4-0.7 → Tier 2 (GPT 5.4 xhigh via ChatGPT subscription, $0)
+#   > 0.7  → Tier 4 (Opus 4.6 via Claude Max subscription, $0; API fallback budget-gated)
 
 features:
   token_count_threshold: 2000
@@ -36,8 +36,10 @@ tier_thresholds:
   tier_2_max: 0.7
 
 # Budget gating for Opus (Tier 4)
-opus_daily_budget_usd: 15.00
-opus_monthly_budget_usd: 100.00
+# Primary T4 is $0 via Claude Max subscription (Claude Code SDK).
+# These caps apply to the Anthropic API FALLBACK only.
+opus_daily_budget_usd: 25.00
+opus_monthly_budget_usd: 150.00
 
 # Version tracking (M2.7 increments on each update)
 version: 2
