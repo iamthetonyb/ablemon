@@ -26,8 +26,11 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 # Ensure we're in the right directory
 os.chdir(Path(__file__).parent)
 
-# Add to path
+# Add to path — atlas/ itself (for `from core.xxx` imports)
+# AND its parent (for `from atlas.core.xxx` imports used by cron jobs,
+# harvesters, morning report, and other lazy-imported modules).
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Load .env for local runs (Docker/CI set env vars directly)
 try:
