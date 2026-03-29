@@ -277,11 +277,25 @@ class InitiativeEngine:
             f"Cost: ${usage.get('cost', 0):.4f}"
         )
 
-        # Format cron status
+        # Format cron status — show success rate, not just raw error counts
         cron_lines = []
         for job in stats["cron_jobs"]:
-            icon = "✅" if job["last_status"] == "success" else ("⏳" if job["last_status"] == "pending" else "❌")
-            cron_lines.append(f"  {icon} {job['name']}: {job['last_status']} (ran {job['run_count']}x, {job['error_count']} errors)")
+            runs = job["run_count"]
+            errors = job["error_count"]
+            successes = runs - errors
+            if runs > 0:
+                rate = round(100 * successes / runs)
+                # Recent trend: if last run succeeded, show that
+                if job["last_status"] == "success":
+                    icon = "✅"
+                    trend = f" (last run: ✅, {rate}% success rate over {runs} runs)"
+                else:
+                    icon = "❌"
+                    trend = f" (last run: ❌, {rate}% success rate over {runs} runs)"
+            else:
+                icon = "⏳"
+                trend = " (no runs yet)"
+            cron_lines.append(f"  {icon} {job['name']}{trend}")
         cron_status = "\n".join(cron_lines) if cron_lines else "  No cron jobs registered"
 
         prompt = f"""Draft the morning briefing based on this REAL system data.

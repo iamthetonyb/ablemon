@@ -44,72 +44,41 @@ class WeeklyResearchReport:
     search_queries_run: int = 0
 
 
-# Research topics organized by category
-# WEEKLY queries — deep scan across all categories
-RESEARCH_QUERIES = {
-    "claude_ecosystem": [
-        "Claude Code SDK new release update changelog",
-        "Anthropic Claude API new features capabilities 2026",
-        "Claude Code hooks MCP integration new",
-        "Anthropic agent SDK update features",
-        "Claude Max subscription new features tools",
-        "Claude computer use browser control update",
-    ],
-    "openclaw_agentic": [
-        "OpenClaw AI agent framework update",
-        "MetaClaw MadMax pattern agentic system",
-        "autonomous AI agent framework comparison 2026",
-        "agentic AGI system architecture new",
-        "self-improving AI agent techniques 2026",
-        "AI agent self-evolution self-healing systems",
-    ],
-    "models_training": [
-        "Qwen model update release 2026",
-        "new open source LLM release reasoning 2026",
-        "Unsloth fine-tuning new features update",
-        "GGUF quantization Unsloth Dynamic improvements",
-        "LoRA QLoRA GRPO training techniques new",
-        "distillation knowledge transfer LLM research 2026",
-    ],
-    "tools_infra": [
-        "Ollama new release features update",
-        "vLLM update inference optimization",
-        "Axolotl training framework update",
-        "promptfoo eval testing new release",
-        "Arize Phoenix observability update",
-        "LMCache prefix caching KV cache optimization",
-        "MCP server new tools popular trending",
-    ],
-    "security_defense": [
-        "prompt injection defense new techniques 2026",
-        "LLM guardrails trust gate improvements",
-        "AI red teaming new attack vectors defense",
-        "agentic system security best practices",
-    ],
-    "ecosystem_trends": [
-        "AI coding assistant comparison features 2026",
-        "OpenAI GPT update API changes",
-        "multi-agent orchestration patterns new",
-        "edge AI deployment mobile GGUF optimization",
-        "H100 fine-tuning optimization cost reduction",
-        "x402 payment protocol blockchain AI integration",
-    ],
+# Base TOPICS (not queries) — the research interests ATLAS cares about.
+# Queries are generated dynamically each run with date context and rotation.
+RESEARCH_TOPICS = {
+    "claude_ecosystem": {
+        "keywords": ["Claude Code SDK", "Anthropic Claude API", "Claude MCP", "Anthropic agent SDK", "Claude Max", "Claude computer use"],
+        "why": "Our T4 provider and CLI tooling — breaking changes or new features directly affect us",
+    },
+    "agentic_systems": {
+        "keywords": ["autonomous AI agent", "self-improving AI", "agentic AGI", "AI agent orchestration", "multi-agent framework"],
+        "why": "Competitive landscape and techniques we can adopt for ATLAS evolution daemon",
+    },
+    "models_training": {
+        "keywords": ["Qwen model", "Unsloth fine-tuning", "GGUF quantization", "LoRA QLoRA", "distillation LLM", "open source LLM release"],
+        "why": "Our distillation pipeline uses Qwen 3.5 + Unsloth + GGUF — updates change our training approach",
+    },
+    "tools_infra": {
+        "keywords": ["Ollama", "vLLM inference", "Axolotl training", "promptfoo eval", "Arize Phoenix", "LMCache", "MCP server"],
+        "why": "Our runtime and eval stack — upgrades can improve performance or unlock features",
+    },
+    "security": {
+        "keywords": ["prompt injection defense", "LLM security", "AI red team", "agentic security"],
+        "why": "Trust gate and client data protection — must stay ahead of attack vectors",
+    },
+    "business_revenue": {
+        "keywords": ["AI SaaS pricing", "AI agent monetization", "white-label AI", "AI consulting business model"],
+        "why": "Revenue goal is $100k MRR from zero — need market intelligence on pricing and GTM",
+    },
+    "ecosystem": {
+        "keywords": ["OpenAI GPT update", "AI coding assistant", "edge AI deployment", "H100 optimization"],
+        "why": "General ecosystem awareness — competitive models, deployment patterns, cost reduction",
+    },
 }
 
-# NIGHTLY queries — lighter scan, focused on breaking news and patches
-NIGHTLY_QUERIES = {
-    "breaking": [
-        "Claude Anthropic announcement today",
-        "OpenAI GPT release patch today",
-        "Qwen Unsloth Ollama release today",
-        "AI agent framework major update this week",
-    ],
-    "patches": [
-        "Claude Code SDK changelog recent",
-        "Ollama release notes recent",
-        "promptfoo update recent",
-    ],
-}
+# How many topics to scan per nightly run (rotates through all over the week)
+NIGHTLY_TOPIC_COUNT = 3
 
 
 class WeeklyResearchScout:
@@ -128,11 +97,13 @@ class WeeklyResearchScout:
         self, categories: List[str] = None, mode: str = "weekly"
     ) -> WeeklyResearchReport:
         """
-        Run research scan.
+        Run research scan with dynamic query generation.
 
-        Args:
-            categories: Specific categories to scan (None = all)
-            mode: "weekly" for deep scan, "nightly" for breaking news only
+        Each run generates fresh queries based on:
+        - Current date (for recency in search results)
+        - Topic rotation (nightly scans different topics each night)
+        - Previous findings (dedup against last report)
+        - Current ATLAS goals/objectives (goal-aware queries)
         """
         report = WeeklyResearchReport(
             timestamp=datetime.now(timezone.utc).isoformat(),
@@ -147,29 +118,28 @@ class WeeklyResearchScout:
             logger.error(f"WebSearch init failed: {e}")
             return report
 
-        # Select query set based on mode
-        query_set = NIGHTLY_QUERIES if mode == "nightly" else RESEARCH_QUERIES
-        cats = categories or list(query_set.keys())
+        # Generate dynamic queries
+        queries = self._generate_queries(mode, categories)
+        previous_urls = self._load_previous_urls()
 
-        for category in cats:
-            queries = query_set.get(category, [])
-            for query in queries:
-                try:
-                    findings = await self._search_topic(search, query, category)
-                    for f in findings:
-                        report.findings.append(f)
-                        if f.relevance == "high":
-                            report.high_priority.append(f)
-                    report.search_queries_run += 1
-                except Exception as e:
-                    report.errors.append(f"Query '{query}': {e}")
-                    logger.warning(f"Research query failed: {query} — {e}")
+        for query, category in queries:
+            try:
+                findings = await self._search_topic(search, query, category)
+                for f in findings:
+                    # Dedup against previous report
+                    if f.url and f.url in previous_urls:
+                        continue
+                    report.findings.append(f)
+                    if f.relevance == "high":
+                        report.high_priority.append(f)
+                report.search_queries_run += 1
+            except Exception as e:
+                report.errors.append(f"Query '{query}': {e}")
+                logger.warning(f"Research query failed: {query} — {e}")
 
-                # Rate limit between queries
-                await asyncio.sleep(1.0)
+            await asyncio.sleep(1.0)
 
         # Phase 2 (weekly only): Deep analysis via Claude Code SDK
-        # Uses Max subscription — zero marginal cost, gets real web browsing
         if mode == "weekly":
             await self._deep_research_phase(report)
 
@@ -190,14 +160,108 @@ class WeeklyResearchScout:
 
         return report
 
+    def _generate_queries(
+        self, mode: str, categories: List[str] = None
+    ) -> List[tuple]:
+        """
+        Generate fresh, date-aware search queries. Returns list of (query, category).
+
+        Nightly: rotates through NIGHTLY_TOPIC_COUNT topics per night.
+        Weekly: scans all topics with deeper queries.
+        """
+        now = datetime.now(timezone.utc)
+        date_str = now.strftime("%B %Y")  # e.g. "March 2026"
+        recency = "this week" if mode == "nightly" else "this month"
+
+        all_topics = list(RESEARCH_TOPICS.keys())
+        if categories:
+            selected_topics = [t for t in categories if t in RESEARCH_TOPICS]
+        elif mode == "nightly":
+            # Rotate: use day-of-year to pick different topics each night
+            day_offset = now.timetuple().tm_yday
+            start = (day_offset * NIGHTLY_TOPIC_COUNT) % len(all_topics)
+            indices = [(start + i) % len(all_topics) for i in range(NIGHTLY_TOPIC_COUNT)]
+            selected_topics = [all_topics[i] for i in indices]
+        else:
+            selected_topics = all_topics
+
+        queries = []
+        for topic_name in selected_topics:
+            topic = RESEARCH_TOPICS[topic_name]
+            keywords = topic["keywords"]
+
+            if mode == "nightly":
+                # 2 queries per topic, focused on breaking news
+                for kw in keywords[:2]:
+                    queries.append((f"{kw} new release update {recency}", topic_name))
+            else:
+                # 3 queries per topic, deeper
+                for kw in keywords[:3]:
+                    queries.append((f"{kw} {date_str} latest", topic_name))
+                # Add one trend query
+                queries.append(
+                    (f"best new {topic_name.replace('_', ' ')} tools techniques {date_str}", topic_name)
+                )
+
+        # Add goal-aware queries from current objectives
+        goal_queries = self._generate_goal_queries(recency)
+        queries.extend(goal_queries)
+
+        return queries
+
+    def _generate_goal_queries(self, recency: str) -> List[tuple]:
+        """Generate queries based on current ATLAS objectives."""
+        queries = []
+        try:
+            goals_path = Path.home() / ".atlas" / "memory" / "current_objectives.yaml"
+            if not goals_path.exists():
+                return queries
+
+            import yaml
+            with open(goals_path) as f:
+                objectives = yaml.safe_load(f) or {}
+
+            # Extract urgent/in-progress goals and generate research queries
+            for priority in ("urgent", "in_progress"):
+                items = objectives.get(priority, [])
+                if isinstance(items, list):
+                    for item in items[:3]:
+                        if isinstance(item, dict):
+                            goal_text = item.get("goal", item.get("name", ""))
+                        else:
+                            goal_text = str(item)
+                        if goal_text and len(goal_text) > 5:
+                            # Turn the goal into a research query
+                            queries.append(
+                                (f"{goal_text[:60]} best approach tools {recency}", "goals")
+                            )
+        except Exception as e:
+            logger.debug(f"Goal-aware query generation failed: {e}")
+
+        return queries[:4]  # Cap at 4 goal queries
+
+    def _load_previous_urls(self) -> set:
+        """Load URLs from the most recent research report for dedup."""
+        urls = set()
+        try:
+            reports = sorted(self.report_dir.glob("research_*.json"), reverse=True)
+            if reports:
+                with open(reports[0]) as f:
+                    data = json.load(f)
+                for finding in data.get("findings", []):
+                    url = finding.get("url", "")
+                    if url:
+                        urls.add(url)
+        except Exception:
+            pass
+        return urls
+
     async def _deep_research_phase(self, report: WeeklyResearchReport):
         """
-        Use Claude Code SDK (Max subscription) for deep research on high-priority findings.
+        Use Claude Code SDK (Max subscription) for deep research.
 
-        This phase:
-        1. Takes the top high-priority findings from web search
-        2. Asks Claude Code to do deep web research on each
-        3. Specifically looks for actionable improvements to integrate into ATLAS
+        Generates questions dynamically from high-priority web findings
+        rather than asking the same static questions every week.
         """
         try:
             from atlas.tools.claude_code_sdk import ClaudeCodeSDK
@@ -210,32 +274,29 @@ class WeeklyResearchScout:
 
         sdk = ClaudeCodeSDK(model="claude-sonnet-4-6", timeout=120.0, max_turns=5)
 
-        # Deep research on curated topics that map to ATLAS improvements
-        deep_topics = [
-            (
-                "What are the latest Claude Code SDK features, hooks, and MCP integrations "
-                "released in the last 2 weeks? Include version numbers and changelog links.",
-                "claude_ecosystem",
-            ),
-            (
-                "What new agentic AI frameworks, self-improving agent architectures, or "
-                "autonomous AGI systems have been released or updated recently? "
-                "Focus on OpenClaw, MetaClaw, and similar projects.",
-                "openclaw_agentic",
-            ),
-            (
-                "What are the latest updates to Qwen models, Unsloth training framework, "
-                "and GGUF quantization? Any new techniques for LoRA/QLoRA fine-tuning?",
-                "models_training",
-            ),
-            (
-                "What new MCP servers, AI developer tools, or LLM observability tools "
-                "have been released recently that could improve an autonomous agent system?",
-                "tools_infra",
-            ),
-        ]
+        # Build deep research questions from ACTUAL findings, not static topics
+        deep_topics = []
 
-        for topic_query, category in deep_topics:
+        # 1. Follow up on top 3 high-priority findings with deeper research
+        for f in report.high_priority[:3]:
+            deep_topics.append((
+                f"Deep dive: {f.title}. What specifically changed, what are the technical details, "
+                f"and how could an autonomous AI agent system using {f.tags[0] if f.tags else 'this technology'} "
+                f"benefit? Include code examples, migration steps, or integration patterns if applicable.",
+                f.tags[0] if f.tags else "general",
+            ))
+
+        # 2. Always check for breaking changes in our core stack
+        now = datetime.now(timezone.utc)
+        date_range = now.strftime("last 7 days of %B %Y")
+        deep_topics.append((
+            f"What breaking changes, deprecations, or critical updates were released in the "
+            f"{date_range} for: Claude API/SDK, OpenAI API, Qwen models, Unsloth, Ollama, "
+            f"or promptfoo? Only include things that would require code changes.",
+            "breaking_changes",
+        ))
+
+        for topic_query, category in deep_topics[:4]:  # Cap at 4
             try:
                 result = await sdk.research(topic_query, deep=False)
                 if result.success and result.content:
@@ -245,7 +306,7 @@ class WeeklyResearchScout:
                         title=f"[Deep] {category.replace('_', ' ').title()}",
                         summary=result.content[:500],
                         relevance="high",
-                        action="Review for integration into ATLAS",
+                        action="Analyzed by Claude — see summary for specific integration steps",
                         tags=[category, "deep_research"],
                     )
                     report.findings.append(finding)
@@ -257,7 +318,7 @@ class WeeklyResearchScout:
                 report.errors.append(f"Deep research '{category}': {e}")
                 logger.warning(f"Deep research failed for {category}: {e}")
 
-            await asyncio.sleep(2.0)  # Rate limit between Claude Code calls
+            await asyncio.sleep(2.0)
 
     async def _search_topic(
         self, search, query: str, category: str
