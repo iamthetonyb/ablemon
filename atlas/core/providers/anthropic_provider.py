@@ -60,6 +60,7 @@ class AnthropicProvider(LLMProvider):
         use_premium: bool = False,
         extended_thinking: bool = False,
         thinking_budget_tokens: int = 16000,
+        cache_enabled: bool = True,
     ):
         model = model or (self.PREMIUM_MODEL if use_premium else self.DEFAULT_MODEL)
         pricing = self.MODEL_PRICING.get(model, {"input": 5.00, "output": 25.00})
@@ -76,6 +77,7 @@ class AnthropicProvider(LLMProvider):
         self._session: Optional[aiohttp.ClientSession] = None
         self.extended_thinking = extended_thinking
         self.thinking_budget_tokens = thinking_budget_tokens
+        self._cache_enabled = cache_enabled
 
     @property
     def name(self) -> str:
@@ -87,6 +89,16 @@ class AnthropicProvider(LLMProvider):
                 timeout=aiohttp.ClientTimeout(total=self.config.timeout)
             )
         return self._session
+
+    def _build_system_blocks(self, system: str) -> list:
+        """Convert system prompt to cacheable content blocks.
+
+        Marks the system text with cache_control so Anthropic caches it
+        across requests.  The 'ephemeral' type keeps the cache for ~5 min,
+        saving up to 90% on repeated system prompts (e.g. SOUL.md + skill
+        context sent on every T4 call).
+        """
+        return [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
 
     def _convert_messages(self, messages: List[Message]) -> tuple:
         """
@@ -164,9 +176,13 @@ class AnthropicProvider(LLMProvider):
             "Content-Type": "application/json"
         }
 
-        # Extended thinking requires beta header
+        beta_features = []
         if self.extended_thinking:
-            headers["anthropic-beta"] = "interleaved-thinking-2025-05-14"
+            beta_features.append("interleaved-thinking-2025-05-14")
+        if self._cache_enabled:
+            beta_features.append("prompt-caching-2024-07-31")
+        if beta_features:
+            headers["anthropic-beta"] = ",".join(beta_features)
 
         system, converted_messages = self._convert_messages(messages)
 
@@ -187,10 +203,18 @@ class AnthropicProvider(LLMProvider):
             payload["temperature"] = temperature
 
         if system:
-            payload["system"] = system
+            if self._cache_enabled:
+                payload["system"] = self._build_system_blocks(system)
+            else:
+                payload["system"] = system
 
         if tools:
-            payload["tools"] = self._convert_tools(tools)
+            converted_tools = self._convert_tools(tools)
+            # Sort tools by name for deterministic ordering (cache stability)
+            converted_tools.sort(key=lambda t: t.get("name", ""))
+            if self._cache_enabled and converted_tools:
+                converted_tools[-1]["cache_control"] = {"type": "ephemeral"}
+            payload["tools"] = converted_tools
             if tool_choice:
                 if tool_choice == "auto":
                     payload["tool_choice"] = {"type": "auto"}
@@ -254,6 +278,24 @@ class AnthropicProvider(LLMProvider):
                 input_tokens = usage.get("input_tokens", 0)
                 output_tokens = usage.get("output_tokens", 0)
 
+                cache_creation_tokens = usage.get("cache_creation_input_tokens", 0)
+                cache_read_tokens = usage.get("cache_read_input_tokens", 0)
+
+                if cache_read_tokens:
+                    logger.info(
+                        f"Prompt cache HIT: {cache_read_tokens} tokens read from cache"
+                    )
+                elif cache_creation_tokens:
+                    logger.info(
+                        f"Prompt cache MISS: {cache_creation_tokens} tokens written to cache"
+                    )
+
+                # Store cache stats in raw_response for interaction logger
+                data["_cache_stats"] = {
+                    "cache_creation_input_tokens": cache_creation_tokens,
+                    "cache_read_input_tokens": cache_read_tokens,
+                }
+
                 result = CompletionResult(
                     content=content_text,
                     finish_reason=data.get("stop_reason", "end_turn"),
@@ -294,6 +336,9 @@ class AnthropicProvider(LLMProvider):
             "Content-Type": "application/json"
         }
 
+        if self._cache_enabled:
+            headers["anthropic-beta"] = "prompt-caching-2024-07-31"
+
         system, converted_messages = self._convert_messages(messages)
 
         payload = {
@@ -305,7 +350,10 @@ class AnthropicProvider(LLMProvider):
         }
 
         if system:
-            payload["system"] = system
+            if self._cache_enabled:
+                payload["system"] = self._build_system_blocks(system)
+            else:
+                payload["system"] = system
 
         try:
             async with session.post(
