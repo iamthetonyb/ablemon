@@ -44,6 +44,7 @@ from tools.vercel.client import VercelClient
 from scheduler.cron import CronScheduler, register_default_jobs
 from core.gateway.initiative import InitiativeEngine
 from memory.hybrid_memory import HybridMemory, MemoryType
+from core.session.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -582,6 +583,16 @@ class ATLASGateway:
         except Exception as e:
             logger.warning(f"InteractionLogger failed to init: {e}")
             self.interaction_logger = None
+
+        # Session state manager (centralized conversation tracking)
+        try:
+            self.session_mgr = SessionManager(
+                db_path=str(_PROJECT_ROOT / "data" / "sessions.db"),
+            )
+            logger.info("SessionManager initialized")
+        except Exception as e:
+            logger.warning(f"SessionManager failed to init: {e}")
+            self.session_mgr = None
 
         # Pre-build tier-specific chains for scored routing
         self.tier_chains = {}
@@ -1152,6 +1163,20 @@ class ATLASGateway:
                         )
                     except Exception as log_e:
                         logger.warning(f"Failed to update interaction log: {log_e}")
+
+                # ── Update session state ──
+                if self.session_mgr:
+                    try:
+                        self.session_mgr.update(
+                            conversation_id=user_id,
+                            complexity_score=scoring_result.score if scoring_result else None,
+                            input_tokens=_usage.input_tokens if _usage else 0,
+                            output_tokens=_usage.output_tokens if _usage else 0,
+                            cost_usd=result.cost if hasattr(result, 'cost') and result.cost else 0.0,
+                            metadata_patch={"channel": "telegram" if update else "api", "client_id": client_id} if loop_iteration == 0 else None,
+                        )
+                    except Exception as sess_e:
+                        logger.warning(f"Session update failed: {sess_e}")
 
                 # ── Append model identifier tag ──
                 _raw_model = result.model if hasattr(result, 'model') and result.model else ""
