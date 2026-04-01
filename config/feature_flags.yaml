@@ -1,0 +1,34 @@
+version: 1
+flags:
+  dream_system:
+    enabled: true
+    description: "Memory consolidation dream cycle (nightly at 4am)"
+
+  prompt_caching:
+    enabled: true
+    description: "Anthropic prompt caching for T4 calls — saves ~90% on system prompt tokens"
+
+  phased_swarm:
+    enabled: false
+    rollout_pct: 50
+    description: "4-phase coordinator protocol for complex swarm tasks"
+
+  atlas_cli:
+    enabled: true
+    description: "ATLAS native CLI agent (replacement for Claude Code)"
+
+  research_novel_sources:
+    enabled: false
+    description: "HackerNews, Reddit, GitHub trending in research scout"
+
+  code_proposer:
+    enabled: false
+    description: "Evolution daemon auto-proposes code changes via PRs"
+
+  autopilot:
+    enabled: false
+    description: "Autonomous task runner — picks up objectives, generates training data"
+
+  session_replay:
+    enabled: false
+    description: "Replay past sessions through different models for distillation"
