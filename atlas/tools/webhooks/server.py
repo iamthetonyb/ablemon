@@ -103,6 +103,7 @@ class WebhookServer:
             "telegram": [],
             "custom": [],
         }
+        self._production_mode = os.environ.get("ATLAS_ENVIRONMENT", "").lower() == "production"
         self.secrets = {
             "github": os.environ.get("GITHUB_WEBHOOK_SECRET", ""),
         }
@@ -111,11 +112,18 @@ class WebhookServer:
     def _verify_bearer_token(self, request) -> bool:
         """Check Authorization: Bearer <token> header against ATLAS_SERVICE_TOKEN."""
         if not self._service_token:
-            return True  # No token configured = open (dev mode)
+            # No token configured: block in production, allow in dev
+            return not self._production_mode
         auth = request.headers.get("Authorization", "")
         if auth.startswith("Bearer "):
             return hmac.compare_digest(auth[7:], self._service_token)
         return False
+
+    def _require_auth(self, request) -> Optional["web.Response"]:
+        """Return a 401 response if bearer token check fails, else None."""
+        if not self._verify_bearer_token(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        return None
 
     def on(self, source: str, handler: Callable):
         """Register a handler for webhook events from a source"""
@@ -145,9 +153,13 @@ class WebhookServer:
         signature = request.headers.get("X-Hub-Signature-256", "")
         event_type = request.headers.get("X-GitHub-Event", "unknown")
 
+        if not self.secrets["github"] and self._production_mode:
+            logger.error("GitHub webhook secret not configured in production mode")
+            return web.Response(status=503, text="Webhook secret not configured")
+
         verified = verify_github_signature(body, signature, self.secrets["github"])
         if self.secrets["github"] and not verified:
-            logger.warning(f"GitHub webhook signature verification failed")
+            logger.warning("GitHub webhook signature verification failed")
             return web.Response(status=401, text="Signature verification failed")
 
         try:
@@ -194,6 +206,10 @@ class WebhookServer:
 
         # Verify signature if ATLAS_WEBHOOK_SECRET is configured
         verified = False
+        if not self._custom_webhook_secret and self._production_mode:
+            logger.error("Custom webhook secret not configured in production mode")
+            return web.json_response({"error": "Webhook secret not configured"}, status=503)
+
         if self._custom_webhook_secret:
             sig = request.headers.get("X-Atlas-Signature", "")
             expected = "sha256=" + hmac.new(
@@ -232,8 +248,8 @@ class WebhookServer:
 
         Requires Bearer token when ATLAS_SERVICE_TOKEN is set.
         """
-        if not self._verify_bearer_token(request):
-            return web.json_response({"error": "unauthorized"}, status=401)
+        if (denied := self._require_auth(request)):
+            return denied
         atlas_home = Path.home() / ".atlas"
         status = {
             "system": "ATLAS",
@@ -322,6 +338,8 @@ class WebhookServer:
 
     async def _handle_metrics(self, request) -> "web.Response":
         """GET /metrics — JSON summary of all metrics."""
+        if (denied := self._require_auth(request)):
+            return denied
         hours = self._get_hours(request)
         since = self._since_iso(hours)
 
@@ -365,6 +383,8 @@ class WebhookServer:
 
     async def _handle_metrics_routing(self, request) -> "web.Response":
         """GET /metrics/routing — Per-tier breakdown."""
+        if (denied := self._require_auth(request)):
+            return denied
         hours = self._get_hours(request)
         since = self._since_iso(hours)
 
@@ -402,6 +422,8 @@ class WebhookServer:
 
     async def _handle_metrics_evolution(self, request) -> "web.Response":
         """GET /metrics/evolution — Evolution daemon history."""
+        if (denied := self._require_auth(request)):
+            return denied
         hours = self._get_hours(request)
 
         # Read versioned weight backups from data/evolution_cycles/
@@ -454,6 +476,8 @@ class WebhookServer:
 
     async def _handle_metrics_budget(self, request) -> "web.Response":
         """GET /metrics/budget — Spend vs budget caps per tier."""
+        if (denied := self._require_auth(request)):
+            return denied
         hours = self._get_hours(request)
         since = self._since_iso(hours)
 
@@ -516,6 +540,8 @@ class WebhookServer:
 
     async def _handle_metrics_skills(self, request) -> "web.Response":
         """GET /metrics/skills — Skill usage and effectiveness."""
+        if (denied := self._require_auth(request)):
+            return denied
         hours = self._get_hours(request)
         since = self._since_iso(hours)
 
@@ -553,6 +579,8 @@ class WebhookServer:
 
     async def _handle_metrics_corpus(self, request) -> "web.Response":
         """GET /metrics/corpus — Distillation corpus stats."""
+        if (denied := self._require_auth(request)):
+            return denied
         # Scan data/ for distillation JSONL files
         corpus_files = []
         total_pairs = 0
@@ -586,6 +614,8 @@ class WebhookServer:
 
     async def _handle_metrics_tenants(self, request) -> "web.Response":
         """GET /metrics/tenants — All tenants overview."""
+        if (denied := self._require_auth(request)):
+            return denied
         hours = self._get_hours(request)
         since = self._since_iso(hours)
 
@@ -610,6 +640,8 @@ class WebhookServer:
 
     async def _handle_tenant_dashboard(self, request) -> "web.Response":
         """GET /tenant/{tenant_id}/dashboard — Per-tenant dashboard."""
+        if (denied := self._require_auth(request)):
+            return denied
         tenant_id = request.match_info.get("tenant_id", "")
         hours = self._get_hours(request)
         since = self._since_iso(hours)
