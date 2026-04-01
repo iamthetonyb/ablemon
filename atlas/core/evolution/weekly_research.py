@@ -12,8 +12,10 @@ import asyncio
 import json
 import logging
 import os
+import urllib.request
+import urllib.parse
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -139,6 +141,9 @@ class WeeklyResearchScout:
 
             await asyncio.sleep(1.0)
 
+        # Phase 1b: Novel sources (HN, Reddit, GitHub trending)
+        await self._search_novel_sources(report, previous_urls, mode)
+
         # Phase 2 (weekly only): Deep analysis via Claude Code SDK
         if mode == "weekly":
             await self._deep_research_phase(report)
@@ -159,6 +164,74 @@ class WeeklyResearchScout:
         )
 
         return report
+
+    async def _search_novel_sources(
+        self, report: WeeklyResearchReport, previous_urls: set, mode: str
+    ):
+        """
+        Search HackerNews, Reddit, and GitHub trending for relevant findings.
+
+        Runs in parallel where possible. Adds results to the report with dedup.
+        """
+        # HN queries — use top keywords from our research topics
+        hn_queries = [
+            "Claude API", "Qwen model", "LLM agent",
+            "Ollama", "fine-tuning", "prompt engineering",
+        ]
+        # Nightly: fewer queries
+        if mode == "nightly":
+            hn_queries = hn_queries[:2]
+
+        # Reddit subreddits to search
+        reddit_searches = [
+            ("LocalLLaMA", "Qwen OR Unsloth OR GGUF OR fine-tuning"),
+            ("MachineLearning", "agent OR autonomous AI OR distillation"),
+        ]
+        if mode == "nightly":
+            reddit_searches = reddit_searches[:1]
+
+        all_novel_findings: List[ResearchFinding] = []
+
+        # Run novel source searches
+        for query in hn_queries:
+            try:
+                findings = await self._search_hackernews(query)
+                all_novel_findings.extend(findings)
+                report.search_queries_run += 1
+            except Exception as e:
+                report.errors.append(f"HN '{query}': {e}")
+            await asyncio.sleep(0.5)
+
+        for subreddit, query in reddit_searches:
+            try:
+                findings = await self._search_reddit(subreddit, query)
+                all_novel_findings.extend(findings)
+                report.search_queries_run += 1
+            except Exception as e:
+                report.errors.append(f"Reddit r/{subreddit}: {e}")
+            await asyncio.sleep(0.5)
+
+        # GitHub trending (always run, cheap single call)
+        try:
+            findings = await self._search_github_trending()
+            all_novel_findings.extend(findings)
+            report.search_queries_run += 1
+        except Exception as e:
+            report.errors.append(f"GitHub trending: {e}")
+
+        # Dedup and add to report
+        for f in all_novel_findings:
+            if f.url and f.url in previous_urls:
+                continue
+            report.findings.append(f)
+            if f.relevance == "high":
+                report.high_priority.append(f)
+
+        if all_novel_findings:
+            logger.info(
+                f"Novel sources: {len(all_novel_findings)} findings "
+                f"(HN + Reddit + GitHub)"
+            )
 
     def _generate_queries(
         self, mode: str, categories: List[str] = None
@@ -537,6 +610,166 @@ RULES:
         except Exception as e:
             logger.warning(f"M2.7 research analysis failed: {e}")
 
+    # ── Novel research sources (HN, Reddit, GitHub trending) ─────
+
+    async def _search_hackernews(self, query: str) -> List[ResearchFinding]:
+        """
+        Search HackerNews via Algolia API, filtered to last 24h.
+
+        API docs: https://hn.algolia.com/api
+        """
+        findings = []
+        try:
+            cutoff = int((datetime.now(timezone.utc) - timedelta(hours=24)).timestamp())
+            params = urllib.parse.urlencode({
+                "query": query,
+                "tags": "story",
+                "numericFilters": f"created_at_i>{cutoff}",
+                "hitsPerPage": 5,
+            })
+            url = f"https://hn.algolia.com/api/v1/search_by_date?{params}"
+
+            req = urllib.request.Request(url, headers={"User-Agent": "ATLAS/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+
+            for hit in data.get("hits", []):
+                title = hit.get("title", "")
+                if not title:
+                    continue
+
+                points = hit.get("points", 0) or 0
+                hn_url = f"https://news.ycombinator.com/item?id={hit.get('objectID', '')}"
+                story_url = hit.get("url", hn_url)
+
+                relevance = self._assess_relevance(title, title, "hackernews")
+                if relevance == "low" and points < 50:
+                    continue
+
+                findings.append(ResearchFinding(
+                    topic=query,
+                    source="hackernews",
+                    title=title,
+                    summary=f"Points: {points} | {story_url}",
+                    url=story_url,
+                    relevance=relevance,
+                    action=self._suggest_action(title, title, "hackernews"),
+                    tags=["hackernews"],
+                ))
+
+        except Exception as e:
+            logger.debug(f"HackerNews search failed for '{query}': {e}")
+
+        return findings
+
+    async def _search_reddit(
+        self, subreddit: str, query: str
+    ) -> List[ResearchFinding]:
+        """
+        Search Reddit via public JSON API.
+
+        Uses .json endpoint with sort=new to get recent posts.
+        """
+        findings = []
+        try:
+            encoded_q = urllib.parse.quote(query)
+            url = (
+                f"https://www.reddit.com/r/{subreddit}/search.json"
+                f"?q={encoded_q}&sort=new&restrict_sr=on&t=week&limit=5"
+            )
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "ATLAS/1.0 (research bot)"},
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+
+            posts = data.get("data", {}).get("children", [])
+            for post_wrapper in posts:
+                post = post_wrapper.get("data", {})
+                title = post.get("title", "")
+                if not title:
+                    continue
+
+                score = post.get("score", 0) or 0
+                post_url = f"https://reddit.com{post.get('permalink', '')}"
+                selftext = (post.get("selftext", "") or "")[:200]
+
+                relevance = self._assess_relevance(title, selftext, subreddit)
+                if relevance == "low" and score < 20:
+                    continue
+
+                findings.append(ResearchFinding(
+                    topic=query,
+                    source="reddit",
+                    title=title,
+                    summary=selftext if selftext else f"Score: {score}",
+                    url=post_url,
+                    relevance=relevance,
+                    action=self._suggest_action(title, selftext, subreddit),
+                    tags=["reddit", subreddit],
+                ))
+
+        except Exception as e:
+            logger.debug(f"Reddit search failed for r/{subreddit} '{query}': {e}")
+
+        return findings
+
+    async def _search_github_trending(self) -> List[ResearchFinding]:
+        """
+        Find trending GitHub repos created recently with high stars.
+
+        Uses the GitHub search API to find repos created yesterday
+        sorted by stars.
+        """
+        findings = []
+        try:
+            yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+            params = urllib.parse.urlencode({
+                "q": f"created:>{yesterday} stars:>10",
+                "sort": "stars",
+                "order": "desc",
+                "per_page": 10,
+            })
+            url = f"https://api.github.com/search/repositories?{params}"
+
+            headers = {"User-Agent": "ATLAS/1.0", "Accept": "application/vnd.github.v3+json"}
+            # Use token if available for higher rate limits
+            gh_token = os.environ.get("GITHUB_TOKEN", "")
+            if gh_token:
+                headers["Authorization"] = f"token {gh_token}"
+
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+
+            for repo in data.get("items", [])[:10]:
+                name = repo.get("full_name", "")
+                description = repo.get("description", "") or ""
+                stars = repo.get("stargazers_count", 0)
+                repo_url = repo.get("html_url", "")
+                language = repo.get("language", "") or ""
+
+                relevance = self._assess_relevance(name, description, "github")
+                if relevance == "low" and stars < 100:
+                    continue
+
+                findings.append(ResearchFinding(
+                    topic="github_trending",
+                    source="github",
+                    title=f"{name} ({language}, {stars} stars)",
+                    summary=description[:300],
+                    url=repo_url,
+                    relevance=relevance,
+                    action=self._suggest_action(name, description, "github"),
+                    tags=["github", "trending"],
+                ))
+
+        except Exception as e:
+            logger.debug(f"GitHub trending search failed: {e}")
+
+        return findings
+
     def _detect_source(self, url: str) -> str:
         """Detect source platform from URL."""
         url_lower = url.lower()
@@ -550,6 +783,8 @@ RULES:
             return "huggingface"
         if "arxiv.org" in url_lower:
             return "arxiv"
+        if "news.ycombinator.com" in url_lower:
+            return "hackernews"
         return "web"
 
     def _save_report(self, report: WeeklyResearchReport):
@@ -629,7 +864,7 @@ RULES:
                 source_emoji = {
                     "twitter": "🐦", "reddit": "📱", "github": "🐙",
                     "huggingface": "🤗", "arxiv": "📄", "web": "🌐",
-                    "claude_code": "🤖",
+                    "claude_code": "🤖", "hackernews": "📰",
                 }.get(f.source, "🌐")
                 lines.append(f"{source_emoji} {f.title[:70]}")
                 # Show the analyzed action, not the generic one

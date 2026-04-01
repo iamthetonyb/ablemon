@@ -259,6 +259,9 @@ class EvolutionDaemon:
             except Exception as e:
                 logger.debug(f"[EVOLUTION] Eval-driven auto-improve skipped: {e}")
 
+            # ── Step 7: Research pipeline + code proposer ────
+            await self._run_research_pipeline()
+
         except Exception as e:
             result.error = str(e)
             logger.error(f"Evolution cycle failed: {e}", exc_info=True)
@@ -304,6 +307,57 @@ class EvolutionDaemon:
     def stop(self):
         """Signal the daemon to stop after current cycle."""
         self._running = False
+
+    async def _run_research_pipeline(self):
+        """
+        Run research action pipeline + code proposer on the latest report.
+
+        Reads the most recent research report, classifies action items,
+        and opens PRs for low-risk config changes.
+        """
+        try:
+            from .research_pipeline import ResearchActionPipeline
+            from .code_proposer import CodeProposer
+
+            # Find the latest research report
+            report_dir = Path("data/research_reports")
+            if not report_dir.exists():
+                return
+
+            reports = sorted(report_dir.glob("research_*.json"), reverse=True)
+            if not reports:
+                return
+
+            # Process through the pipeline
+            pipeline = ResearchActionPipeline()
+            pipeline_result = await pipeline.process(
+                str(reports[0]),
+                auto_apply=False,  # Pipeline classifies only; proposer handles PRs
+            )
+
+            if not pipeline_result.config_changes:
+                return
+
+            # Feed low-risk config changes to the code proposer
+            low_risk = [
+                c for c in pipeline_result.config_changes
+                if c.auto_applicable
+            ]
+
+            if low_risk and self.config.auto_deploy:
+                proposer = CodeProposer(dry_run=not self.config.auto_deploy)
+                proposer_result = await proposer.propose_batch(low_risk)
+
+                if proposer_result.prs_opened > 0:
+                    logger.info(
+                        f"[EVOLUTION] Code proposer: {proposer_result.prs_opened} PRs opened "
+                        f"from research pipeline"
+                    )
+
+        except ImportError as e:
+            logger.debug(f"[EVOLUTION] Research pipeline not available: {e}")
+        except Exception as e:
+            logger.debug(f"[EVOLUTION] Research pipeline skipped: {e}")
 
     def _load_current_weights(self) -> Dict[str, Any]:
         """Load current scorer weights from disk."""

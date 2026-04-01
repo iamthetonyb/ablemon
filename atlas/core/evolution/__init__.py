@@ -17,6 +17,8 @@ from .validator import ChangeValidator, ValidationResult
 from .deployer import ChangeDeployer, DeployResult
 from .self_scheduler import SelfScheduler, ScheduledAction, SchedulerCycleReport
 from .morning_report import MorningReporter, MorningReportData
+from .research_pipeline import ResearchActionPipeline, ClassifiedAction, PipelineResult
+from .code_proposer import CodeProposer, Proposal, ProposerCycleResult
 
 __all__ = [
     "EvolutionDaemon", "EvolutionConfig", "CycleResult",
@@ -27,4 +29,6 @@ __all__ = [
     "ChangeDeployer", "DeployResult",
     "SelfScheduler", "ScheduledAction", "SchedulerCycleReport",
     "MorningReporter", "MorningReportData",
+    "ResearchActionPipeline", "ClassifiedAction", "PipelineResult",
+    "CodeProposer", "Proposal", "ProposerCycleResult",
 ]
