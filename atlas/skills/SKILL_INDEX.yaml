@@ -42,6 +42,9 @@ skills:
     type: "behavioral"
     trust_level: "L1_OBSERVE"
     requires_approval: false
+    risk_level: "LOW"
+    read_only: true
+    concurrent_safe: true
     created: "2026-02-21"
     last_used: null
     use_count: 0
@@ -62,6 +65,9 @@ skills:
     type: "behavioral"
     trust_level: "L1_OBSERVE"
     requires_approval: false
+    risk_level: "LOW"
+    read_only: true
+    concurrent_safe: true
     created: "2026-03-10"
     use_count: 0
 
@@ -74,6 +80,9 @@ skills:
     type: "behavioral"
     trust_level: "L1_OBSERVE"
     requires_approval: false
+    risk_level: "LOW"
+    read_only: true
+    concurrent_safe: true
     created: "2026-02-03"
     use_count: 0
 
@@ -86,6 +95,9 @@ skills:
     type: "behavioral"
     trust_level: "L1_OBSERVE"
     requires_approval: false
+    risk_level: "LOW"
+    read_only: true
+    concurrent_safe: true
     created: "2026-02-03"
     use_count: 0
 
@@ -107,6 +119,9 @@ skills:
     type: "tool"
     trust_level: "L2_SUGGEST"
     requires_approval: true
+    risk_level: "MEDIUM"
+    read_only: false
+    concurrent_safe: true
     created: "2026-02-21"
     last_used: null
     use_count: 0
@@ -131,6 +146,9 @@ skills:
     trust_level: "L1_OBSERVE"
     tools_used: [web_search, web_fetch, read, write]
     requires_approval: false
+    risk_level: "LOW"
+    read_only: true
+    concurrent_safe: true
     created: "2026-02-03"
     use_count: 0
 
@@ -143,6 +161,9 @@ skills:
     type: "behavioral"
     trust_level: "L1_OBSERVE"
     requires_approval: false
+    risk_level: "LOW"
+    read_only: true
+    concurrent_safe: true
     created: "2026-02-03"
     use_count: 0
 
@@ -160,6 +181,9 @@ skills:
     trust_level: "L2_SUGGEST"
     tools_used: [read, bash]
     requires_approval: false
+    risk_level: "LOW"
+    read_only: true
+    concurrent_safe: true
     created: "2026-02-03"
     use_count: 0
 
@@ -173,6 +197,9 @@ skills:
     trust_level: "L3_ACT"
     tools_used: [bash]
     requires_approval: true
+    risk_level: "MEDIUM"
+    read_only: false
+    concurrent_safe: false
     created: "2026-02-03"
     use_count: 0
 
@@ -190,6 +217,9 @@ skills:
     type: "behavioral"
     trust_level: "L2_SUGGEST"
     requires_approval: false
+    risk_level: "MEDIUM"
+    read_only: false
+    concurrent_safe: true
     created: "2026-03-10"
     use_count: 0
 
@@ -213,6 +243,9 @@ skills:
     type: "behavioral"
     trust_level: "L1_OBSERVE"
     requires_approval: false
+    risk_level: "LOW"
+    read_only: true
+    concurrent_safe: true
     created: "2026-03-10"
     use_count: 0
 
@@ -227,6 +260,9 @@ skills:
     type: "behavioral"
     trust_level: "L1_OBSERVE"
     requires_approval: false
+    risk_level: "LOW"
+    read_only: true
+    concurrent_safe: true
     created: "2026-03-10"
     use_count: 0
 
@@ -250,6 +286,9 @@ skills:
     type: "behavioral"
     trust_level: "L2_SUGGEST"
     requires_approval: false
+    risk_level: "MEDIUM"
+    read_only: true
+    concurrent_safe: true
     created: "2026-03-10"
     use_count: 0
 
@@ -264,6 +303,9 @@ skills:
     type: "hybrid"
     trust_level: "L3_ACT"
     requires_approval: true
+    risk_level: "HIGH"
+    read_only: false
+    concurrent_safe: false
     created: "2026-03-10"
     use_count: 0
 
@@ -283,6 +325,9 @@ skills:
     type: "behavioral"
     trust_level: "L2_SUGGEST"
     requires_approval: false
+    risk_level: "MEDIUM"
+    read_only: false
+    concurrent_safe: false
     created: "2026-03-10"
     use_count: 0
 
@@ -298,6 +343,9 @@ skills:
     type: "behavioral"
     trust_level: "L2_SUGGEST"
     requires_approval: false
+    risk_level: "MEDIUM"
+    read_only: false
+    concurrent_safe: true
     created: "2026-03-11"
     use_count: 0
 
@@ -315,6 +363,9 @@ skills:
     trust_level: "L3_ACT"
     tools_used: [read, write, bash]
     requires_approval: true
+    risk_level: "MEDIUM"
+    read_only: false
+    concurrent_safe: true
     created: "2026-02-03"
     use_count: 0
 
@@ -327,6 +378,9 @@ skills:
     type: "behavioral"
     trust_level: "L2_SUGGEST"
     requires_approval: false
+    risk_level: "LOW"
+    read_only: true
+    concurrent_safe: true
     created: "2026-02-03"
     use_count: 0
 
@@ -345,6 +399,9 @@ skills:
     trust_level: "L2_SUGGEST"
     tools_used: [read, bash]
     requires_approval: false
+    risk_level: "MEDIUM"
+    read_only: true
+    concurrent_safe: true
     created: "2026-02-03"
     use_count: 0
 
@@ -357,6 +414,9 @@ skills:
     type: "tool"
     trust_level: "L1_OBSERVE"
     requires_approval: false
+    risk_level: "LOW"
+    read_only: true
+    concurrent_safe: true
     created: "2026-02-03"
     use_count: 0
 
@@ -374,6 +434,9 @@ skills:
     trust_level: "L2_SUGGEST"
     tools_used: [read, write]
     requires_approval: false
+    risk_level: "MEDIUM"
+    read_only: false
+    concurrent_safe: false
     created: "2026-02-03"
     use_count: 0
 
@@ -385,6 +448,9 @@ skills:
     type: "behavioral"
     trust_level: "L2_SUGGEST"
     requires_approval: false
+    risk_level: "LOW"
+    read_only: true
+    concurrent_safe: true
     created: "2026-02-03"
     use_count: 0
 
@@ -405,6 +471,9 @@ skills:
     trust_level: "L3_ACT"
     tools_used: [bash, read, write]
     requires_approval: true
+    risk_level: "HIGH"
+    read_only: false
+    concurrent_safe: false
     scripts:
       init: "atlas/skills/scripts/init_skill.py"
       package: "atlas/skills/scripts/package_skill.py"
@@ -425,6 +494,9 @@ skills:
     trust_level: "L2_SUGGEST"
     tools_used: [bash, read]
     requires_approval: false
+    risk_level: "LOW"
+    read_only: true
+    concurrent_safe: true
     implementation: "atlas/skills/library/skill-tester/implement.py"
     created: "2026-03-05"
     use_count: 0
@@ -442,6 +514,9 @@ skills:
     trust_level: "L2_SUGGEST"
     tools_used: [bash]
     requires_approval: false
+    risk_level: "LOW"
+    read_only: true
+    concurrent_safe: true
     auto_schedule: "0 9 * * 1"
     implementation: "atlas/tools/skills_sh/client.py"
     created: "2026-02-22"
@@ -466,6 +541,9 @@ skills:
     trust_level: "L3_ACT"
     requires_approval: true
     approval_risk: "medium"
+    risk_level: "HIGH"
+    read_only: false
+    concurrent_safe: false
     created: "2026-02-22"
     use_count: 0
 
@@ -483,6 +561,9 @@ skills:
     trust_level: "L3_ACT"
     requires_approval: true
     approval_risk: "low"
+    risk_level: "HIGH"
+    read_only: false
+    concurrent_safe: false
     created: "2026-02-22"
     use_count: 0
 
@@ -499,6 +580,9 @@ skills:
     trust_level: "L3_ACT"
     requires_approval: true
     approval_risk: "low"
+    risk_level: "HIGH"
+    read_only: false
+    concurrent_safe: false
     created: "2026-02-22"
     use_count: 0
 

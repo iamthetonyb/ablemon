@@ -41,6 +41,11 @@ class SkillMetadata:
     trust_level_required: str = "L2_SUGGEST"  # Minimum trust level to execute
     requires_approval: bool = False
 
+    # Risk classification
+    risk_level: str = "MEDIUM"  # LOW, MEDIUM, HIGH
+    read_only: bool = False
+    concurrent_safe: bool = True
+
     def to_dict(self) -> Dict:
         return {
             "name": self.name,
@@ -59,6 +64,9 @@ class SkillMetadata:
             "required_tools": self.required_tools,
             "trust_level_required": self.trust_level_required,
             "requires_approval": self.requires_approval,
+            "risk_level": self.risk_level,
+            "read_only": self.read_only,
+            "concurrent_safe": self.concurrent_safe,
         }
 
     @classmethod
@@ -80,6 +88,9 @@ class SkillMetadata:
             required_tools=data.get("required_tools", []),
             trust_level_required=data.get("trust_level_required", "L2_SUGGEST"),
             requires_approval=data.get("requires_approval", False),
+            risk_level=data.get("risk_level", "MEDIUM"),
+            read_only=data.get("read_only", False),
+            concurrent_safe=data.get("concurrent_safe", True),
         )
 
 

@@ -119,8 +119,20 @@ class SkillExecutor:
                     error=f"Security check failed: {verdict.get('reason', 'Unknown')}"
                 )
 
+        # Risk-based behavior enforcement
+        risk = getattr(skill.metadata, 'risk_level', "MEDIUM")
+        if risk == "LOW":
+            pass  # Auto-execute, minimal logging
+        elif risk == "MEDIUM":
+            logger.info(f"Executing MEDIUM-risk skill: {skill_name}")
+        elif risk == "HIGH":
+            logger.warning(f"HIGH-risk skill invocation: {skill_name}")
+
         # Check if approval required
         needs_approval = require_approval if require_approval is not None else skill.metadata.requires_approval
+        # HIGH-risk skills always require approval
+        if risk == "HIGH":
+            needs_approval = True
 
         if needs_approval and self.approval_workflow:
             approval = await self.approval_workflow.request_approval(
