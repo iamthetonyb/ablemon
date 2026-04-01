@@ -19,6 +19,8 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
 
 @dataclass
 class ResearchFinding:
@@ -89,7 +91,9 @@ class WeeklyResearchScout:
     developments relevant to ATLAS's tech stack and capabilities.
     """
 
-    def __init__(self, report_dir: str = "data/research_reports"):
+    def __init__(self, report_dir: str = None):
+        if report_dir is None:
+            report_dir = str(_PROJECT_ROOT / "data" / "research_reports")
         self.report_dir = Path(report_dir)
         self.report_dir.mkdir(parents=True, exist_ok=True)
 
@@ -684,3 +688,21 @@ async def run_nightly_research(
     return await run_weekly_research(
         send_telegram=send_telegram, mode="nightly"
     )
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="ATLAS Research Scout")
+    parser.add_argument("--once", action="store_true", help="Run single nightly research cycle")
+    parser.add_argument("--weekly", action="store_true", help="Run full weekly research")
+    args = parser.parse_args()
+
+    if args.once or args.weekly:
+        scout = WeeklyResearchScout()
+        mode = "weekly" if args.weekly else "nightly"
+        report = asyncio.run(scout.run_research(mode=mode))
+        report_path = scout.report_dir / f"research_{datetime.now().strftime('%Y-%m-%d')}.json"
+        print(f"Report saved: {report_path}")
+    else:
+        parser.print_help()

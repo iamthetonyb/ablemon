@@ -121,6 +121,10 @@ jobs:
             rsync -av /opt/atlas/ABLE/config/ /home/atlas/.atlas/config/
             cp /opt/atlas/ABLE/ATLAS.md /home/atlas/.atlas/ATLAS.md
             cp /opt/atlas/ABLE/SOUL.md /home/atlas/.atlas/SOUL.md
+            echo "=== Ensuring data directories exist ==="
+            mkdir -p /home/atlas/.atlas/data/research_reports
+            mkdir -p /home/atlas/.atlas/data/evolution_cycles
+
             chown -R atlas:atlas /home/atlas/.atlas/
 
             echo "=== Updating systemd service ==="
