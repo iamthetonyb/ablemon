@@ -772,3 +772,41 @@ def register_default_jobs(
         timeout=600.0,
         max_retries=2,
     )
+
+    # ── Weekly security pentest — Monday 4am ──────────────────
+    async def run_weekly_pentest():
+        from atlas.security.self_pentest import run_pentest
+        from atlas.core.security.trust_gate import TrustGate
+
+        gate = TrustGate(min_trust_threshold=0.7)
+        report = await run_pentest(trust_gate=gate)
+
+        summary = (
+            f"\U0001f6e1\ufe0f *ATLAS Weekly Pentest*\n"
+            f"Tests: {report.total_tests} | "
+            f"Passed: {report.passed} | "
+            f"Failed: {report.failed}\n"
+            f"Pass rate: {report.pass_rate:.1f}%"
+        )
+        if report.failed > 0:
+            summary += "\n\n*Failures:*"
+            for r in report.results:
+                if not r.passed:
+                    summary += f"\n\u2022 `{r.test_id}` [{r.severity}]: {r.details[:100]}"
+
+        if send_telegram:
+            try:
+                await send_telegram(summary)
+            except Exception as e:
+                logger.warning(f"Pentest Telegram delivery failed: {e}")
+
+        return {"total": report.total_tests, "passed": report.passed, "failed": report.failed, "pass_rate": report.pass_rate}
+
+    scheduler.add_job(
+        "weekly-pentest",
+        "0 4 * * 1",  # Monday 4am
+        run_weekly_pentest,
+        description="Weekly automated pentest — tests trust gate, webhooks, secrets, endpoints",
+        timeout=120.0,
+        max_retries=1,
+    )
