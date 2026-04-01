@@ -239,6 +239,23 @@ class HybridMemory:
 
         return context
 
+    def get_since(self, since: datetime, memory_types: List[MemoryType] = None) -> List[MemoryEntry]:
+        """Get all memories created after *since*."""
+        return self.db.get_since(since, memory_types=memory_types)
+
+    def delete(self, entry_id: str) -> bool:
+        """Delete a memory entry from SQLite, vector store, and cache."""
+        deleted = self.db.delete(entry_id)
+        self.vectors.delete(entry_id)
+        self._cache.pop(entry_id, None)
+        return deleted
+
+    def count(self, memory_types: List[MemoryType] = None) -> int:
+        """Count total memories, optionally filtered by type."""
+        if memory_types:
+            return sum(self.db.count(memory_type=mt) for mt in memory_types)
+        return self.db.count()
+
     def _sync_to_v1_learnings(self, entry: MemoryEntry):
         """Sync learning to v1 ~/.atlas/memory/learnings.md"""
         if not self._v1_path:

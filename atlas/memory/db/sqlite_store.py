@@ -275,6 +275,34 @@ class SQLiteStore:
             relevance_score=row['relevance_score']
         )
 
+    def get_since(
+        self,
+        since: datetime,
+        memory_types: List = None,
+        limit: int = 10000,
+    ) -> List:
+        """Get all memory entries created after a given datetime."""
+        try:
+            return self._get_since_impl(since, memory_types, limit)
+        except sqlite3.DatabaseError as e:
+            if "malformed" in str(e) or "corrupt" in str(e) or "disk image" in str(e):
+                self._nuke_and_rebuild(e)
+                return []
+            raise
+
+    def _get_since_impl(self, since, memory_types, limit):
+        with self._raw_connection() as conn:
+            sql = "SELECT * FROM memories WHERE timestamp > ?"
+            params: list = [since.isoformat()]
+            if memory_types:
+                placeholders = ",".join("?" * len(memory_types))
+                sql += f" AND memory_type IN ({placeholders})"
+                params.extend([mt.value for mt in memory_types])
+            sql += " ORDER BY timestamp DESC LIMIT ?"
+            params.append(limit)
+            rows = conn.execute(sql, params).fetchall()
+            return [self._row_to_entry(row) for row in rows]
+
     def count(self, memory_type=None, client_id: Optional[str] = None) -> int:
         """Count memory entries"""
         with self._raw_connection() as conn:

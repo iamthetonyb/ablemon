@@ -665,6 +665,47 @@ def register_default_jobs(
         max_retries=2,
     )
 
+    # ── Nightly dream consolidation — 4am daily ─────────────────
+    async def run_dream_consolidation():
+        from atlas.core.agi.dream_system import DreamConsolidator
+
+        dreamer = DreamConsolidator(memory=memory)
+
+        should_run, reason = await dreamer.should_run()
+        if not should_run:
+            return {"skipped": True, "reason": reason}
+
+        result = await dreamer.run_cycle()
+
+        if send_telegram and result.insights_extracted > 0:
+            summary = (
+                f"Dream Cycle Complete\n"
+                f"Scanned: {result.memories_scanned}\n"
+                f"Merged: {result.duplicates_merged}\n"
+                f"Insights: {result.insights_extracted}\n"
+                f"Pruned: {result.memories_pruned}"
+            )
+            try:
+                await send_telegram(summary)
+            except Exception:
+                pass
+
+        return {
+            "scanned": result.memories_scanned,
+            "merged": result.duplicates_merged,
+            "insights": result.insights_extracted,
+            "pruned": result.memories_pruned,
+        }
+
+    scheduler.add_job(
+        "dream-consolidation",
+        "0 4 * * *",
+        run_dream_consolidation,
+        description="Dream cycle -- consolidate memories, extract insights, prune old entries",
+        timeout=180.0,
+        max_retries=1,
+    )
+
     # ── Nightly distillation harvest — 2am daily ────────────────
     async def run_nightly_distillation():
         from atlas.core.distillation.harvest_runner import run_harvest
