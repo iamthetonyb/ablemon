@@ -772,3 +772,42 @@ def register_default_jobs(
         timeout=600.0,
         max_retries=2,
     )
+
+    # ── AutoPilot — daily at 5am ─────────────────────────────────
+    async def run_autopilot():
+        from atlas.core.agi.autopilot import AutoPilot
+
+        pilot = AutoPilot()
+        result = await pilot.run_objectives(max_tasks=5)
+
+        prompting_result = await pilot.run_auto_prompting(
+            domain="coding", count=10,
+        )
+
+        eval_result = await pilot.run_self_eval()
+
+        return {
+            "objectives": {
+                "attempted": result.tasks_attempted,
+                "succeeded": result.tasks_succeeded,
+                "pairs": result.distillation_pairs,
+            },
+            "auto_prompting": {
+                "attempted": prompting_result.tasks_attempted,
+                "succeeded": prompting_result.tasks_succeeded,
+                "pairs": prompting_result.distillation_pairs,
+            },
+            "self_eval": {
+                "failures_processed": eval_result.tasks_attempted,
+                "prompts_added": eval_result.distillation_pairs,
+            },
+        }
+
+    scheduler.add_job(
+        "autopilot",
+        "0 5 * * *",
+        run_autopilot,
+        description="Daily autonomous task runner — objectives + auto-prompting + self-eval",
+        timeout=900.0,
+        max_retries=2,
+    )
