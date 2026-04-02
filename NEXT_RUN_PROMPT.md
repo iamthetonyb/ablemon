@@ -99,11 +99,30 @@ All four learning feedback loops are closed and tested:
 - Buddy setup is required in interactive first-run sessions, `/buddy setup` can refresh onboarding later, and non-interactive sessions auto-skip the first-run prompt.
 - Clean gateway teardown closes provider/web/studio sessions so `/exit` no longer leaks unclosed `aiohttp` sessions.
 - Header labels now spell out `Wins`, `Draws`, `Losses`, and `/status` shows the active provider roster instead of only a count.
-- 74 focused CLI/buddy tests (14 CLI chat + 60 buddy).
+- `/image <path>` sends images to vision chain; `/audio <path>` transcribes audio files and optionally forwards to ABLE.
+- 77 focused CLI/buddy tests (17 CLI chat + 60 buddy).
+
+**Gateway resilience**:
+- `ProviderChain.stream()` now checks circuit breaker before each provider and records success/failure — matches `complete()` resilience model.
+- Input length validation: messages over 100K chars rejected before pipeline runs.
+- Per-client rate limiting (token bucket + sliding window) wired into both `process_message()` and `stream_message()`. Default: 20/min, 200/hr.
+- Tool outputs wrapped with `[TOOL OUTPUT — name]...[END TOOL OUTPUT]` delimiters to prevent prompt injection via tool responses.
+
+**Lazy imports**:
+- `aiohttp` (~203ms), `telegram` (~98ms) deferred to first use. CLI startup no longer pays the Telegram/aiohttp import tax.
+- `from __future__ import annotations` + `TYPE_CHECKING` block keeps type hints valid without eager imports.
+- Gateway import dropped from ~600ms to ~300ms.
+
+**Multimodal**:
+- Telegram: photos, videos (thumbnail extraction), video notes, audio docs, image docs all handled.
+- CLI: `/image <path>` and `/audio <path>` commands.
+- Pluggable ASR: `VoiceTranscriber` supports ExternalASR (HTTP endpoint for Voxtral/Qwen3), OpenAI Whisper (legacy), LocalWhisper. Selected via `ABLE_ASR_PROVIDER` / `ABLE_ASR_ENDPOINT`.
+- Default ASR endpoint not yet configured — operator provides their preferred model endpoint.
 
 **Test suite**:
-- Full-suite pass: 602 tests, 0 deprecation warnings
+- Full-suite pass: 662 tests, 0 deprecation warnings
 - datetime.utcnow() replaced with datetime.now(timezone.utc) across all tenant modules
+- New tests: stream circuit breaker, input validation, rate limiting, provider chain fallback
 
 Plus: resource action tool, control-plane endpoint tests, legacy shim removal, CLI slash commands (/resources, /eval, /evolve, /buddy, /battle).
 

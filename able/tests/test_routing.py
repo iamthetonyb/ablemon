@@ -1186,6 +1186,110 @@ def run_phase4_tests():
 # Phase 5 tests moved to able/tests/test_metrics_endpoints.py
 
 
+# ═══════════════════════════════════════════════════════════════
+# PROVIDER CHAIN RESILIENCE TESTS (pytest)
+# ═══════════════════════════════════════════════════════════════
+
+import asyncio
+import pytest
+from able.core.providers.base import (
+    CircuitBreaker, ProviderChain, LLMProvider, ProviderConfig,
+    ProviderError, AllProvidersFailedError, Message, Role,
+    CompletionResult, UsageStats,
+)
+
+
+class _FakeProvider(LLMProvider):
+    """Minimal provider for chain/CB testing."""
+
+    def __init__(self, pname: str, *, fail_stream: bool = False, fail_complete: bool = False):
+        super().__init__(ProviderConfig(model="test"))
+        self._pname = pname
+        self._fail_stream = fail_stream
+        self._fail_complete = fail_complete
+
+    @property
+    def name(self):
+        return self._pname
+
+    async def complete(self, messages, **kw):
+        if self._fail_complete:
+            raise ProviderError(self._pname, "boom", retryable=False)
+        return CompletionResult(
+            content="ok", finish_reason="stop",
+            usage=UsageStats(), provider=self._pname, model="test",
+        )
+
+    async def stream(self, messages, **kw):
+        if self._fail_stream:
+            raise RuntimeError("stream failed")
+        yield "chunk1"
+        yield "chunk2"
+
+    def count_tokens(self, text):
+        return len(text.split())
+
+
+def test_circuit_breaker_trips_after_threshold():
+    cb = CircuitBreaker(failure_threshold=2, cooldown_seconds=300)
+    cb.record_failure("p1")
+    assert cb.is_available("p1") is True
+    cb.record_failure("p1")
+    assert cb.is_available("p1") is False
+
+
+def test_circuit_breaker_resets_on_success():
+    cb = CircuitBreaker(failure_threshold=2, cooldown_seconds=300)
+    cb.record_failure("p1")
+    cb.record_failure("p1")
+    assert cb.is_available("p1") is False
+    # Simulate cooldown by manually clearing (unit test, not waiting 300s)
+    cb._open_since.pop("p1", None)
+    cb.record_success("p1")
+    assert cb.is_available("p1") is True
+
+
+@pytest.mark.asyncio
+async def test_provider_chain_stream_uses_circuit_breaker():
+    """Stream should skip providers with open circuit breaker."""
+    broken = _FakeProvider("broken", fail_stream=True)
+    healthy = _FakeProvider("healthy")
+    chain = ProviderChain([broken, healthy])
+
+    # Trip the breaker for 'broken'
+    for _ in range(3):
+        chain.circuit_breaker.record_failure("broken")
+
+    chunks = [chunk async for chunk in chain.stream([Message(role=Role.USER, content="hi")])]
+    assert chunks == ["chunk1", "chunk2"]
+
+
+@pytest.mark.asyncio
+async def test_provider_chain_stream_falls_back_on_failure():
+    """If first provider stream fails, chain should try the next."""
+    failing = _FakeProvider("failing", fail_stream=True)
+    working = _FakeProvider("working")
+    chain = ProviderChain([failing, working])
+
+    chunks = [chunk async for chunk in chain.stream([Message(role=Role.USER, content="hi")])]
+    assert chunks == ["chunk1", "chunk2"]
+    # Failing provider should have recorded a failure
+    assert chain.circuit_breaker._failures.get("failing", 0) >= 1
+
+
+@pytest.mark.asyncio
+async def test_provider_chain_stream_records_success():
+    """Successful stream should record success on circuit breaker."""
+    provider = _FakeProvider("good")
+    chain = ProviderChain([provider])
+    # Add some failures first
+    chain.circuit_breaker.record_failure("good")
+
+    chunks = [chunk async for chunk in chain.stream([Message(role=Role.USER, content="hi")])]
+    assert chunks == ["chunk1", "chunk2"]
+    assert chain.circuit_breaker._failures.get("good", 0) == 0
+
+
 if __name__ == "__main__":
     p1 = run_phase1_tests()
     p2 = run_phase2_tests()

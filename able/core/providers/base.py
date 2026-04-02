@@ -486,21 +486,37 @@ class ProviderChain:
         prefer_provider: Optional[str] = None,
         **kwargs
     ) -> AsyncIterator[str]:
-        """Stream completion with fallback (uses first available provider)"""
+        """
+        Stream completion with fallback and circuit breaker.
+
+        Skips providers in OPEN state, records success/failure,
+        and falls through to next provider on error.
+        """
         providers = self._order_providers(prefer_provider)
+        errors: List[ProviderError] = []
 
         for provider in providers:
+            if not self.circuit_breaker.is_available(provider.name):
+                logger.debug(f"Skipping {provider.name} for stream (circuit breaker OPEN)")
+                continue
+
             try:
+                yielded = False
                 async for chunk in provider.stream(messages, **kwargs):
+                    yielded = True
                     yield chunk
-                return  # Success, don't try other providers
+                # Full stream succeeded
+                self.circuit_breaker.record_success(provider.name)
+                return
             except Exception as e:
+                self.circuit_breaker.record_failure(provider.name)
+                errors.append(ProviderError(provider.name, str(e), retryable=False))
                 logger.warning(f"Streaming failed for {provider.name}: {e}")
                 continue
 
-        raise AllProvidersFailedError([
-            ProviderError(p.name, "Stream failed", False) for p in providers
-        ])
+        raise AllProvidersFailedError(
+            errors or [ProviderError(p.name, "Stream failed", False) for p in providers]
+        )
 
     def _order_providers(self, prefer: Optional[str]) -> List[LLMProvider]:
         """Reorder providers to try preferred first"""

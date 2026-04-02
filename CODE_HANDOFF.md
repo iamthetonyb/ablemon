@@ -188,9 +188,10 @@ Training lanes:
 4. **Operator slash commands expanded**: `/resources`, `/eval`, `/evolve` added to `able chat`. README updated.
 5. **Test coverage**:
    - Buddy suite: 60 tests passing
-   - CLI chat: 14 tests passing
+   - CLI chat: 17 tests passing (added input validation, rate limiting, oversized message tests)
+   - Routing tests: 50 tests (added circuit breaker + stream fallback tests)
    - Focused new-surface suite: 23 tests across control plane, resource tools, learning loops, collect_results, and evolution cycle passing
-   - Full suite: 602 tests, 0 deprecation warnings (+ 45 routing tests separate)
+   - Full suite: 662 tests, 0 deprecation warnings
 6. **Legacy cleanup**: all 87 bare imports migrated, 5 root-level shims removed, pyproject.toml simplified.
 7. **Buddy system (system-wide)**: Pokemon + Tamagotchi gamified agent companion in `able/core/buddy/`:
    - 5 starter species (Blaze/Wave/Root/Spark/Phantom) with domain bonuses
@@ -311,20 +312,32 @@ Training lanes:
 21. **PhasedCoordinatorProtocol merged**: 4-phase agent execution for swarm (from `wu-g` branch).
 22. **AuthManager singleton** — PBKDF2 was re-computed 14 times during gateway init (~880ms). Cached as singleton, cutting gateway init from ~1.6s to ~0.8s.
 23. **BuddyNeedsCheck proactive bug fixed** — used nonexistent `NOTIFY` enum and `message=` field. Corrected to `ALERT` + `title`/`description`. Class is unused in production (buddy-walk cron covers the same role) but is now correct if ProactiveEngine is ever started.
+24. **Gateway resilience hardening**:
+    - **ProviderChain.stream() circuit breaker**: Stream path now checks `circuit_breaker.is_available()` before each provider, records success/failure — matches the complete() resilience model.
+    - **Input length validation**: `process_message()` and `stream_message()` reject messages over 100K chars before any pipeline step runs.
+    - **Per-client rate limiting**: `RateLimiter` (token bucket + sliding window) wired into both message paths. Default: 20/min, 200/hr. Configurable per client.
+    - **Tool output wrapping**: Tool results fed back to LLM are wrapped with `[TOOL OUTPUT — name]...[END TOOL OUTPUT]` delimiters to prevent prompt injection via tool responses.
+25. **Lazy imports for gateway.py**:
+    - `aiohttp` (~203ms), `telegram` (~98ms), and provider SDK classes deferred to first use via `_ensure_aiohttp()` / `_ensure_telegram()` helpers.
+    - CLI startup no longer pays the Telegram/aiohttp import tax. Gateway import dropped from ~600ms to ~300ms.
+    - Provider class imports moved into legacy `_init_providers_legacy()` (primary path uses registry which does its own lazy imports).
+    - `from __future__ import annotations` + `TYPE_CHECKING` block keeps type hints valid without eager imports.
+26. **Multimodal support across channels**:
+    - **CLI**: `/image <path>` sends images to vision chain with optional caption. `/audio <path>` transcribes audio files and optionally forwards to ABLE.
+    - **Telegram**: Photos, videos (via thumbnail extraction), video notes, audio documents, and image documents all handled. Filter updated to accept `VIDEO | VIDEO_NOTE | Document.ALL`.
+    - **Pluggable ASR**: `VoiceTranscriber` refactored with 3 backends: `ExternalASR` (HTTP endpoint for Voxtral/Qwen3/any frontier model), `OpenAIWhisper` (legacy), `LocalWhisper` (faster-whisper). Backend selected via `ABLE_ASR_PROVIDER` env var or auto-detected from `ABLE_ASR_ENDPOINT`.
+    - Default ASR endpoint not yet configured — operator provides their preferred model endpoint via `ABLE_ASR_ENDPOINT` + `ABLE_ASR_API_KEY`.
+27. **662 tests passing** (up from 654): stream circuit breaker, input validation, rate limiting, provider chain fallback tests added.
 
 ## Next-Run Objectives
 
 ### Priority 1: Studio dashboard buddy integration
 
-The buddy system works across all channels (CLI, Telegram, API, cron) but the Studio web dashboard doesn't display buddy state yet. Wire buddy status, operator profile, roster/backpack progress, badges, and battle history into the Studio API so operators can see their buddy progression from the web.
+The buddy system works across all channels (CLI, Telegram, API, cron) but the Studio web dashboard doesn't display buddy state yet. Wire buddy status, operator profile, roster/backpack progress, badges, and battle history into the Studio API.
 
-### Priority 2: Further startup latency cuts
+### Priority 2: ASR backend configuration
 
-AuthManager singleton already cut init from ~1.6s to ~0.8s. Remaining opportunities:
-- Lazy-import `anthropic` SDK (~328ms) — only import inside `AnthropicProvider.__init__()`, remove top-level import in gateway.py
-- Lazy-import `telegram` (~98ms) behind `require_telegram` flag
-- Lazy-import `aiohttp` (~203ms) inside `_init_providers()` instead of module-level
-- Add provider/tier latency breakdown in CLI verbose mode
+The pluggable ASR interface is ready. Next step: configure the operator's preferred audio-native model (Voxtral or Qwen3) as the `ABLE_ASR_ENDPOINT`, test with real audio from Telegram and CLI, and verify transcription quality.
 
 ### Priority 3: Streaming for tool-dispatch iterations
 
@@ -332,7 +345,7 @@ Current streaming (`stream_message()`) handles text-only responses. For tool dis
 
 ### Priority 4: Provider-level reasoning streaming
 
-The CLI parser can already surface streamed reasoning markers, but most providers currently only stream visible answer text. Add provider-level support where available (for example Anthropic/OpenAI reasoning deltas) so live `thinking` previews are grounded in actual provider events instead of only `<think>`-style chunks.
+The CLI parser can already surface streamed reasoning markers, but most providers currently only stream visible answer text. Add provider-level support where available (Anthropic/OpenAI reasoning deltas) so live `thinking` previews are grounded in actual provider events.
 
 ### Priority 5: Distillation corpus growth
 

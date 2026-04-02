@@ -3,6 +3,8 @@ Gateway Server - The coordinator that ties everything together
 Handles: Telegram channels, session routing, agent orchestration, AI responses
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -10,30 +12,68 @@ import os
 import base64
 import hmac
 from datetime import datetime, timezone
-from typing import AsyncIterator, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, AsyncIterator, Dict, List, Optional, Union
 from pathlib import Path
 from urllib.parse import unquote
 
 # Project root is 4 levels up from this file (able/core/gateway/gateway.py → ABLE/)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
-from aiohttp import web
-from telegram import Update, Bot
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
-try:
-    from telegram.ext import AIORateLimiter
-    _RATE_LIMITER_AVAILABLE = True
-except (ImportError, RuntimeError):
-    _RATE_LIMITER_AVAILABLE = False
+# ── Lazy-loaded heavy third-party modules ─────────────────────────────────────
+# aiohttp (~203ms), telegram (~98ms), and provider SDKs (~328ms for anthropic)
+# are deferred to first use.  TYPE_CHECKING imports keep type annotations valid.
+
+if TYPE_CHECKING:
+    from aiohttp import web as _web_mod
+    from telegram import Update, Bot
+    from telegram.ext import (
+        Application, CommandHandler, MessageHandler,
+        CallbackQueryHandler, filters, ContextTypes,
+    )
+
+_web = None  # aiohttp.web — populated on first use
+_telegram_loaded = False
+_RATE_LIMITER_AVAILABLE = False
+
+
+def _ensure_aiohttp():
+    """Import aiohttp.web on first use (~203ms)."""
+    global _web
+    if _web is None:
+        from aiohttp import web as _w
+        _web = _w
+        globals()["web"] = _w  # so existing `web.` references work
+    return _web
+
+
+def _ensure_telegram():
+    """Import telegram on first use (~98ms). Returns (Update, Bot, ext-module)."""
+    global _telegram_loaded, _RATE_LIMITER_AVAILABLE
+    if not _telegram_loaded:
+        import telegram as _tg  # noqa: F811
+        import telegram.ext as _tg_ext  # noqa: F811
+        # Cache into module globals so existing code can reference them
+        g = globals()
+        g["Update"] = _tg.Update
+        g["Bot"] = _tg.Bot
+        g["Application"] = _tg_ext.Application
+        g["CommandHandler"] = _tg_ext.CommandHandler
+        g["MessageHandler"] = _tg_ext.MessageHandler
+        g["CallbackQueryHandler"] = _tg_ext.CallbackQueryHandler
+        g["filters"] = _tg_ext.filters
+        g["ContextTypes"] = _tg_ext.ContextTypes
+        try:
+            g["AIORateLimiter"] = _tg_ext.AIORateLimiter
+            _RATE_LIMITER_AVAILABLE = True
+        except (ImportError, RuntimeError, AttributeError):
+            _RATE_LIMITER_AVAILABLE = False
+        _telegram_loaded = True
+
 
 from able.core.security.trust_gate import TrustGate, TrustTier
 from able.core.agents.base import ScannerAgent, AuditorAgent, ExecutorAgent, AgentContext, AgentAction, AgentRole
 from able.core.queue.lane_queue import LaneQueue
 from able.clients.client_manager import ClientRegistry, ClientTranscriptManager
-from able.core.providers.nvidia_nim import NVIDIANIMProvider
-from able.core.providers.openrouter import OpenRouterProvider
-from able.core.providers.anthropic_provider import AnthropicProvider
-from able.core.providers.ollama import OllamaProvider
 from able.core.providers.base import ProviderChain, ProviderConfig, Message, Role
 from able.core.routing.provider_registry import ProviderRegistry, ProviderTierConfig
 from able.core.routing.complexity_scorer import ComplexityScorer, ScoringResult
@@ -193,6 +233,10 @@ async def post_audit_log(entry: dict):
         await session.post(url, json=entry)
     except Exception:
         pass  # Dashboard logging is best-effort
+
+# ── Input safety limits ────────────────────────────────────────────────────────
+
+MAX_MESSAGE_LENGTH = 100_000  # ~75k tokens — reject anything larger to prevent DoS
 
 # ── System prompt ──────────────────────────────────────────────────────────────
 
@@ -381,6 +425,10 @@ class ABLEGateway:
         self.resource_plane = ResourcePlane(_PROJECT_ROOT)
         self.tool_registry = build_default_registry()
 
+        # Per-client rate limiter (burst + sustained)
+        from able.core.ratelimit.limiter import RateLimiter
+        self.rate_limiter = RateLimiter()
+
         # Client bots
         self.client_bots: Dict[str, Application] = {}
 
@@ -543,6 +591,11 @@ class ABLEGateway:
 
     def _init_providers_legacy(self) -> ProviderChain:
         """Legacy hardcoded provider chain (backward compatibility)."""
+        from able.core.providers.nvidia_nim import NVIDIANIMProvider
+        from able.core.providers.openrouter import OpenRouterProvider
+        from able.core.providers.anthropic_provider import AnthropicProvider
+        from able.core.providers.ollama import OllamaProvider
+
         providers = []
 
         nvidia_key = os.environ.get("NVIDIA_API_KEY")
@@ -653,6 +706,19 @@ class ABLEGateway:
         text_content = message
         if isinstance(message, list):
             text_content = next((item.get("text", "") for item in message if item.get("type") == "text"), "")
+
+        # Input length guard — prevent DoS via oversized messages
+        _text_len = len(text_content) if isinstance(text_content, str) else 0
+        if _text_len > MAX_MESSAGE_LENGTH:
+            logger.warning(f"[PIPELINE] Message rejected: {_text_len:,} chars (limit {MAX_MESSAGE_LENGTH:,})")
+            return f"⚠️ Message too long ({_text_len:,} chars). Maximum is {MAX_MESSAGE_LENGTH:,} characters."
+
+        # Per-client rate limiting (burst + sustained)
+        _rl_client = client_id or user_id
+        _rl = await self.rate_limiter.check_message_limit(_rl_client)
+        if not _rl.allowed:
+            logger.warning(f"[PIPELINE] Rate limited: client={_rl_client} type={_rl.limit_type} retry_after={_rl.retry_after:.1f}s")
+            return f"⚠️ Rate limit exceeded ({_rl.limit_type}). Try again in {_rl.retry_after:.0f}s."
 
         _channel = self._resolve_channel(update, metadata)
         _msg_preview = (text_content[:80] + "...") if isinstance(text_content, str) and len(text_content) > 80 else text_content
@@ -939,10 +1005,17 @@ class ABLEGateway:
                             except Exception:
                                 pass
                                 
-                        # Inject the tool observation back into the prompt for the next loop
+                        # Inject the tool observation back into the prompt for the next loop.
+                        # Wrap output with delimiters to prevent prompt injection via tool results.
+                        _tool_content = str(tool_output)
+                        _wrapped_tool_content = (
+                            f"[TOOL OUTPUT — {tool_call.name}]\n"
+                            f"{_tool_content}\n"
+                            f"[END TOOL OUTPUT]"
+                        )
                         msgs.append(Message(
                             role=Role.TOOL,
-                            content=str(tool_output),
+                            content=_wrapped_tool_content,
                             name=tool_call.name,
                             tool_call_id=tool_call.id
                         ))
@@ -1132,6 +1205,19 @@ class ABLEGateway:
         """
         import time as _time
         _pipeline_start = _time.monotonic()
+
+        # Input length guard
+        _text_len = len(message) if isinstance(message, str) else 0
+        if _text_len > MAX_MESSAGE_LENGTH:
+            yield f"⚠️ Message too long ({_text_len:,} chars). Maximum is {MAX_MESSAGE_LENGTH:,} characters."
+            return
+
+        # Per-client rate limiting
+        _rl_client = client_id or user_id
+        _rl = await self.rate_limiter.check_message_limit(_rl_client)
+        if not _rl.allowed:
+            yield f"⚠️ Rate limit exceeded ({_rl.limit_type}). Try again in {_rl.retry_after:.0f}s."
+            return
 
         _channel = (metadata or {}).get("channel", "cli")
 
@@ -1633,11 +1719,57 @@ class ABLEGateway:
             photo_file = await update.message.photo[-1].get_file()
             photo_bytes = await photo_file.download_as_bytearray()
             base64_image = base64.b64encode(photo_bytes).decode('utf-8')
-            
+
             message = [
-                {"type": "text", "text": message_text},
+                {"type": "text", "text": message_text or "Describe this image."},
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
             ]
+
+        # Handle video messages — extract thumbnail and send to vision chain
+        if update.message.video or update.message.video_note:
+            try:
+                video = update.message.video or update.message.video_note
+                # Use the thumbnail (small JPEG) to avoid downloading full video
+                if video.thumbnail:
+                    thumb_file = await video.thumbnail.get_file()
+                    thumb_bytes = await thumb_file.download_as_bytearray()
+                    b64_thumb = base64.b64encode(bytes(thumb_bytes)).decode('utf-8')
+                    duration = getattr(video, 'duration', 0)
+                    caption = message_text or f"This is a frame from a {duration}s video. Describe what you see."
+                    message = [
+                        {"type": "text", "text": caption},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_thumb}"}},
+                    ]
+                else:
+                    await update.message.reply_text("⚠️ Video has no thumbnail — send a screenshot instead")
+                    return
+            except Exception as e:
+                logger.error(f"Video processing failed: {e}")
+                await update.message.reply_text("⚠️ Couldn't process video")
+                return
+
+        # Handle document/file attachments (images sent as files)
+        if update.message.document and not update.message.photo:
+            doc = update.message.document
+            mime = doc.mime_type or ""
+            if mime.startswith("image/"):
+                doc_file = await doc.get_file()
+                doc_bytes = await doc_file.download_as_bytearray()
+                b64_doc = base64.b64encode(bytes(doc_bytes)).decode('utf-8')
+                message = [
+                    {"type": "text", "text": message_text or "Describe this image."},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_doc}"}},
+                ]
+            elif mime.startswith("audio/") and self.voice_transcriber:
+                try:
+                    doc_file = await doc.get_file()
+                    doc_bytes = await doc_file.download_as_bytearray()
+                    result = await self.voice_transcriber.transcribe(bytes(doc_bytes), filename=doc.file_name or "audio.wav")
+                    message_text = result.text
+                    message = message_text
+                    await update.message.reply_text(f"🎙️ *Transcribed:* {result.text}", parse_mode="Markdown")
+                except Exception as e:
+                    logger.error(f"Audio document transcription failed: {e}")
 
         # Check if owner
         if user_id != self.owner_telegram_id:
@@ -1812,6 +1944,7 @@ class ABLEGateway:
 
     async def _health_handler(self, request: web.Request) -> web.Response:
         """HTTP health check endpoint for Docker/load balancers"""
+        _ensure_aiohttp()  # populate module-level `web` for all control handlers
         return web.json_response({
             "status": "ok",
             "version": "2.0",
@@ -1915,6 +2048,7 @@ class ABLEGateway:
 
     async def start_health_server(self, port: int = 8080, *, quiet: bool = False):
         """Start lightweight HTTP health check server"""
+        web = _ensure_aiohttp()
         app = web.Application()
         app.router.add_get("/health", self._health_handler)
         app.router.add_get("/", self._health_handler)
@@ -2003,6 +2137,7 @@ class ABLEGateway:
 
     async def start_master_bot(self):
         """Start the master Telegram bot"""
+        _ensure_telegram()  # lazy-load telegram on first bot start
         builder = (
             Application.builder()
             .token(self.bot_token)
@@ -2021,7 +2156,7 @@ class ABLEGateway:
         self.master_bot.add_handler(CommandHandler("audit", self._cmd_audit))
         self.master_bot.add_handler(CallbackQueryHandler(self._handle_approval_callback))
         self.master_bot.add_handler(MessageHandler(
-            (filters.TEXT | filters.VOICE | filters.AUDIO | filters.PHOTO) & ~filters.COMMAND,
+            (filters.TEXT | filters.VOICE | filters.AUDIO | filters.PHOTO | filters.VIDEO | filters.VIDEO_NOTE | filters.Document.ALL) & ~filters.COMMAND,
             self._handle_master_message
         ))
 

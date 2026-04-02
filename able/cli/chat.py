@@ -643,6 +643,8 @@ async def _handle_slash(message, ctx, buddy):
         print(f"  {_c(BOLD, '/buddy bag')}  backpack + dex progress")
         print(f"  {_c(BOLD, '/buddy switch <name>')}  switch active buddy")
         print(f"  {_c(BOLD, '/battle')}     eval-based battle")
+        print(f"  {_c(BOLD, '/image <path>')}  send an image to vision model")
+        print(f"  {_c(BOLD, '/audio <path>')}  transcribe audio file")
         print(f"  {_c(BOLD, '/clear')}      clear the screen, keep scrollback")
         print(f"  {_c(BOLD, '/compact')}    clear + print compact session recap")
         print(f"  {_c(BOLD, '/exit')}       quit")
@@ -657,6 +659,65 @@ async def _handle_slash(message, ctx, buddy):
 
     if message in {"/compact", "-compact"}:
         _print_compact_view(gateway, args, buddy, render_header)
+        return True, buddy
+
+    # ── Multimodal commands ────────────────────────────────────────
+    if message.startswith("/image "):
+        img_path = message[7:].strip().strip('"').strip("'")
+        img_file = Path(img_path).expanduser()
+        if not img_file.exists():
+            print(f"  {_c(RED, 'error')}: file not found — {img_path}")
+            return True, buddy
+        try:
+            import base64 as _b64
+            img_bytes = img_file.read_bytes()
+            ext = img_file.suffix.lower().lstrip(".")
+            mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                    "gif": "image/gif", "webp": "image/webp"}.get(ext, "image/jpeg")
+            b64 = _b64.b64encode(img_bytes).decode()
+            caption = (await asyncio.to_thread(
+                _prompt_input, f"  {_c(CYAN, 'caption')} (Enter to skip): "
+            )).strip() or "Describe this image."
+            multimodal_msg = [
+                {"type": "text", "text": caption},
+                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+            ]
+            print(f"  {_c(DIM, f'sending {img_file.name} ({len(img_bytes)//1024}KB)...')}")
+            response = await gateway.process_message(
+                message=multimodal_msg, user_id=args.session,
+                client_id=args.client, metadata={"source": "cli", "channel": "cli", "is_owner": True},
+            )
+            print(f"\n  {_c(CYAN, 'able')} {response}\n")
+        except Exception as e:
+            print(f"  {_c(RED, 'error')}: {e}")
+        return True, buddy
+
+    if message.startswith("/audio "):
+        audio_path = message[7:].strip().strip('"').strip("'")
+        audio_file = Path(audio_path).expanduser()
+        if not audio_file.exists():
+            print(f"  {_c(RED, 'error')}: file not found — {audio_path}")
+            return True, buddy
+        try:
+            from able.tools.voice.transcription import VoiceTranscriber
+            transcriber = VoiceTranscriber()
+            print(f"  {_c(DIM, f'transcribing {audio_file.name}...')}")
+            result = await transcriber.transcribe_file(audio_file)
+            print(f"  {_c(GREEN, 'transcribed')}: {result.text}")
+            print(f"  {_c(DIM, f'{result.duration_seconds:.1f}s · {result.provider.value} · {result.processing_time_ms:.0f}ms')}")
+            # Optionally send to gateway
+            followup = (await asyncio.to_thread(
+                _prompt_input, f"  {_c(CYAN, 'send to ABLE?')} [y/N]: "
+            )).strip().lower()
+            if followup in ("y", "yes"):
+                response = await gateway.process_message(
+                    message=result.text, user_id=args.session,
+                    client_id=args.client, metadata={"source": "cli", "channel": "cli", "is_owner": True},
+                )
+                print(f"\n  {_c(CYAN, 'able')} {response}\n")
+            await transcriber.close()
+        except Exception as e:
+            print(f"  {_c(RED, 'error')}: {e}")
         return True, buddy
 
     if message == "/tools":

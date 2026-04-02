@@ -135,6 +135,7 @@ class _PartialFailureChain:
 
 
 def _stub_gateway(chain):
+    from able.core.ratelimit.limiter import RateLimiter
     gateway = object.__new__(ABLEGateway)
     gateway.scanner = _Scanner()
     gateway.auditor = _Auditor()
@@ -145,6 +146,7 @@ def _stub_gateway(chain):
     gateway.memory = None
     gateway.transcript_manager = _TranscriptManager()
     gateway.session_mgr = None
+    gateway.rate_limiter = RateLimiter()
     return gateway
 
 
@@ -297,3 +299,69 @@ async def test_compact_slash_is_handled(monkeypatch, capsys):
     assert handled is True
     assert buddy is None
     assert "compacted view" in capsys.readouterr().out
+
+
+# ── Input validation tests ────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_stream_message_rejects_oversized_input():
+    """Messages exceeding MAX_MESSAGE_LENGTH are rejected before the pipeline runs."""
+    from able.core.gateway.gateway import MAX_MESSAGE_LENGTH
+
+    chain = _ImmediateFailureChain()
+    gateway = _stub_gateway(chain)
+
+    huge_msg = "x" * (MAX_MESSAGE_LENGTH + 1)
+    chunks = [chunk async for chunk in gateway.stream_message(
+        message=huge_msg, user_id="cli", client_id="master",
+        metadata={"channel": "cli"},
+    )]
+
+    assert len(chunks) == 1
+    assert "too long" in chunks[0]
+    assert chain.complete_called is False
+
+
+@pytest.mark.asyncio
+async def test_stream_message_accepts_normal_input():
+    """Normal-length messages pass the length guard."""
+    chain = _PartialFailureChain()
+    gateway = _stub_gateway(chain)
+
+    chunks = [chunk async for chunk in gateway.stream_message(
+        message="hello", user_id="cli", client_id="master",
+        metadata={"channel": "cli"},
+    )]
+
+    assert any("partial" in c for c in chunks)
+
+
+# ── Rate limiter tests ────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_stream_message_rate_limits_after_burst():
+    """Exceeding burst rate returns a rate limit message instead of processing."""
+    from able.core.ratelimit.limiter import RateLimiter, ClientLimits
+
+    chain = _ImmediateFailureChain()
+    gateway = _stub_gateway(chain)
+    # Extremely tight limit: 2 per minute
+    gateway.rate_limiter = RateLimiter()
+    gateway.rate_limiter.set_client_limits("master", ClientLimits(
+        messages_per_minute=2, messages_per_hour=1000, tokens_per_day=1000000,
+    ))
+
+    results = []
+    for i in range(4):
+        chunks = [chunk async for chunk in gateway.stream_message(
+            message=f"msg {i}", user_id="cli", client_id="master",
+            metadata={"channel": "cli"},
+        )]
+        results.append("".join(chunks))
+
+    # First 2 should succeed (or at least not be rate-limited)
+    assert "Rate limit" not in results[0]
+    # By the 3rd or 4th, rate limiting should kick in
+    assert any("Rate limit" in r for r in results[2:])
