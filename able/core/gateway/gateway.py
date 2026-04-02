@@ -1917,6 +1917,7 @@ class ABLEGateway:
                 m27_provider=m27_provider,
                 split_policy=split_policy,
                 approval_workflow=self.approval_workflow,
+                memory=getattr(self, "memory", None),
             )
             asyncio.create_task(self.evolution_daemon.run_continuous())
             print(f"🧬 Evolution Daemon started (6h cycle, M2.7 {'connected' if m27_provider else 'rule-based fallback'}, split_test={'on' if split_policy else 'off'})")

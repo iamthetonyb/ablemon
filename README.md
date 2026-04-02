@@ -50,6 +50,9 @@ Inside `able chat`, these local commands are handled without going through the m
 - `/help`
 - `/status`
 - `/tools`
+- `/resources` — control plane resource inventory
+- `/eval` — distillation corpus progress and pair counts
+- `/evolve` — trigger a single evolution cycle on demand
 - `/exit`
 
 `able` with no subcommand still starts the packaged service path. `able serve` is the explicit version of that same behavior.

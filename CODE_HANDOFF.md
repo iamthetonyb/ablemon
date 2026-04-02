@@ -177,51 +177,39 @@ Training lanes:
 
 ## What Was Just Completed
 
-1. Closed the eval → self-improvement bridge:
-   - `able/core/evolution/auto_improve.py` now maps skill/content failures into approval-gated SKILL.md updates instead of only writing learnings.
-   - `able/core/agi/self_improvement.py` now correctly handles `ApprovalResult.status`, renders `SECTION` updates deterministically, and supports targeted patch-style replacements through metadata.
-2. Closed the proactive → evolution collector bridge:
-   - `able/core/evolution/collector.py` now accepts `submit_insight()` events and includes them in the next collection payload.
-   - `able/core/agi/proactive.py` now submits recurring failure insights to the collector when a collector is wired in.
-3. Added the missing resource lifecycle tool path:
-   - `resource_action` now exists in `able/core/gateway/tool_defs/resource_tools.py`.
-   - Tool dispatch now preserves approval metadata for handlers.
-   - Resource actions execute with `approved_by` + `service_token_verified=True` on the backend-managed path.
-4. Fixed the control-plane HTTP seam:
-   - `/control/resources/{id}/action` now forwards optional parameters, passes the service-token verification flag, and returns the correct HTTP status code.
-   - Control-plane timestamps use timezone-aware UTC values.
-5. Added corpus readiness feedback:
-   - `able/evals/collect_results.py` now counts all `data/distillation_*.jsonl` shards and emits a clear `CORPUS READY` message at 100+ pairs.
-6. Added dedicated tests for the new surfaces:
-   - `able/tests/test_control_plane.py`
-   - `able/tests/test_resource_tools.py`
-   - `able/tests/test_learning_loops.py`
-   - `able/tests/test_collect_results.py`
-   - `able/tests/test_evolution_cycle.py`
+1. **All four learning feedback loops are now closed:**
+   - **Eval → Self-Improvement**: `auto_improve.py` maps skill/content failures into approval-gated SKILL.md updates via `SelfImprovementEngine`.
+   - **Proactive → Evolution**: `proactive.py` submits recurring failure insights to the collector via `submit_insight()`.
+   - **Memory → Evolution**: `collector.py` now queries `HybridMemory` for durable learnings (LEARNING + SKILL types) and enriches the metrics package with `memory_context` before the analyzer sees it. Gateway and cron both pass memory to the daemon.
+   - **Interaction → Distillation**: `collect_results.py` captures T4 gold outputs and emits CORPUS READY at 100+ pairs.
+2. **Resource lifecycle tool**: `resource_action` in `able/core/gateway/tool_defs/resource_tools.py` with approval gating.
+3. **Control-plane hardened**: all endpoints token-gated, `perform_action()` requires `service_token_verified`, HTTP status codes corrected.
+4. **Operator slash commands expanded**: `/resources`, `/eval`, `/evolve` added to `able chat`. README updated.
+5. **Test coverage**: 26 tests across 6 new test files, all passing.
+6. **Legacy cleanup**: all 87 bare imports migrated, 5 root-level shims removed, pyproject.toml simplified.
 
 ## Next-Run Objectives
 
-### Priority 1: Close the last major learning bridge
+### Priority 1: Increase distillation throughput
 
-**Memory → Evolution**
-`able/memory/hybrid_memory.py` still stores learnings and patterns largely outside the evolution collector. Add a memory recall step so the next evolution cycle can weigh durable operator preferences and repeated domain signals, not just recent interaction metrics and proactive insights.
+The learning loops are closed — now feed them data.
+- Review routing/domain distribution from `data/interaction_log.db` to find where eval gaps are.
+- Add 2-3 new eval configs targeting the highest-traffic domains.
+- Push the corpus toward the first 100+ pair threshold for H100 promotion.
+- Verify the distillation harvester correctly marks corpus-eligible interactions.
 
-### Priority 2: Increase usable distillation throughput
+### Priority 2: Streaming output for `able chat`
 
-- Review routing/domain distribution from `data/interaction_log.db`.
-- Add 2-3 new eval configs for the highest-traffic or highest-value domains.
-- Keep pushing the corpus toward the first 100+ pair threshold for H100 promotion while maintaining the T4-first 9B lane.
+Currently blocks until the full response is generated. For demo/operator use, streaming tokens as they arrive is the single biggest UX improvement. The gateway's `process_message` returns a complete response — investigate whether the provider chain can yield chunks for streaming display.
 
-### Priority 3: Improve live operator experience
+### Priority 3: Improve CLI approval rendering
 
-- `able chat` streaming output instead of full-response blocking
-- Expand the local slash-command surface (`/eval`, `/evolve`, `/distill`, resource status/actions)
-- Improve CLI approval rendering so write actions are easier to review during demos and offline runs
+Write-action approval prompts in the terminal are plain text. For demos and offline runs, richer rendering (operation summary, risk level, affected resources) makes the approval decision faster and more informed. This pairs well with the new `/resources` and `/evolve` commands.
 
 ### Priority 4: Keep docs and runtime in lockstep
 
-- Refresh `README.md` only when code changes make its current commands or runtime description stale.
-- Keep `CODE_HANDOFF.md` and `CODEX_PROMPT.md` updated at the end of each implementation pass.
+- Refresh `README.md` only when code changes make its current commands stale.
+- Keep `CODE_HANDOFF.md` and `CODEX_PROMPT.md` updated at the end of each pass.
 
 ## Validation Commands
 

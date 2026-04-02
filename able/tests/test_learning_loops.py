@@ -125,6 +125,72 @@ def test_metrics_collector_submit_insight_is_consumed_once():
     assert second["proactive_insights"] == []
 
 
+def _stub_queries():
+    """Reusable stub for LogQueries returning empty metrics."""
+    return type(
+        "Queries",
+        (),
+        {
+            "get_evolution_summary": staticmethod(
+                lambda since: {
+                    "failures_by_tier": [],
+                    "escalation_rate": {"override_rate_pct": 0},
+                    "cost_by_tier": [],
+                    "wins_by_tier": [],
+                    "domain_accuracy": [{"domain": "security", "accuracy": 0.7}],
+                    "scoring_drift": [],
+                    "fallback_frequency": [],
+                }
+            )
+        },
+    )()
+
+
+class FakeMemoryEntry:
+    def __init__(self, content, memory_type_value):
+        self.content = content
+        self.memory_type = type("MT", (), {"value": memory_type_value})()
+
+
+class FakeSearchResult:
+    def __init__(self, content, score, mem_type="learning"):
+        self.entry = FakeMemoryEntry(content, mem_type)
+        self.score = score
+
+
+class FakeHybridMemory:
+    """Fake HybridMemory that returns canned search results."""
+
+    def search(self, query, memory_types=None, limit=5, min_score=0.3):
+        return [
+            FakeSearchResult("Security prompts tend to under-route at tier 1", 0.85),
+            FakeSearchResult("Operator prefers conservative routing for financial domain", 0.72),
+        ]
+
+
+def test_memory_context_enriches_evolution_metrics():
+    collector = MetricsCollector(db_path=":memory:", memory=FakeHybridMemory())
+    collector._queries = _stub_queries()
+
+    result = collector.collect(since="2026-04-01T00:00:00+00:00")
+
+    ctx = result["memory_context"]
+    assert ctx["available"] is True
+    assert len(ctx["learnings"]) == 2
+    assert "under-route" in ctx["learnings"][0]["content"]
+    assert ctx["learnings"][0]["score"] == 0.85
+    assert "query" in ctx
+
+
+def test_memory_context_graceful_without_memory():
+    collector = MetricsCollector(db_path=":memory:", memory=None)
+    collector._queries = _stub_queries()
+
+    result = collector.collect(since="2026-04-01T00:00:00+00:00")
+
+    assert result["memory_context"]["available"] is False
+
+
 def test_learning_insight_check_submits_to_collector():
     collector = DummyCollector()
     check = LearningInsightCheck(

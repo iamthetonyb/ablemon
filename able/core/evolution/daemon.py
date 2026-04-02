@@ -99,9 +99,12 @@ class EvolutionDaemon:
         m27_provider=None,
         split_policy: Optional[EvolutionSplitTestPolicy] = None,
         approval_workflow=None,
+        memory=None,
     ):
         self.config = config or EvolutionConfig()
-        self._collector = MetricsCollector(db_path=self.config.interaction_db)
+        self._collector = MetricsCollector(
+            db_path=self.config.interaction_db, memory=memory
+        )
         self._analyzer = EvolutionAnalyzer(provider=m27_provider)
         self._deployer = ChangeDeployer(weights_path=self.config.weights_path)
         self.split_policy = split_policy

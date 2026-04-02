@@ -171,7 +171,7 @@ async def run_chat(args: argparse.Namespace) -> int:
     print(f"providers:{' ' if providers else ''}{', '.join(providers)}")
     if args.control_port:
         print(f"control:  http://127.0.0.1:{args.control_port}/health")
-    print("commands: /help /status /tools /exit")
+    print("commands: /help /status /tools /resources /eval /evolve /exit")
 
     while True:
         try:
@@ -187,7 +187,7 @@ async def run_chat(args: argparse.Namespace) -> int:
             print("bye")
             return 0
         if message == "/help":
-            print("commands: /help /status /tools /exit")
+            print("commands: /help /status /tools /resources /eval /evolve /exit")
             print("all other input goes through the full gateway pipeline.")
             continue
         if message == "/tools":
@@ -213,6 +213,43 @@ async def run_chat(args: argparse.Namespace) -> int:
                 },
                 indent=2,
             ))
+            continue
+        if message == "/resources":
+            try:
+                from able.core.control_plane.resources import ResourcePlane
+                rp = ResourcePlane()
+                inv = rp.get_inventory()
+                for r in inv.get("resources", []):
+                    state = r.get("state", "unknown")
+                    print(f"  {r['id']}  {r['type']:10s}  {state}")
+                if not inv.get("resources"):
+                    print("  (no resources registered)")
+            except Exception as e:
+                print(f"  error: {e}")
+            continue
+        if message == "/eval":
+            try:
+                from able.evals.collect_results import summarize_corpus_progress
+                report = summarize_corpus_progress()
+                print(json.dumps(report, indent=2))
+            except Exception as e:
+                print(f"  error: {e}")
+            continue
+        if message == "/evolve":
+            if hasattr(gateway, "evolution_daemon") and gateway.evolution_daemon:
+                print("  running single evolution cycle...")
+                try:
+                    result = await gateway.evolution_daemon.run_cycle()
+                    print(f"  cycle {result.cycle_id}: {'OK' if result.success else 'FAILED'}")
+                    print(f"  interactions: {result.interactions_analyzed}")
+                    print(f"  problems: {result.problems_found}")
+                    print(f"  deployed: {result.improvements_deployed}")
+                    if result.error:
+                        print(f"  error: {result.error}")
+                except Exception as e:
+                    print(f"  cycle error: {e}")
+            else:
+                print("  evolution daemon not running")
             continue
 
         gateway.transcript_manager.log_message(

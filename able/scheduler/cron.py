@@ -630,7 +630,12 @@ def register_default_jobs(
         from able.core.evolution.self_scheduler import SelfScheduler
 
         config = EvolutionConfig()
-        daemon = EvolutionDaemon(config=config)
+        try:
+            from able.memory.hybrid_memory import HybridMemory
+            memory = HybridMemory()
+        except Exception:
+            memory = None
+        daemon = EvolutionDaemon(config=config, memory=memory)
         result = await daemon.run_cycle()
 
         # Feed results into self-scheduler if the cycle produced analysis

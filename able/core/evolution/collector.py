@@ -25,10 +25,11 @@ class MetricsCollector:
     period management for the daemon's cycle.
     """
 
-    def __init__(self, db_path: str = "data/interaction_log.db"):
+    def __init__(self, db_path: str = "data/interaction_log.db", memory=None):
         self._queries = LogQueries(db_path=db_path)
         self._last_collection: Optional[str] = None
         self._submitted_insights: List[Dict[str, Any]] = []
+        self._memory = memory
 
     def collect(
         self, hours: int = 24, since: Optional[str] = None
@@ -63,6 +64,9 @@ class MetricsCollector:
 
         # Add computed health indicators
         summary["health_indicators"] = self._compute_health(summary)
+
+        # Enrich with durable memory context (operator learnings, domain signals)
+        summary["memory_context"] = self._collect_memory_context(summary)
 
         self._last_collection = datetime.now(timezone.utc).isoformat()
         return summary
@@ -110,6 +114,61 @@ class MetricsCollector:
                 )
 
         return health
+
+    def _collect_memory_context(
+        self, summary: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Query hybrid memory for durable learnings that should inform
+        the evolution cycle.  Returns a lightweight context dict that
+        the analyzer can weigh alongside interaction metrics.
+
+        Runs synchronously — HybridMemory.search() is sync — and
+        degrades gracefully if memory is unavailable.
+        """
+        if self._memory is None:
+            return {"available": False}
+
+        try:
+            from able.memory.hybrid_memory import MemoryType
+        except ImportError:
+            return {"available": False}
+
+        # Build a query from the domains and alerts the metrics surface
+        query_parts = ["routing failures", "escalation patterns"]
+        for alert in summary.get("health_indicators", {}).get("alerts", []):
+            query_parts.append(alert[:80])
+        for domain_row in summary.get("domain_accuracy", [])[:3]:
+            domain = domain_row.get("domain") or domain_row.get("name")
+            if domain:
+                query_parts.append(f"{domain} quality")
+
+        query = "; ".join(query_parts[:5])
+
+        results = self._memory.search(
+            query=query,
+            memory_types=[MemoryType.LEARNING, MemoryType.SKILL],
+            limit=5,
+            min_score=0.3,
+        )
+
+        learnings = []
+        for r in results:
+            learnings.append({
+                "content": r.entry.content[:300],
+                "type": r.entry.memory_type.value,
+                "score": round(r.score, 3),
+            })
+
+        logger.info(
+            "Memory context: %d learnings enriching evolution metrics", len(learnings)
+        )
+
+        return {
+            "available": True,
+            "query": query,
+            "learnings": learnings,
+        }
 
     @property
     def queries(self) -> LogQueries:
