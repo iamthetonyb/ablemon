@@ -917,6 +917,40 @@ class TestScaffoldingStripping:
         assert "<system-reminder>" not in cleaned[0]["content"]
         assert "<command-name>" not in cleaned[1]["content"]
 
+    def test_strips_claude_code_hint_tags(self):
+        """claude-code-hint is a zero-token side channel — must be stripped."""
+        from able.core.distillation.harvesters.base import BaseHarvester
+        text = 'Output <claude-code-hint type="plugin">install eslint</claude-code-hint> done'
+        result = BaseHarvester._strip_scaffolding(text)
+        assert "<claude-code-hint>" not in result
+        assert "Output" in result
+        assert "done" in result
+
+    def test_strips_base64_data_uris(self):
+        """Base64 image data URIs from tool results should be replaced."""
+        from able.core.distillation.harvesters.base import BaseHarvester
+        payload = "A" * 200  # simulated base64 payload
+        text = f'Screenshot: data:image/png;base64,{payload} end'
+        result = BaseHarvester._strip_scaffolding(text)
+        assert payload not in result
+        assert "[image]" in result
+
+    def test_strips_analytics_event_names(self):
+        """Internal tengu_* analytics event names should be removed."""
+        from able.core.distillation.harvesters.base import BaseHarvester
+        text = "Logged tengu_bash_tool_command_executed with data"
+        result = BaseHarvester._strip_scaffolding(text)
+        assert "tengu_bash_tool_command_executed" not in result
+
+    def test_strips_example_tags(self):
+        """Prompt example tags should be stripped."""
+        from able.core.distillation.harvesters.base import BaseHarvester
+        text = 'Before <example>some example content here</example> After'
+        result = BaseHarvester._strip_scaffolding(text)
+        assert "<example>" not in result
+        assert "Before" in result
+        assert "After" in result
+
 
 # ── Claude Code harvester filtering ───────────────────────────
 

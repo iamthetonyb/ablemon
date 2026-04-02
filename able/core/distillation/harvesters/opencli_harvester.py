@@ -175,6 +175,8 @@ class OpenCLIHarvester(BaseHarvester):
             messages, thinking = self._collect_jsonl_session(
                 data, role_map, thinking_field,
             )
+            # Strip scaffolding from all messages (Codex, ChatGPT, etc.)
+            messages = self._clean_messages(messages)
             if not messages or self._is_meta_conversation(messages):
                 return []
             return [
@@ -198,6 +200,8 @@ class OpenCLIHarvester(BaseHarvester):
 
             raw_messages = self._extract_messages(item, message_path)
             messages = self._normalise_roles(raw_messages, role_map)
+            # Strip scaffolding from all messages
+            messages = self._clean_messages(messages)
             if not messages:
                 continue
             if self._is_meta_conversation(messages):

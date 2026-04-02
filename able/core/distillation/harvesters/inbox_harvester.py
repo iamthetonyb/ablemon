@@ -131,6 +131,11 @@ class InboxHarvester(BaseHarvester):
         for i, para in enumerate(paragraphs):
             messages.append({"role": roles[i % 2], "content": para})
 
+        # Strip scaffolding from all messages
+        messages = self._clean_messages(messages)
+        if not messages:
+            return []
+
         if self._is_meta_conversation(messages):
             return []
 
@@ -154,6 +159,11 @@ class InboxHarvester(BaseHarvester):
         """Convert a JSON object into a HarvestedConversation."""
         messages = obj.get("messages", [])
         if not messages or not isinstance(messages, list):
+            return None
+
+        # Strip scaffolding from all messages (inbox may contain raw exports)
+        messages = self._clean_messages(messages)
+        if not messages:
             return None
 
         if self._is_meta_conversation(messages):

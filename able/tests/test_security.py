@@ -219,6 +219,85 @@ def test_extended_command_guard_attacks():
         assert result.verdict == CommandVerdict.DENIED
 
 
+# ── Tests for security patterns ported from Claude Code BashTool ──
+
+def test_binary_hijack_env_vars():
+    """LD_PRELOAD, DYLD_INSERT_LIBRARIES, PATH= as command prefix."""
+    guard = CommandGuard()
+
+    hijack_commands = [
+        "LD_PRELOAD=/evil.so cat /etc/passwd",
+        "DYLD_INSERT_LIBRARIES=/evil.dylib ls",
+        "PATH=/tmp:$PATH cat secrets.txt",
+    ]
+    for cmd in hijack_commands:
+        result = guard.analyze(cmd)
+        assert result.verdict == CommandVerdict.DENIED, f"Should deny: {cmd}"
+        assert "hijack" in result.reason.lower()
+
+
+def test_safe_env_var_stripping():
+    """NODE_ENV=prod, RUST_LOG=debug etc. should be stripped before matching."""
+    guard = CommandGuard()
+
+    # Safe env var + allowed command → should be allowed
+    result = guard.analyze("NODE_ENV=production ls -la")
+    assert result.verdict == CommandVerdict.ALLOWED
+
+    result = guard.analyze("RUST_LOG=debug cat file.txt")
+    assert result.verdict == CommandVerdict.ALLOWED
+
+
+def test_dangerous_removal_paths():
+    """rm/rmdir on critical system paths always escalated."""
+    guard = CommandGuard()
+
+    for path in ["/", "/etc", "/usr", "/bin", "/home", "/tmp"]:
+        result = guard.analyze(f"rm -rf {path}")
+        assert result.verdict == CommandVerdict.DENIED, f"Should deny rm -rf {path}"
+
+    # rm with -- flag smuggling: rm -- -/../usr
+    result = guard.analyze("rm -- /usr")
+    assert result.verdict == CommandVerdict.DENIED
+
+
+def test_cd_git_compound_detection():
+    """cd+git in compound commands → bare repo fsmonitor RCE vector."""
+    guard = CommandGuard()
+
+    attacks = [
+        "cd evil-repo && git status",
+        "cd /tmp/malicious; git pull",
+        "cd sub || git checkout main",
+    ]
+    for cmd in attacks:
+        result = guard.analyze(cmd)
+        assert result.verdict == CommandVerdict.DENIED, f"Should deny: {cmd}"
+        assert "git" in result.reason.lower()
+
+    # cd alone or git alone should NOT trigger
+    result = guard.analyze("cd /tmp")
+    # cd is not in allowlist, but shouldn't be DENIED for cd+git
+    assert "git" not in (result.reason or "").lower()
+
+
+def test_subcommand_cap():
+    """Compound commands with too many subcommands force-escalate."""
+    guard = CommandGuard()
+    # Build a command with 60 subcommands
+    huge = " && ".join(["echo x"] * 60)
+    result = guard.analyze(huge)
+    assert result.verdict == CommandVerdict.REQUIRES_APPROVAL
+    assert "subcommand" in result.reason.lower()
+
+
+def test_pipe_to_zsh_blocked():
+    """Pipe to zsh should be blocked (added alongside sh/bash)."""
+    guard = CommandGuard()
+    result = guard.analyze("cat payload.sh | zsh")
+    assert result.verdict == CommandVerdict.DENIED
+
+
 def run_all_tests():
     """Run all security tests"""
     print("\n" + "=" * 60)

@@ -154,6 +154,11 @@ class OwavMLHarvester(BaseHarvester):
                 {"role": "assistant", "content": response},
             ]
 
+            # Strip scaffolding from all messages
+            messages = self._clean_messages(messages)
+            if not messages:
+                continue
+
             conv = HarvestedConversation(
                 id=f"0wav-ml-{stem}",
                 source="0wav_ml",

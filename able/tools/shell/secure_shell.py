@@ -119,8 +119,10 @@ class SecureShell:
             if env:
                 exec_env.update(env)
 
-            for dangerous in ["LD_PRELOAD", "LD_LIBRARY_PATH", "PYTHONPATH"]:
-                exec_env.pop(dangerous, None)
+            # Strip binary hijack env vars (ported from Claude Code BashTool)
+            for key in list(exec_env):
+                if key.startswith(("LD_", "DYLD_")) or key == "PYTHONPATH":
+                    exec_env.pop(key, None)
 
             argv = analysis.parsed_argv
             if analysis.uses_shell_syntax:

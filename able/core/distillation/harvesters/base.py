@@ -73,12 +73,16 @@ _SCAFFOLDING_TAG_RE = re.compile(
     r"antml_function_calls|"       # Anthropic function call XML
     r"antml_invoke|"               # Anthropic invoke XML
     r"antml_parameter|"            # Anthropic parameter XML
-    r"task-notification"           # Background task notifications
+    r"task-notification|"          # Background task notifications
+    r"claude-code-hint|"           # Zero-token side-channel hint protocol
+    r"example_agent_descriptions|" # Agent description examples in prompts
+    r"example"                     # Inline prompt examples
     r")(?:\s[^>]*)?>.*?</(?:"
     r"system-reminder|command-name|command-message|"
     r"local-command-stdout|local-command-caveat|local-command-stderr|"
     r"user-prompt-submit-hook|functions|function|"
-    r"antml_function_calls|antml_invoke|antml_parameter|task-notification"
+    r"antml_function_calls|antml_invoke|antml_parameter|task-notification|"
+    r"claude-code-hint|example_agent_descriptions|example"
     r")>",
     re.DOTALL,
 )
@@ -86,9 +90,16 @@ _SCAFFOLDING_TAG_RE = re.compile(
 # Self-closing or orphaned opening tags (sometimes the closing tag is missing)
 _SCAFFOLDING_OPEN_RE = re.compile(
     r"<(?:system-reminder|local-command-caveat|local-command-stdout|"
-    r"local-command-stderr|user-prompt-submit-hook|task-notification)"
+    r"local-command-stderr|user-prompt-submit-hook|task-notification|"
+    r"claude-code-hint)"
     r"(?:\s[^>]*)?>",
 )
+
+# Base64 data URIs (image dumps from tool results — huge, no training value)
+_DATA_URI_RE = re.compile(r"data:image/[a-z0-9.+_-]+;base64,[A-Za-z0-9+/=]{100,}")
+
+# Analytics event names injected by Claude Code internals
+_ANALYTICS_EVENT_RE = re.compile(r"\btengu_[a-z_]+\b")
 
 # Tool result content over this size is truncated — raw file dumps and
 # git diffs are not useful for teaching reasoning.
@@ -148,15 +159,24 @@ class BaseHarvester(ABC):
         """Remove AI-tool scaffolding tags from message content.
 
         Claude Code, Codex, and similar tools inject XML tags like
-        ``<system-reminder>``, ``<command-name>``, ``<functions>``, and
-        ``<antml_function_calls>`` into conversation transcripts.  These
-        are runtime artifacts — NOT part of the reasoning.  If they leak
-        into training data, fine-tuned models learn to hallucinate them.
+        ``<system-reminder>``, ``<command-name>``, ``<functions>``,
+        ``<antml_function_calls>``, and ``<claude-code-hint>`` into
+        conversation transcripts.  These are runtime artifacts — NOT
+        part of the reasoning.  If they leak into training data,
+        fine-tuned models learn to hallucinate them.
+
+        Also strips base64 image data URIs (tool result dumps of
+        screenshots/charts — huge payload, zero reasoning value) and
+        internal analytics event names (tengu_* identifiers).
         """
         # Strip matched pairs first
         text = _SCAFFOLDING_TAG_RE.sub("", text)
         # Then orphaned opening tags
         text = _SCAFFOLDING_OPEN_RE.sub("", text)
+        # Strip base64 image data URIs (can be 100KB+ of noise)
+        text = _DATA_URI_RE.sub("[image]", text)
+        # Strip internal analytics event names
+        text = _ANALYTICS_EVENT_RE.sub("", text)
         # Collapse leftover whitespace
         text = re.sub(r"\n{3,}", "\n\n", text).strip()
         return text

@@ -157,6 +157,9 @@ class ExternalToolHarvester(BaseHarvester):
                 if record.get("source"):
                     record_source = record["source"]
 
+        # Strip scaffolding from all messages (handles tags from any AI tool)
+        messages = self._clean_messages(messages)
+
         if not messages or len(messages) < _MIN_TURNS:
             return None
 

@@ -121,6 +121,11 @@ class CLISessionHarvester(BaseHarvester):
         if not messages:
             return None
 
+        # Strip scaffolding from all messages (catches tags from any source)
+        messages = self._clean_messages(messages)
+        if not messages:
+            return None
+
         # Quality filters
         if not self._is_quality_session(messages, tool_uses, has_accepted_response):
             return None

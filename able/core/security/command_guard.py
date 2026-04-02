@@ -1,6 +1,14 @@
 """
 Command Guard - Allowlist-based command authorization
 Blocklists have 8+ documented bypasses. Allowlists are secure by default.
+
+Security patterns ported from Claude Code's BashTool (12K+ LOC):
+- Binary hijack env var detection (LD_, DYLD_, PATH)
+- Dangerous removal path checking (/,  /etc, /usr, ~)
+- cd+git compound detection (bare repo fsmonitor RCE)
+- Safe env var stripping for permission matching
+- ``--`` end-of-options handling to prevent flag smuggling
+- MAX_SUBCOMMANDS cap against DoS via exponential splitting
 """
 
 from __future__ import annotations
@@ -8,6 +16,7 @@ from __future__ import annotations
 import re
 import shlex
 import unicodedata
+from pathlib import Path
 from typing import List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
@@ -29,6 +38,39 @@ class CommandAnalysis:
     reason: str
     risk_level: int  # 1-10
     uses_shell_syntax: bool = False
+
+
+# ── Ported from Claude Code BashTool security layer ──────────────
+
+# Binary hijack env vars — if set as prefix, the command can load
+# arbitrary shared objects or redirect binary resolution.
+_BINARY_HIJACK_RE = re.compile(r"^(LD_|DYLD_|PATH=)")
+
+# Env vars that are safe to appear as command prefixes (build config,
+# locale, terminal settings).  Matches Claude Code's SAFE_ENV_VARS.
+_SAFE_ENV_VARS: frozenset[str] = frozenset({
+    "GOEXPERIMENT", "GOOS", "GOARCH", "CGO_ENABLED", "GO111MODULE",
+    "RUST_BACKTRACE", "RUST_LOG",
+    "NODE_ENV",
+    "PYTHONUNBUFFERED", "PYTHONDONTWRITEBYTECODE",
+    "PYTEST_DISABLE_PLUGIN_AUTOLOAD", "PYTEST_DEBUG",
+    "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "LC_TIME", "CHARSET",
+    "TERM", "COLORTERM", "NO_COLOR", "FORCE_COLOR", "TZ",
+    "LS_COLORS", "LSCOLORS", "GREP_COLOR", "GREP_COLORS",
+    "TIME_STYLE", "BLOCK_SIZE", "BLOCKSIZE",
+})
+
+# Dangerous removal targets — rm/rmdir on these always requires approval
+# regardless of allowlist rules.  Prevents catastrophic data loss.
+_DANGEROUS_PATHS: frozenset[str] = frozenset({
+    "/", "/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/lib64",
+    "/opt", "/proc", "/root", "/run", "/sbin", "/srv", "/sys",
+    "/tmp", "/usr", "/var",
+})
+
+# DoS protection: compound commands split into more subcommands than
+# this are force-escalated to REQUIRES_APPROVAL.
+MAX_SUBCOMMANDS = 50
 
 # ALLOWLIST - Only these commands can execute without approval
 ALLOWED_COMMANDS = {
@@ -104,12 +146,26 @@ class CommandGuard:
         self.trust_tier = trust_tier  # 1-4, higher = more permissions
 
     def _parse_command(self, command: str) -> Tuple[str, List[str], List[str]]:
-        """Parse command into base command and arguments"""
+        """Parse command into base command and arguments.
+
+        Strips safe env var prefixes (NODE_ENV=prod, RUST_LOG=debug)
+        before extracting the base command so that permission rules
+        match the actual program, not the env setter.
+        """
         try:
             parts = shlex.split(command, posix=True)
             if not parts:
                 return "", [], []
-            return parts[0], parts[1:], parts
+            # Strip leading safe env var assignments
+            i = 0
+            while i < len(parts) and "=" in parts[i]:
+                var_name = parts[i].split("=", 1)[0]
+                if var_name not in _SAFE_ENV_VARS:
+                    break
+                i += 1
+            if i >= len(parts):
+                return parts[0], parts[1:], parts  # all env vars, no command
+            return parts[i], parts[i + 1:], parts
         except ValueError:
             # Handle unbalanced quotes etc
             parts = command.split()
@@ -157,12 +213,85 @@ class CommandGuard:
     def _contains_control_characters(command: str) -> bool:
         return any(ord(ch) < 32 and ch not in {"\t", "\n", "\r"} for ch in command)
 
+    @staticmethod
+    def _check_binary_hijack(command: str) -> Optional[str]:
+        """Detect env var prefixes that hijack binary loading.
+
+        LD_PRELOAD, DYLD_INSERT_LIBRARIES, and PATH= as command prefixes
+        can redirect execution to attacker-controlled shared objects or
+        binaries.  Ported from Claude Code's BINARY_HIJACK_VARS check.
+        """
+        for token in command.split():
+            if "=" not in token:
+                break  # past env var prefix region
+            if _BINARY_HIJACK_RE.match(token):
+                var_name = token.split("=", 1)[0]
+                return f"Binary hijack env var: {var_name}"
+        return None
+
+    @staticmethod
+    def _check_dangerous_removal(command: str) -> Optional[str]:
+        """Detect rm/rmdir targeting critical system paths.
+
+        Ported from Claude Code's checkDangerousRemovalPaths.  Commands
+        like ``rm -rf /`` or ``rm -rf /usr`` are always escalated to
+        REQUIRES_APPROVAL regardless of other allowlist rules.
+        """
+        parts = command.split()
+        if not parts or parts[0] not in ("rm", "rmdir"):
+            return None
+        # Extract path arguments (skip flags, respect --)
+        after_double_dash = False
+        for arg in parts[1:]:
+            if arg == "--":
+                after_double_dash = True
+                continue
+            if not after_double_dash and arg.startswith("-"):
+                continue
+            # Resolve path
+            p = arg.replace("~", str(Path.home()))
+            resolved = str(Path(p).resolve()) if not Path(p).is_absolute() else p
+            resolved = resolved.rstrip("/") or "/"
+            if resolved in _DANGEROUS_PATHS:
+                return f"Dangerous removal target: {resolved}"
+        return None
+
+    @staticmethod
+    def _check_cd_git_compound(command: str) -> Optional[str]:
+        """Detect cd+git in compound commands (bare repo fsmonitor RCE).
+
+        ``cd malicious-repo && git status`` in a bare repo with a crafted
+        fsmonitor hook executes arbitrary code.  Claude Code specifically
+        gates this cross-segment pattern.
+        """
+        subcommands = re.split(r"\s*(?:&&|\|\||;)\s*", command)
+        has_cd = any(s.strip().startswith("cd ") or s.strip() == "cd" for s in subcommands)
+        has_git = any(s.strip().startswith("git ") or s.strip() == "git" for s in subcommands)
+        if has_cd and has_git:
+            return "cd+git compound: bare repo fsmonitor attack vector"
+        return None
+
     def _check_dangerous_patterns(self, command: str) -> Optional[str]:
         """Check for shell injection patterns"""
         if self._contains_obfuscated_whitespace(command):
             return "Unicode whitespace obfuscation"
         if self._contains_control_characters(command):
             return "Control characters"
+
+        # Binary hijack env vars (LD_, DYLD_, PATH=)
+        hijack = self._check_binary_hijack(command)
+        if hijack:
+            return hijack
+
+        # Dangerous removal paths
+        removal = self._check_dangerous_removal(command)
+        if removal:
+            return removal
+
+        # cd+git compound (bare repo attack)
+        cdgit = self._check_cd_git_compound(command)
+        if cdgit:
+            return cdgit
 
         dangerous_patterns = [
             (r':\(\)\s*\{.*?\}\s*;\s*:', "Fork bomb"),
@@ -175,6 +304,7 @@ class CommandGuard:
             (r'(^|[^\\])#["\']', "Comment/quote desynchronization"),
             (r'\|\s*sh', "Pipe to shell"),
             (r'\|\s*bash', "Pipe to bash"),
+            (r'\|\s*zsh', "Pipe to zsh"),
             (r';\s*rm', "Chained deletion"),
             (r'&&\s*rm', "Conditional deletion"),
             (r'\|\|\s*rm', "Fallback deletion"),
@@ -196,6 +326,21 @@ class CommandGuard:
         """Analyze a command and return verdict"""
         base_cmd, args, argv = self._parse_command(command)
         uses_shell_syntax, shell_reason, shell_is_denied = self._detect_shell_syntax(command)
+
+        # DoS protection: cap subcommand count (ported from Claude Code)
+        subcommands = re.split(r"\s*(?:&&|\|\||;|\|)\s*", command)
+        if len(subcommands) > MAX_SUBCOMMANDS:
+            return CommandAnalysis(
+                verdict=CommandVerdict.REQUIRES_APPROVAL,
+                command=command,
+                base_command=base_cmd,
+                parsed_args=args,
+                parsed_argv=argv,
+                reason=f"Compound command has {len(subcommands)} subcommands "
+                       f"(cap: {MAX_SUBCOMMANDS}) — cannot verify safety",
+                risk_level=8,
+                uses_shell_syntax=True,
+            )
 
         # Check for dangerous patterns first
         danger = self._check_dangerous_patterns(command)

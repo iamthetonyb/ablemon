@@ -129,6 +129,11 @@ class AntigravityHarvester(BaseHarvester):
                 "content": sp_content,
             })
 
+        # Strip scaffolding from all messages
+        messages = self._clean_messages(messages)
+        if not messages:
+            return None
+
         if self._is_meta_conversation(messages):
             return None
 

@@ -53,6 +53,11 @@ _SKIP_ENTRY_TYPES: frozenset[str] = frozenset({
     "stream_event",             # Raw API stream events
     "tombstone",                # Removal signals
     "progress",                 # Tool execution progress
+    "comment-label",            # Bash comment label metadata
+    "bash-progress",            # Bash tool progress updates (intermediate output)
+    "code-indexing",            # Code indexing/search telemetry
+    "plugin-hint",              # Plugin recommendation hint records
+    "claude-code-hint",         # Zero-token side-channel hint protocol
 })
 
 # System message subtypes that are scaffolding, not reasoning
