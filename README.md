@@ -165,6 +165,7 @@ Production deploy remains `main`-driven via `.github/workflows/deploy.yml`.
 - `workflow_dispatch` with `ref`: manual branch/tag/SHA deploy
 
 Both the GitHub Action and `deploy-to-server.sh` now install the packaged runtime and start the `able` systemd unit instead of calling `python start.py` directly.
+The deploy path also bootstraps the `able` system user/group if the VPS has not been migrated yet.
 
 ## Notes
 

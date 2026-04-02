@@ -1,3 +1,14 @@
+# ABLE — Code Handoff
+
+This file mirrors the current cross-agent handoff state for auditors and follow-up agents.
+
+Canonical branch: `codex/able-rewrite-integration`
+Canonical integration PR: `#49`
+
+Do not merge atlas-era PRs `#37` through `#48` individually. They are reference inputs only.
+
+---
+
 # ABLE — Claude Handoff
 
 Date: 2026-04-01
@@ -9,7 +20,7 @@ Branch: `codex/able-rewrite-integration`
 - Updated `able/__main__.py` so `able` still serves the packaged gateway by default while `able chat` starts a terminal session that reuses the same pipeline, tools, routing, memory, and transcript logging.
 - Relaxed the gateway constructor so local CLI mode can run without `TELEGRAM_BOT_TOKEN`; telemetry/session logs now record `cli` as a first-class channel.
 - Updated deploy automation to bootstrap the `able` system user/group on the server before chowning runtime paths.
-- Added `CODE_HANDOFF.md` as a stable alias that points auditors back to this file.
+- Added `CODE_HANDOFF.md` as a stable alias for this cross-agent handoff.
 - Replaced the gateway's hardcoded tool list with the shared registry in `able/core/gateway/tool_registry.py`.
 - Added control-plane endpoints in `able/core/gateway/gateway.py`:
   - `/control/tools/catalog`

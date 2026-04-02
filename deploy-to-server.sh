@@ -9,6 +9,8 @@ SSH_KEY="${ABLE_SSH_KEY:-$HOME/.ssh/id_ed25519}"
 REPO_URL="https://github.com/iamthetonyb/ABLE.git"
 REPO_PATH="/opt/able/ABLE"
 RUNTIME_HOME="/home/able/.able"
+APP_USER="able"
+APP_GROUP="able"
 TARGET_REF="${1:-main}"
 
 RED='\033[0;31m'
@@ -32,7 +34,19 @@ ssh_run "echo connected >/dev/null"
 echo -e "${GREEN}SSH ready${NC}"
 echo ""
 
-echo -e "${GREEN}[1/5] Syncing repository...${NC}"
+echo -e "${GREEN}[1/6] Ensuring runtime user...${NC}"
+ssh_run "
+set -euo pipefail
+if ! getent group ${APP_GROUP} >/dev/null 2>&1; then
+  groupadd --system ${APP_GROUP}
+fi
+if ! id -u ${APP_USER} >/dev/null 2>&1; then
+  useradd --system --gid ${APP_GROUP} --create-home --home-dir /home/${APP_USER} --shell /bin/bash ${APP_USER}
+fi
+install -d -o ${APP_USER} -g ${APP_GROUP} /opt/able ${RUNTIME_HOME}
+"
+
+echo -e "${GREEN}[2/6] Syncing repository...${NC}"
 ssh_run "
 set -euo pipefail
 mkdir -p /opt/able
@@ -42,18 +56,18 @@ fi
 cd ${REPO_PATH}
 git fetch --tags origin ${TARGET_REF}
 git checkout -B deployed FETCH_HEAD
-chown -R able:able ${REPO_PATH}
+chown -R ${APP_USER}:${APP_GROUP} ${REPO_PATH}
 "
 
-echo -e "${GREEN}[2/5] Preparing runtime directories...${NC}"
+echo -e "${GREEN}[3/6] Preparing runtime directories...${NC}"
 ssh_run "
 set -euo pipefail
 mkdir -p ${RUNTIME_HOME}
 mkdir -p ${REPO_PATH}/data
-chown -R able:able ${RUNTIME_HOME} ${REPO_PATH}/data
+chown -R ${APP_USER}:${APP_GROUP} ${RUNTIME_HOME} ${REPO_PATH}/data
 "
 
-echo -e "${GREEN}[3/5] Installing Python environment...${NC}"
+echo -e "${GREEN}[4/6] Installing Python environment...${NC}"
 ssh_run "
 set -euo pipefail
 apt-get update -qq >/dev/null
@@ -66,7 +80,7 @@ ${RUNTIME_HOME}/venv/bin/pip install --quiet --upgrade -r ${REPO_PATH}/able/requ
 ${RUNTIME_HOME}/venv/bin/pip install --quiet --upgrade -e ${REPO_PATH}
 "
 
-echo -e "${GREEN}[4/5] Installing systemd unit...${NC}"
+echo -e "${GREEN}[5/6] Installing systemd unit...${NC}"
 ssh_run "
 set -euo pipefail
 cp ${REPO_PATH}/able/able.service /etc/systemd/system/able.service
@@ -74,7 +88,7 @@ systemctl daemon-reload
 systemctl restart able
 "
 
-echo -e "${GREEN}[5/5] Verifying service...${NC}"
+echo -e "${GREEN}[6/6] Verifying service...${NC}"
 ssh_run "
 set -euo pipefail
 systemctl is-active --quiet able

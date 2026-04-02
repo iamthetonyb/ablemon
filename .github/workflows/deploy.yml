@@ -59,6 +59,15 @@ jobs:
           script: |
             set -euo pipefail
 
+            echo "=== Ensuring able system user exists ==="
+            if ! getent group able >/dev/null 2>&1; then
+              groupadd --system able
+            fi
+            if ! id -u able >/dev/null 2>&1; then
+              useradd --system --gid able --create-home --home-dir /home/able --shell /bin/bash able
+            fi
+            install -d -o able -g able /opt/able /home/able/.able
+
             echo "=== Pulling target ref ==="
             if [ ! -d /opt/able/ABLE/.git ]; then
               git clone https://github.com/iamthetonyb/ABLE.git /opt/able/ABLE
