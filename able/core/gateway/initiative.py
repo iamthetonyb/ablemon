@@ -496,7 +496,7 @@ Output ONLY the learnings, no preamble."""
     async def _security_pentest(self):
         """Run weekly self-penetration test and report results."""
         try:
-            from security.self_pentest import run_pentest
+            from able.security.self_pentest import run_pentest
 
             report = await run_pentest(
                 trust_gate=self.gateway.trust_gate,
@@ -520,6 +520,11 @@ Output ONLY the learnings, no preamble."""
                 for r in report.results:
                     if not r.passed:
                         summary += f"  [{r.severity.upper()}] {r.test_id}: {r.attack_vector[:60]}\n"
+
+            if report.external_checks:
+                summary += "\n*External Checks:*\n"
+                for check in report.external_checks:
+                    summary += f"  - {check.get('tool', 'external')}: {check.get('status', 'unknown')}\n"
 
             summary += f"\nFull report: `audit/logs/{report.run_id}.md`"
 

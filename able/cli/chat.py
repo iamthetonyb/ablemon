@@ -229,7 +229,81 @@ class _Spinner:
 
 # ── Buddy helper (inline setup) ──────────────────────────────────────────
 
-async def _buddy_setup_flow(Species, create_starter_buddy, save_buddy, render_starter_selection):
+_FOCUS_OPTIONS = [
+    ("coding", "Ship code, fix bugs, and lean on tools heavily."),
+    ("research", "Gather sources, synthesize context, and investigate."),
+    ("operations", "Run deploys, infra, automations, and steady operator work."),
+    ("creative", "Write, message, position, and content."),
+    ("security", "Audit, harden, and pressure-test the system."),
+    ("general-business", "Mixed product, ops, research, and growth work."),
+]
+
+_WORK_STYLE_OPTIONS = [
+    ("solo-operator", "One operator managing most of the stack."),
+    ("builder", "Mostly engineering and product build work."),
+    ("client-delivery", "Customer work, launches, and delivery pressure."),
+    ("mixed-team", "A rotating mix of build, ops, and review."),
+]
+
+_DISTILLATION_OPTIONS = [
+    ("9b-fast-local", "Fast local/T4-first distillation and lighter demos."),
+    ("27b-deep-h100", "Heavier H100 runs for deep-quality promotions."),
+    ("hybrid", "Iterate on 9B and promote the best work to 27B."),
+]
+
+
+async def _choose_profile_option(title: str, options: list[tuple[str, str]]) -> str:
+    print(f"\n  {_c(BOLD, title)}")
+    for idx, (value, description) in enumerate(options, 1):
+        print(f"    [{idx}] {value.replace('-', ' ')} — {description}")
+    while True:
+        choice = (await asyncio.to_thread(input, "  pick a number (Enter for recommended): ")).strip()
+        if not choice:
+            return options[0][0]
+        if choice.isdigit():
+            index = int(choice) - 1
+            if 0 <= index < len(options):
+                return options[index][0]
+        print(f"  {_c(YELLOW, 'choose one of the listed numbers')}")
+
+
+def _distillation_hint(track: str) -> str:
+    hints = {
+        "9b-fast-local": "Distillation lane: start with the 9B T4/local path. It is the fastest way to build corpus and demo quickly.",
+        "27b-deep-h100": "Distillation lane: keep collecting locally, then promote the strongest eval-backed corpus to the 27B H100 path.",
+        "hybrid": "Distillation lane: iterate on 9B for speed, then promote the best work to 27B when the corpus is ready.",
+    }
+    return hints.get(track, hints["hybrid"])
+
+
+async def _buddy_onboarding_flow(update_collection_profile):
+    """Capture operator-facing preferences after the starter is chosen."""
+    print(f"\n  {_c(BOLD, 'buddy onboarding')}")
+    print("  This sets the companion up for your main domain focus and preferred distillation lane.")
+    focus = await _choose_profile_option("Primary focus", _FOCUS_OPTIONS)
+    work_style = await _choose_profile_option("Work style", _WORK_STYLE_OPTIONS)
+    distillation_track = await _choose_profile_option("Distillation track", _DISTILLATION_OPTIONS)
+    profile = {
+        "focus": focus,
+        "work_style": work_style,
+        "distillation_track": distillation_track,
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    collection = update_collection_profile(profile)
+    print(f"  {_c(GREEN, 'saved')} profile: {focus} · {work_style} · {distillation_track}")
+    print(f"  {_c(DIM, _distillation_hint(distillation_track))}")
+    return collection
+
+
+async def _buddy_setup_flow(
+    Species,
+    create_starter_buddy,
+    save_buddy,
+    render_starter_selection,
+    update_collection_profile,
+    *,
+    allow_skip: bool,
+):
     """Quick inline buddy creation. Returns buddy or None."""
     species_list = list(Species)
     print(render_starter_selection())
@@ -237,10 +311,11 @@ async def _buddy_setup_flow(Species, create_starter_buddy, save_buddy, render_st
         try:
             choice = await asyncio.to_thread(
                 input,
-                f"  {_c(GREEN, 'pick')} [1-{len(species_list)}] or Enter to skip: ",
+                f"  {_c(GREEN, 'pick')} [1-{len(species_list)}]"
+                + (" or Enter to skip: " if allow_skip else ": "),
             )
             choice = choice.strip().lower()
-            if not choice or choice in {"s", "skip"}:
+            if allow_skip and (not choice or choice in {"s", "skip"}):
                 return None
             if choice.isdigit():
                 idx = int(choice) - 1
@@ -256,20 +331,65 @@ async def _buddy_setup_flow(Species, create_starter_buddy, save_buddy, render_st
                         created_at=datetime.now(timezone.utc).isoformat(),
                     )
                     save_buddy(buddy)
+                    await _buddy_onboarding_flow(update_collection_profile)
                     shiny_tag = " shiny!" if buddy.is_shiny else ""
                     print(f"  {buddy.display_emoji} {name} the {buddy.meta['label']} joins you!{shiny_tag}")
                     return buddy
-            print(f"  {_c(YELLOW, 'choose 1-5 or press Enter to skip')}")
+            if allow_skip:
+                print(f"  {_c(YELLOW, 'choose 1-5 or press Enter to skip')}")
+            else:
+                print(f"  {_c(YELLOW, 'starter selection is required — choose 1-5')}")
         except (EOFError, KeyboardInterrupt):
             break
     return None
 
 
+def _collection_snapshot(collection) -> tuple[set[str], set[str], bool]:
+    if not collection:
+        return set(), set(), False
+    species = set(collection.buddies.keys())
+    badges = {badge.get("id", "") for badge in collection.badges}
+    return species, badges, bool(collection.easter_egg_title)
+
+
+def _profile_is_complete(collection) -> bool:
+    return bool(collection and collection.operator_profile.get("completed_at"))
+
+
+def _print_collection_updates(before_collection, after_collection) -> None:
+    if not after_collection:
+        return
+    before_species, before_badges, before_easter = _collection_snapshot(before_collection)
+    after_species, after_badges, after_easter = _collection_snapshot(after_collection)
+
+    for species_id in sorted(after_species - before_species):
+        active = after_collection.buddies.get(species_id)
+        if not active:
+            continue
+        buddy = after_collection.get_active_buddy() if after_collection.active_species == species_id else None
+        if buddy is None:
+            from able.core.buddy.model import BuddyState
+            buddy = BuddyState(**{
+                k: v for k, v in active.items()
+                if k in BuddyState.__dataclass_fields__
+            })
+        print(f"  🎒 caught {buddy.display_emoji} {buddy.name} the {buddy.meta['label']}!")
+
+    for badge in after_collection.badges:
+        badge_id = badge.get("id", "")
+        if badge_id and badge_id not in before_badges:
+            print(f"  🏅 badge unlocked: {badge['title']}")
+
+    if after_easter and not before_easter:
+        print(f"  ✨ easter egg unlocked: {after_collection.easter_egg_title}")
+
+
 # ── Slash command handler ─────────────────────────────────────────────────
 
 async def _handle_slash(message, gateway, args, buddy, load_buddy, save_buddy,
-                        Species, create_starter_buddy, render_full, render_banner,
-                        render_battle_result, render_evolution, render_legendary_unlock):
+                        load_buddy_collection, switch_active_buddy, update_collection_profile, record_collection_progress,
+                        Species, create_starter_buddy, render_full, render_banner, render_backpack,
+                        render_starter_selection, render_battle_result, render_evolution, render_legendary_unlock):
     """Handle slash commands. Returns (handled: bool, updated_buddy)."""
     if message in {"/exit", "/quit", "/q"}:
         print(_c(DIM, "  bye"))
@@ -283,7 +403,9 @@ async def _handle_slash(message, gateway, args, buddy, load_buddy, save_buddy,
         print(f"  {_c(BOLD, '/resources')}  control plane inventory")
         print(f"  {_c(BOLD, '/eval')}       distillation progress")
         print(f"  {_c(BOLD, '/evolve')}     run evolution cycle")
-        print(f"  {_c(BOLD, '/buddy')}      your buddy stats & setup")
+        print(f"  {_c(BOLD, '/buddy')}      active buddy stats")
+        print(f"  {_c(BOLD, '/buddy bag')}  backpack + dex progress")
+        print(f"  {_c(BOLD, '/buddy switch <name>')}  switch active buddy")
         print(f"  {_c(BOLD, '/battle')}     eval-based battle")
         print(f"  {_c(BOLD, '/exit')}       quit")
         print(_c(DIM, "  ─────────────────────────────────────"))
@@ -353,12 +475,87 @@ async def _handle_slash(message, gateway, args, buddy, load_buddy, save_buddy,
             print(_c(DIM, "  evolution daemon not running"))
         return True, buddy
 
-    if message == "/buddy":
+    if message.startswith("/buddy"):
+        parts = message.split()
+        subcommand = parts[1].lower() if len(parts) > 1 else ""
+        collection = load_buddy_collection()
+
+        if subcommand in {"bag", "backpack", "party", "dex", "badges"}:
+            print(render_backpack(collection))
+            return True, load_buddy()
+
+        if subcommand in {"switch", "choose", "equip"}:
+            if len(parts) < 3:
+                print(_c(DIM, "  usage: /buddy switch <name|species>"))
+                return True, buddy
+            switched = switch_active_buddy(" ".join(parts[2:]))
+            if switched:
+                print(f"  active buddy set to {switched.display_emoji} {switched.name} the {switched.meta['label']}")
+                print(render_banner(switched))
+                return True, switched
+            print(_c(DIM, "  buddy not found in backpack"))
+            return True, buddy
+
+        if subcommand in {"setup", "starter"}:
+            if collection and collection.buddies:
+                if not _profile_is_complete(collection) and len(collection.buddies) <= 1:
+                    print(_c(DIM, "  starter selection is required to finish initial setup."))
+                    from able.core.buddy.model import reset_buddy_collection
+                    reset_buddy_collection()
+                    buddy = await _buddy_setup_flow(
+                        Species,
+                        create_starter_buddy,
+                        save_buddy,
+                        render_starter_selection,
+                        update_collection_profile,
+                        allow_skip=False,
+                    )
+                    return True, buddy
+                print(render_backpack(collection))
+                await _buddy_onboarding_flow(update_collection_profile)
+                print(_c(DIM, "  starter team kept. use /buddy switch <name> to rotate."))
+                return True, load_buddy()
+            buddy = await _buddy_setup_flow(
+                Species,
+                create_starter_buddy,
+                save_buddy,
+                render_starter_selection,
+                update_collection_profile,
+                allow_skip=False,
+            )
+            return True, buddy
+
         buddy = load_buddy()
+        if collection and collection.buddies and not _profile_is_complete(collection):
+            if len(collection.buddies) <= 1:
+                print(_c(DIM, "  starter selection is required before the buddy system goes live."))
+                from able.core.buddy.model import reset_buddy_collection
+                reset_buddy_collection()
+                buddy = await _buddy_setup_flow(
+                    Species,
+                    create_starter_buddy,
+                    save_buddy,
+                    render_starter_selection,
+                    update_collection_profile,
+                    allow_skip=False,
+                )
+                return True, buddy
+            await _buddy_onboarding_flow(update_collection_profile)
+            collection = load_buddy_collection()
+            buddy = load_buddy()
         if buddy:
             print(render_full(buddy))
+            if collection and len(collection.buddies) > 1:
+                print(render_backpack(collection))
         else:
-            buddy = await _buddy_setup_flow(Species, create_starter_buddy, save_buddy)
+            buddy = await _buddy_setup_flow(
+                Species,
+                create_starter_buddy,
+                save_buddy,
+                render_starter_selection,
+                update_collection_profile,
+                allow_skip=False,
+            )
         return True, buddy
 
     if message.startswith("/battle"):
@@ -389,6 +586,7 @@ async def _handle_slash(message, gateway, args, buddy, load_buddy, save_buddy,
             print(f"  no eval config for '{domain}'")
             return True, buddy
 
+        collection_before = load_buddy_collection()
         was_legendary = buddy.legendary_title
         buddy.record_battle(record)
         restored = buddy.feed("battle")
@@ -405,8 +603,14 @@ async def _handle_slash(message, gateway, args, buddy, load_buddy, save_buddy,
         elif not was_legendary and buddy.legendary_title:
             print(render_legendary_unlock(buddy))
         save_buddy(buddy)
+        collection_update = record_collection_progress(
+            domain,
+            points=4 if record.result == "win" else 2 if record.result == "draw" else 1,
+        )
         print(render_battle_result(buddy, record.domain, record.passed, record.total, record.result, record.xp_earned))
         print(render_banner(buddy))
+        if collection_update["new_buddies"] or collection_update["new_badges"] or collection_update["easter_egg_unlocked"]:
+            _print_collection_updates(collection_before, load_buddy_collection())
         return True, buddy
 
     return False, buddy
@@ -415,19 +619,35 @@ async def _handle_slash(message, gateway, args, buddy, load_buddy, save_buddy,
 # ── Main chat loop ────────────────────────────────────────────────────────
 
 async def run_chat(args: argparse.Namespace) -> int:
-    from able.core.buddy.model import load_buddy, save_buddy, Species, create_starter_buddy
+    from able.core.buddy.model import (
+        load_buddy,
+        load_buddy_collection,
+        reset_buddy_collection,
+        save_buddy,
+        switch_active_buddy,
+        update_collection_profile,
+        record_collection_progress,
+        Species,
+        create_starter_buddy,
+    )
     from able.core.buddy.renderer import (
-        render_banner, render_header, render_full, render_starter_selection,
+        render_backpack, render_banner, render_header, render_full, render_starter_selection,
         render_battle_result, render_evolution, render_legendary_unlock,
     )
 
-    buddy = load_buddy()
-    if buddy is None and sys.stdin.isatty():
+    collection = load_buddy_collection()
+    buddy = load_buddy() if _profile_is_complete(collection) else None
+    if sys.stdin.isatty() and not _profile_is_complete(collection):
+        if collection and collection.buddies and len(collection.buddies) <= 1:
+            print(_c(DIM, "  starter selection is required to finish initial setup."))
+            reset_buddy_collection()
         buddy = await _buddy_setup_flow(
             Species,
             create_starter_buddy,
             save_buddy,
             render_starter_selection,
+            update_collection_profile,
+            allow_skip=False,
         )
 
     gateway = None
@@ -499,13 +719,15 @@ async def run_chat(args: argparse.Namespace) -> int:
             if message.startswith("/"):
                 handled, buddy = await _handle_slash(
                     message, gateway, args, buddy, load_buddy, save_buddy,
-                    Species, create_starter_buddy, render_full, render_banner,
-                    render_battle_result, render_evolution, render_legendary_unlock,
+                    load_buddy_collection, switch_active_buddy, update_collection_profile, record_collection_progress,
+                    Species, create_starter_buddy, render_full, render_banner, render_backpack,
+                    render_starter_selection, render_battle_result, render_evolution, render_legendary_unlock,
                 )
                 if handled:
                     continue
 
             # Log inbound
+            collection_before = load_buddy_collection()
             gateway.transcript_manager.log_message(
                 args.client,
                 {"user_id": args.session, "message": message,
@@ -597,6 +819,7 @@ async def run_chat(args: argparse.Namespace) -> int:
                 if new_buddy and not showed_legendary and not old_legendary and new_buddy.legendary_title:
                     print(render_legendary_unlock(new_buddy))
                 buddy = new_buddy or buddy
+                _print_collection_updates(collection_before, load_buddy_collection())
             except Exception:
                 pass
     finally:

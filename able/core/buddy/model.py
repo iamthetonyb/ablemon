@@ -245,6 +245,43 @@ LEGENDARY_REQUIREMENTS = {
     ),
 }
 
+CATCH_PROGRESS_TARGET = 12
+
+BADGE_DEFS = {
+    "starter-license": {
+        "title": "Starter License",
+        "description": "Choose your first buddy.",
+    },
+    "field-guide": {
+        "title": "Field Guide",
+        "description": "Catch at least 3 buddy species.",
+    },
+    "full-dex": {
+        "title": "Full Dex",
+        "description": "Catch all 5 starter species.",
+    },
+    "evolution-league": {
+        "title": "Evolution League",
+        "description": "Evolve the full roster to Stage 3.",
+    },
+    "legendary-league": {
+        "title": "Legendary League",
+        "description": "Unlock legendary form on the full roster.",
+    },
+    "master-trainer": {
+        "title": "Master Trainer",
+        "description": "Reach level 40 with the full roster.",
+    },
+}
+
+OMNIDEX_EASTER_EGG = {
+    "title": "Apex Archive",
+    "message": (
+        "100% completion reached. You caught the full ABLE dex, "
+        "evolved every line, and awakened the hidden sixth signal."
+    ),
+}
+
 
 # ── XP and leveling ─────────────────────────────────────────────────────
 
@@ -690,6 +727,49 @@ class BuddyState:
         self.unlock_legendary()
 
 
+@dataclass
+class BuddyCollection:
+    """Persistent collection of caught buddies with one active party member."""
+
+    active_species: str = ""
+    buddies: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    catch_progress: Dict[str, int] = field(default_factory=dict)
+    operator_profile: Dict[str, str] = field(default_factory=dict)
+    badges: List[Dict[str, str]] = field(default_factory=list)
+    easter_egg_title: str = ""
+    easter_egg_message: str = ""
+    easter_egg_unlocked_at: str = ""
+
+    def list_buddies(self) -> List[BuddyState]:
+        order = {species.value: idx for idx, species in enumerate(Species)}
+        buddies = [_deserialize_buddy(data) for data in self.buddies.values()]
+        return sorted(
+            [buddy for buddy in buddies if buddy is not None],
+            key=lambda buddy: order.get(buddy.species, 999),
+        )
+
+    def get_active_buddy(self) -> Optional[BuddyState]:
+        if self.active_species and self.active_species in self.buddies:
+            return _deserialize_buddy(self.buddies[self.active_species])
+        buddies = self.list_buddies()
+        if buddies:
+            self.active_species = buddies[0].species
+            return buddies[0]
+        return None
+
+    def upsert_buddy(self, buddy: BuddyState, *, make_active: bool = False) -> None:
+        self.buddies[buddy.species] = _serialize_buddy(buddy)
+        self.catch_progress.setdefault(buddy.species, CATCH_PROGRESS_TARGET)
+        if make_active or not self.active_species:
+            self.active_species = buddy.species
+
+    def get_progress(self, species: Species) -> int:
+        return int(self.catch_progress.get(species.value, 0))
+
+    def badge_ids(self) -> set[str]:
+        return {badge.get("id", "") for badge in self.badges}
+
+
 def starter_is_shiny(
     *,
     name: str,
@@ -729,28 +809,10 @@ def create_starter_buddy(
 # ── Persistence ──────────────────────────────────────────────────────────
 
 BUDDY_PATH = Path.home() / ".able" / "buddy.yaml"
+BUDDY_COLLECTION_PATH = Path.home() / ".able" / "buddy_collection.yaml"
 
-
-def load_buddy() -> Optional[BuddyState]:
-    """Load buddy state from disk.  Returns None if not yet created."""
-    if not BUDDY_PATH.exists():
-        return None
-    try:
-        data = yaml.safe_load(BUDDY_PATH.read_text(encoding="utf-8"))
-        if not data or not isinstance(data, dict):
-            return None
-        return BuddyState(**{
-            k: v for k, v in data.items()
-            if k in BuddyState.__dataclass_fields__
-        })
-    except Exception:
-        return None
-
-
-def save_buddy(buddy: BuddyState) -> None:
-    """Persist buddy state to disk."""
-    BUDDY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    data = {
+def _serialize_buddy(buddy: BuddyState) -> Dict[str, Any]:
+    return {
         "name": buddy.name,
         "species": buddy.species,
         "stage": buddy.stage,
@@ -777,7 +839,248 @@ def save_buddy(buddy: BuddyState) -> None:
         "domains_used_today": buddy.domains_used_today,
         "domains_today_date": buddy.domains_today_date,
     }
-    BUDDY_PATH.write_text(
-        yaml.dump(data, default_flow_style=False, sort_keys=False),
+
+
+def _deserialize_buddy(data: Dict[str, Any] | None) -> Optional[BuddyState]:
+    try:
+        if not data or not isinstance(data, dict):
+            return None
+        return BuddyState(**{
+            k: v for k, v in data.items()
+            if k in BuddyState.__dataclass_fields__
+        })
+    except Exception:
+        return None
+
+
+def _load_legacy_buddy(path: Path | None = None) -> Optional[BuddyState]:
+    path = path or BUDDY_PATH
+    if not path.exists():
+        return None
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return _deserialize_buddy(data)
+
+
+def _unlock_badge(collection: BuddyCollection, badge_id: str) -> Optional[Dict[str, str]]:
+    if badge_id in collection.badge_ids():
+        return None
+    badge_def = BADGE_DEFS[badge_id]
+    badge = {
+        "id": badge_id,
+        "title": badge_def["title"],
+        "description": badge_def["description"],
+        "unlocked_at": datetime.now(timezone.utc).isoformat(),
+    }
+    collection.badges.append(badge)
+    return badge
+
+
+def _refresh_collection_rewards(collection: BuddyCollection) -> Dict[str, Any]:
+    buddies = collection.list_buddies()
+    total_species = len(Species)
+    new_badges: List[Dict[str, str]] = []
+
+    if len(buddies) >= 1:
+        badge = _unlock_badge(collection, "starter-license")
+        if badge:
+            new_badges.append(badge)
+    if len(buddies) >= 3:
+        badge = _unlock_badge(collection, "field-guide")
+        if badge:
+            new_badges.append(badge)
+    if len(buddies) == total_species:
+        badge = _unlock_badge(collection, "full-dex")
+        if badge:
+            new_badges.append(badge)
+    if len(buddies) == total_species and all(b.stage >= Stage.EVOLVED.value for b in buddies):
+        badge = _unlock_badge(collection, "evolution-league")
+        if badge:
+            new_badges.append(badge)
+    if len(buddies) == total_species and all(b.is_legendary for b in buddies):
+        badge = _unlock_badge(collection, "legendary-league")
+        if badge:
+            new_badges.append(badge)
+    if len(buddies) == total_species and all(b.level >= LEGENDARY_REQUIREMENTS["min_level"] for b in buddies):
+        badge = _unlock_badge(collection, "master-trainer")
+        if badge:
+            new_badges.append(badge)
+
+    easter_egg_unlocked = False
+    if (
+        len(buddies) == total_species
+        and all(b.stage >= Stage.EVOLVED.value for b in buddies)
+        and all(b.is_legendary for b in buddies)
+        and all(b.level >= LEGENDARY_REQUIREMENTS["min_level"] for b in buddies)
+        and not collection.easter_egg_title
+    ):
+        collection.easter_egg_title = OMNIDEX_EASTER_EGG["title"]
+        collection.easter_egg_message = OMNIDEX_EASTER_EGG["message"]
+        collection.easter_egg_unlocked_at = datetime.now(timezone.utc).isoformat()
+        easter_egg_unlocked = True
+
+    return {
+        "new_badges": new_badges,
+        "easter_egg_unlocked": easter_egg_unlocked,
+    }
+
+
+def load_buddy_collection() -> Optional[BuddyCollection]:
+    """Load the buddy collection, migrating from the legacy single-buddy file if needed."""
+    if BUDDY_COLLECTION_PATH.exists():
+        try:
+            raw = yaml.safe_load(BUDDY_COLLECTION_PATH.read_text(encoding="utf-8")) or {}
+        except Exception:
+            raw = {}
+        collection = BuddyCollection(
+            active_species=str(raw.get("active_species", "")),
+            buddies={
+                str(species): data
+                for species, data in (raw.get("buddies") or {}).items()
+                if isinstance(data, dict)
+            },
+            catch_progress={
+                str(species): int(value)
+                for species, value in (raw.get("catch_progress") or {}).items()
+            },
+            operator_profile={
+                str(key): str(value)
+                for key, value in (raw.get("operator_profile") or {}).items()
+            },
+            badges=list(raw.get("badges") or []),
+            easter_egg_title=str(raw.get("easter_egg_title", "")),
+            easter_egg_message=str(raw.get("easter_egg_message", "")),
+            easter_egg_unlocked_at=str(raw.get("easter_egg_unlocked_at", "")),
+        )
+        if not collection.active_species:
+            active = collection.get_active_buddy()
+            if active:
+                collection.active_species = active.species
+        return collection
+
+    legacy = _load_legacy_buddy()
+    if legacy is None:
+        return None
+    collection = BuddyCollection(active_species=legacy.species)
+    collection.upsert_buddy(legacy, make_active=True)
+    _refresh_collection_rewards(collection)
+    save_buddy_collection(collection)
+    return collection
+
+
+def save_buddy_collection(collection: BuddyCollection) -> None:
+    """Persist the collection and keep the legacy active-buddy mirror in sync."""
+    BUDDY_COLLECTION_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "active_species": collection.active_species,
+        "buddies": collection.buddies,
+        "catch_progress": collection.catch_progress,
+        "operator_profile": collection.operator_profile,
+        "badges": collection.badges,
+        "easter_egg_title": collection.easter_egg_title,
+        "easter_egg_message": collection.easter_egg_message,
+        "easter_egg_unlocked_at": collection.easter_egg_unlocked_at,
+    }
+    BUDDY_COLLECTION_PATH.write_text(
+        yaml.dump(payload, default_flow_style=False, sort_keys=False),
         encoding="utf-8",
     )
+
+    active = collection.get_active_buddy()
+    if active is not None:
+        BUDDY_PATH.write_text(
+            yaml.dump(_serialize_buddy(active), default_flow_style=False, sort_keys=False),
+            encoding="utf-8",
+        )
+
+
+def list_buddies() -> List[BuddyState]:
+    collection = load_buddy_collection()
+    return collection.list_buddies() if collection else []
+
+
+def switch_active_buddy(selector: str) -> Optional[BuddyState]:
+    """Switch the active buddy by species, label, or chosen name."""
+    collection = load_buddy_collection()
+    if collection is None:
+        return None
+    normalized = selector.strip().lower()
+    for buddy in collection.list_buddies():
+        if normalized in {buddy.species, buddy.meta["label"].lower(), buddy.name.lower()}:
+            collection.active_species = buddy.species
+            save_buddy_collection(collection)
+            return buddy
+    return None
+
+
+def update_collection_profile(profile: Dict[str, str]) -> BuddyCollection:
+    """Persist operator-facing buddy onboarding preferences."""
+    collection = load_buddy_collection() or BuddyCollection()
+    cleaned = {
+        str(key): str(value).strip()
+        for key, value in profile.items()
+        if str(value).strip()
+    }
+    collection.operator_profile.update(cleaned)
+    save_buddy_collection(collection)
+    return collection
+
+
+def reset_buddy_collection() -> None:
+    """Delete buddy persistence when the operator needs to re-run starter setup."""
+    for path in (BUDDY_PATH, BUDDY_COLLECTION_PATH):
+        try:
+            if path.exists():
+                path.unlink()
+        except OSError:
+            continue
+
+
+def record_collection_progress(domain: str, *, points: int = 1) -> Dict[str, Any]:
+    """Advance catch progress for uncaught species tied to the domain worked on."""
+    collection = load_buddy_collection()
+    if collection is None or not domain or domain == "default":
+        return {"new_buddies": [], "new_badges": [], "easter_egg_unlocked": False}
+
+    new_buddies: List[BuddyState] = []
+    for species, meta in SPECIES_META.items():
+        if domain not in meta.get("bonus_domains", []):
+            continue
+        current = collection.catch_progress.get(species.value, 0)
+        collection.catch_progress[species.value] = current + max(points, 0)
+        if species.value not in collection.buddies and collection.catch_progress[species.value] >= CATCH_PROGRESS_TARGET:
+            new_buddy = create_starter_buddy(
+                name=meta["label"],
+                species=species,
+                catch_phrase=f"Caught through {domain} work.",
+                created_at=datetime.now(timezone.utc).isoformat(),
+            )
+            collection.upsert_buddy(new_buddy, make_active=False)
+            new_buddies.append(new_buddy)
+
+    reward_update = _refresh_collection_rewards(collection)
+    save_buddy_collection(collection)
+    return {
+        "new_buddies": new_buddies,
+        "new_badges": reward_update["new_badges"],
+        "easter_egg_unlocked": reward_update["easter_egg_unlocked"],
+    }
+
+
+def load_buddy() -> Optional[BuddyState]:
+    """Load the active buddy from disk. Returns None if none has been created."""
+    collection = load_buddy_collection()
+    if collection is not None:
+        return collection.get_active_buddy()
+    return _load_legacy_buddy()
+
+
+def save_buddy(buddy: BuddyState) -> None:
+    """Persist the active buddy and synchronize the collection state."""
+    collection = load_buddy_collection() or BuddyCollection()
+    make_active = not collection.active_species or collection.active_species == buddy.species
+    collection.upsert_buddy(buddy, make_active=make_active)
+    _refresh_collection_rewards(collection)
+    save_buddy_collection(collection)

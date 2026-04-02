@@ -8,13 +8,16 @@ from __future__ import annotations
 
 from .model import (
     BuddyState,
+    BuddyCollection,
     BuddyStats,
     BuddyNeeds,
     SPECIES_META,
     STAGE_NAMES,
     EVOLUTION_REQUIREMENTS,
     LEGENDARY_REQUIREMENTS,
+    CATCH_PROGRESS_TARGET,
     Stage,
+    Species,
 )
 
 
@@ -243,6 +246,61 @@ def render_battle_result(
     return "\n".join(lines)
 
 
+def render_backpack(collection: BuddyCollection | None) -> str:
+    """Backpack / dex view for owned buddies, progress, and completion rewards."""
+    if collection is None or not collection.buddies:
+        return "  No buddies caught yet."
+
+    lines = []
+    lines.append(f"{'=' * 54}")
+    lines.append("  Buddy Backpack")
+    lines.append(f"{'=' * 54}")
+
+    owned = collection.list_buddies()
+    lines.append(f"  Caught: {len(owned)}/{len(Species)}")
+    if collection.operator_profile:
+        focus = collection.operator_profile.get("focus", "unset")
+        work_style = collection.operator_profile.get("work_style", "unset")
+        distillation = collection.operator_profile.get("distillation_track", "unset")
+        lines.append(
+            f"  Operator profile: {focus} · {work_style} · {distillation}"
+        )
+    for buddy in owned:
+        active = "▶" if collection.active_species == buddy.species else " "
+        stage = STAGE_NAMES[buddy.stage_enum]
+        lines.append(
+            f"  {active} {buddy.display_emoji} {buddy.name:<12} "
+            f"Lv.{buddy.level:<3} {stage:<8} {buddy.rarity_label}"
+        )
+
+    missing = [species for species in Species if species.value not in collection.buddies]
+    if missing:
+        lines.append(f"{'─' * 54}")
+        lines.append("  Uncaught")
+        for species in missing:
+            meta = SPECIES_META[species]
+            progress = min(collection.get_progress(species), CATCH_PROGRESS_TARGET)
+            lines.append(
+                f"  [{progress:>2}/{CATCH_PROGRESS_TARGET}] {meta['emoji']} {meta['label']} "
+                f"· {meta['best_for']}"
+            )
+
+    if collection.badges:
+        lines.append(f"{'─' * 54}")
+        lines.append("  Badges")
+        for badge in collection.badges:
+            lines.append(f"  🏅 {badge['title']} — {badge['description']}")
+
+    if collection.easter_egg_title:
+        lines.append(f"{'─' * 54}")
+        lines.append(f"  ✨ Easter Egg: {collection.easter_egg_title}")
+        if collection.easter_egg_message:
+            lines.append(f"  {collection.easter_egg_message}")
+
+    lines.append(f"{'=' * 54}")
+    return "\n".join(lines)
+
+
 def render_starter_selection() -> str:
     """Starter selection menu for first run."""
     lines = []
@@ -274,5 +332,5 @@ def render_starter_selection() -> str:
 
     lines.append(f"{'=' * 72}")
     lines.append("  Rare hatch chance: some starters emerge as Shiny variants.")
-    lines.append("  Skip for now if you want to start chatting immediately. Use /buddy later to set one up.")
+    lines.append("  Interactive chat requires a starter pick. Non-interactive sessions skip this flow.")
     return "\n".join(lines)

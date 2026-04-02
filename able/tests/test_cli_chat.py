@@ -5,8 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from able.cli.chat import TerminalApprovalWorkflow, build_parser
+from able.cli.chat import TerminalApprovalWorkflow, _handle_slash, build_parser
 from able.core.approval.workflow import ApprovalStatus
+from able.core.buddy.model import BuddyState
 from able.core.gateway.gateway import ABLEGateway
 
 
@@ -161,3 +162,38 @@ async def test_stream_message_does_not_duplicate_after_partial_output():
 
     assert chunks == ["partial "]
     assert chain.complete_called is False
+
+
+@pytest.mark.asyncio
+async def test_buddy_slash_uses_setup_flow_when_no_active_buddy(monkeypatch):
+    created = BuddyState(name="Wave", species="wave")
+
+    async def fake_setup(*args, **kwargs):
+        return created
+
+    monkeypatch.setattr("able.cli.chat._buddy_setup_flow", fake_setup)
+
+    handled, buddy = await _handle_slash(
+        "/buddy",
+        SimpleNamespace(),
+        SimpleNamespace(session="local", client="master"),
+        None,
+        lambda: None,
+        lambda value: None,
+        lambda: None,
+        lambda selector: None,
+        lambda profile: None,
+        lambda domain, points=1: {"new_buddies": [], "new_badges": [], "easter_egg_unlocked": False},
+        object(),
+        lambda **kwargs: created,
+        lambda current: "full",
+        lambda current: "banner",
+        lambda collection: "bag",
+        lambda: "starter",
+        lambda *args: "battle",
+        lambda *args: "evolution",
+        lambda *args: "legendary",
+    )
+
+    assert handled is True
+    assert buddy is created

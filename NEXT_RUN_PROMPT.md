@@ -42,15 +42,17 @@ All four learning feedback loops are closed and tested:
 **Buddy gamification system** (system-wide, all channels):
 - 5 starter species, 3 evolution stages, XP from real interactions
 - Deterministic shiny starter hatch + earned legendary form tied to real runtime milestones
+- Interactive first-run setup now requires a real starter pick plus onboarding for `focus`, `work_style`, and `distillation_track`
+- Backpack/collection system is live: `/buddy bag`, `/buddy switch <name>`, badges, full-dex completion, and easter egg unlocks
 - **Needs/Tamagotchi layer**: hunger (evals), thirst (evolution), energy (domain exploration) — decay over time, restored by real actions
 - Mood system with context-aware messages and cross-channel nudges
 - Battles tied to real promptfoo evals, domain bonuses per species
 - XP awards in the gateway (fires on Telegram, CLI, API — not channel-specific)
 - Proactive engine `BuddyNeedsCheck` runs every 2h for auto-nudges
 - Telegram nudges appended to responses when needs are low
-- CLI renders rarity badges, streaks, and legendary unlock state correctly
+- CLI renders rarity badges, streaks, legendary unlock state, and operator profile/backpack status correctly
 - Starter selection now explains each species in plain language: element, role, best-for domains, abilities, and the fact that the choice affects buddy flavor/bonus XP rather than routing
-- 47 tests covering model, persistence, rendering, battles, rarity, XP, needs, and mood
+- 53 buddy tests covering model, persistence, onboarding/profile state, rendering, battles, rarity, XP, needs, and mood
 
 **Streaming + approval UX**:
 - `stream_message()` async generator in the gateway — runs full pipeline then streams AI response
@@ -68,6 +70,11 @@ All four learning feedback loops are closed and tested:
 - Existing `/opt/able/ABLE` working trees are re-owned by `able` before fetch/checkout
 - This fixes Git's `dubious ownership` failure during deploy without weakening `safe.directory`
 
+**Reports + Security Sidecars**:
+- Research scout writes readable operator-facing output to `~/.able/reports/research/latest.md` plus `latest.json`
+- Dated JSON still mirrors to `data/research_reports/`
+- Strix is now represented as a real optional sidecar in the control plane and weekly pentest path, not just a placeholder note
+
 **Terminal UX overhaul**:
 - One-command install: `bash install.sh` — handles Python, venv, deps, PATH, workspace init. `able` and `able-chat` work from any terminal.
 - Bare `able` defaults to `chat` in interactive terminals, `serve` in non-interactive.
@@ -80,9 +87,9 @@ All four learning feedback loops are closed and tested:
 - Response timing `[1.2s]` after each response.
 - Slash command shortcuts: `/q`, `/h`, `/?`. Formatted help table.
 - Claude Code-style header with buddy ASCII art mascot and stats.
-- Buddy selection is skippable, `/buddy` supports mid-session setup, and non-interactive sessions auto-skip the first-run buddy prompt.
+- Buddy setup is required in interactive first-run sessions, `/buddy setup` can refresh onboarding later, and non-interactive sessions auto-skip the first-run prompt.
 - Clean gateway teardown closes provider/web/studio sessions so `/exit` no longer leaks unclosed `aiohttp` sessions.
-- 55 focused CLI/buddy tests (8 CLI chat + 47 buddy).
+- 62 focused CLI/buddy tests (9 CLI chat + 53 buddy).
 
 **Test suite**:
 - This pass revalidated CLI smoke, buddy, and focused new-surface tests
@@ -98,7 +105,7 @@ Good work usually looks like:
 - grow the distillation corpus toward 100+ pairs for H100 fine-tuning
 - cut live startup and first-response latency further
 - harden runtime seams (deploy, gateway, approval, control plane)
-- add Studio dashboard integration for buddy and routing metrics
+- add Studio dashboard integration for buddy, roster, operator profile, and routing metrics
 - add missing tests around new or risky surfaces
 - fix doc/runtime drift
 
@@ -128,6 +135,7 @@ python3 -m able chat --help
 python3 -m pytest able/tests/test_cli_chat.py -x
 cd /tmp && ~/.local/bin/able chat --help
 cd /tmp && printf '/q\n' | ~/.local/bin/able chat --control-port 0
+python3 -m pytest able/tests/test_weekly_research.py -x
 ```
 
 Then run the full suite:
@@ -140,6 +148,7 @@ Or targeted runs:
 python3 -m pytest able/tests/test_buddy.py -q
 python3 -m pytest able/tests/test_cli_chat.py -x
 python3 -m pytest able/tests/test_control_plane.py able/tests/test_resource_tools.py able/tests/test_learning_loops.py able/tests/test_collect_results.py able/tests/test_evolution_cycle.py -x
+python3 -m pytest able/tests/test_weekly_research.py -x
 python3 -m pytest able/tests/test_harvesters.py -x
 python3 -m pytest able/tests/test_evolution_split_tests.py -x
 ```

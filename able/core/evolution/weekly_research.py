@@ -91,7 +91,9 @@ class WeeklyResearchScout:
 
     def __init__(self, report_dir: str = "data/research_reports"):
         self.report_dir = Path(report_dir)
+        self.operator_report_dir = Path.home() / ".able" / "reports" / "research"
         self.report_dir.mkdir(parents=True, exist_ok=True)
+        self.operator_report_dir.mkdir(parents=True, exist_ok=True)
 
     async def run_research(
         self, categories: List[str] = None, mode: str = "weekly"
@@ -552,14 +554,10 @@ RULES:
             return "arxiv"
         return "web"
 
-    def _save_report(self, report: WeeklyResearchReport):
-        """Save report as JSON."""
-        date_str = datetime.now().strftime("%Y-%m-%d")
-        report_path = self.report_dir / f"research_{date_str}.json"
-
+    def _report_payload(self, report: WeeklyResearchReport) -> Dict[str, Any]:
+        """Serialize the report for JSON persistence."""
         action_items = getattr(report, "_action_items", None) or []
-
-        data = {
+        return {
             "timestamp": report.timestamp,
             "total_findings": report.total_findings,
             "high_priority_count": len(report.high_priority),
@@ -581,10 +579,88 @@ RULES:
             ],
         }
 
-        with open(report_path, "w") as f:
-            json.dump(data, f, indent=2)
+    def _render_markdown_report(self, report: WeeklyResearchReport) -> str:
+        """Generate a readable local report with action items first."""
+        payload = self._report_payload(report)
+        lines = [
+            "# ABLE Research Report",
+            "",
+            f"- Timestamp: {payload['timestamp']}",
+            f"- Findings: {payload['total_findings']}",
+            f"- High priority: {payload['high_priority_count']}",
+            f"- Queries run: {payload['search_queries_run']}",
+            "",
+        ]
 
-        logger.info(f"Research report saved: {report_path}")
+        action_items = payload.get("action_items") or []
+        if action_items:
+            lines.append("## Action Items")
+            lines.append("")
+            for idx, item in enumerate(action_items, 1):
+                ties_to = f" [{item.get('ties_to')}]" if item.get("ties_to") else ""
+                impact = item.get("impact", "unknown")
+                effort = item.get("effort", "unknown")
+                lines.append(f"{idx}. {item.get('action', 'No action text')}{ties_to}")
+                lines.append(f"   - Category: {item.get('category', 'general')}")
+                lines.append(f"   - Impact: {impact}")
+                lines.append(f"   - Effort: {effort}")
+                if item.get("source_title"):
+                    lines.append(f"   - Source: {item['source_title']}")
+                if item.get("url"):
+                    lines.append(f"   - URL: {item['url']}")
+            lines.append("")
+
+        high_priority = [f for f in payload["findings"] if f["relevance"] == "high"]
+        if high_priority:
+            lines.append("## High Priority Findings")
+            lines.append("")
+            for finding in high_priority:
+                lines.append(f"- {finding['title']}")
+                if finding.get("action"):
+                    lines.append(f"  - Action: {finding['action']}")
+                if finding.get("url"):
+                    lines.append(f"  - URL: {finding['url']}")
+            lines.append("")
+
+        if payload["errors"]:
+            lines.append("## Errors")
+            lines.append("")
+            for error in payload["errors"]:
+                lines.append(f"- {error}")
+            lines.append("")
+
+        return "\n".join(lines).rstrip() + "\n"
+
+    def _save_report(self, report: WeeklyResearchReport):
+        """Save report JSON plus an operator-facing markdown summary."""
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        payload = self._report_payload(report)
+        markdown = self._render_markdown_report(report)
+
+        json_paths = [
+            self.report_dir / f"research_{date_str}.json",
+            self.operator_report_dir / f"research_{date_str}.json",
+            self.operator_report_dir / "latest.json",
+        ]
+        markdown_paths = [
+            self.operator_report_dir / f"research_{date_str}.md",
+            self.operator_report_dir / "latest.md",
+        ]
+
+        for path in json_paths:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "w") as f:
+                json.dump(payload, f, indent=2)
+
+        for path in markdown_paths:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(markdown, encoding="utf-8")
+
+        logger.info(
+            "Research report saved: %s and %s",
+            json_paths[0],
+            self.operator_report_dir / "latest.md",
+        )
 
     def format_telegram(self, report: WeeklyResearchReport, mode: str = "weekly") -> str:
         """Format report for Telegram — actionable intelligence, not link dumps."""
@@ -646,7 +722,7 @@ RULES:
         if report.errors:
             lines.append(f"\n⚠️ {len(report.errors)} search errors")
 
-        lines.append(f"\n📁 Full report: data/research_reports/")
+        lines.append(f"\n📁 Latest report: ~/.able/reports/research/latest.md")
         return "\n".join(lines)
 
 

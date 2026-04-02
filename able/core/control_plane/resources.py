@@ -77,6 +77,7 @@ class ResourcePlane:
         resources.extend(self._core_service_resources())
         resources.extend(self._docker_resources())
         resources.extend(self._ollama_resources())
+        resources.extend(self._security_resources())
         resources.extend(self._knowledge_resources())
         history = self._recent_actions()
         for resource in resources:
@@ -127,7 +128,7 @@ class ResourcePlane:
                 name="Pentest Lab",
                 summary="Security audit and red-team bundle for ABLE's weekly pentest and audit loops.",
                 resources=["service:able", "http:gateway-health"],
-                modules=["security-audit", "weekly-pentest", "strix-inspired checks"],
+                modules=["security-audit", "weekly-pentest", "strix-sidecar"],
                 notes=[
                     "Use existing approval workflow for any mutating security action.",
                 ],
@@ -146,6 +147,7 @@ class ResourcePlane:
         return [collection.to_dict() for collection in collections]
 
     def get_setup_wizard(self) -> Dict[str, Any]:
+        strix_status = self._strix_status()
         return {
             "title": "ABLE Setup Wizard",
             "steps": [
@@ -172,6 +174,12 @@ class ResourcePlane:
                     "label": "Vector Store",
                     "status": self._path_status(Path.home() / ".able" / "memory"),
                     "description": "Validate local memory/vector storage before enabling heavier RAG workflows.",
+                },
+                {
+                    "id": "strix",
+                    "label": "Strix Security",
+                    "status": strix_status,
+                    "description": "Optional external pentest sidecar. Built-in self-pentest remains primary unless Strix is explicitly enabled.",
                 },
             ],
             "collections": self.list_collections(),
@@ -419,6 +427,45 @@ class ResourcePlane:
                 approval_required=False,
             ),
         ]
+
+    def _security_resources(self) -> List[ResourceRecord]:
+        strix_base = os.environ.get("STRIX_BASE_URL", "https://app.strix.ai")
+        strix_bin = shutil.which("strix")
+        strix_enabled = os.environ.get("ABLE_ENABLE_STRIX_PENTEST", "").strip().lower() in {
+            "1", "true", "yes", "on"
+        }
+        strix_llm = bool(os.environ.get("STRIX_LLM"))
+        strix_api_key = bool(os.environ.get("LLM_API_KEY"))
+        return [
+            ResourceRecord(
+                id="integration:strix",
+                kind="workflow",
+                name="Strix Security Platform",
+                status=self._strix_status(),
+                summary="Optional external pentest platform. ABLE can run it as a weekly sidecar when the CLI, provider env, and explicit opt-in are all present.",
+                control_mode="external",
+                endpoint=strix_base,
+                allowed_actions=["refresh"],
+                approval_required=False,
+                metadata={
+                    "binary_present": bool(strix_bin),
+                    "enabled": strix_enabled,
+                    "llm_configured": strix_llm,
+                    "api_key_present": strix_api_key,
+                    "base_url": strix_base,
+                },
+            ),
+        ]
+
+    def _strix_status(self) -> str:
+        strix_bin = shutil.which("strix")
+        if not strix_bin:
+            return "inactive"
+        if os.environ.get("ABLE_ENABLE_STRIX_PENTEST", "").strip().lower() not in {"1", "true", "yes", "on"}:
+            return "available"
+        if os.environ.get("STRIX_LLM") and os.environ.get("LLM_API_KEY"):
+            return "configured"
+        return "misconfigured"
 
     def _action_command(self, resource_id: str, action: str) -> Optional[List[str]]:
         if resource_id.startswith("service:") and action in {"start", "stop", "restart", "status"}:

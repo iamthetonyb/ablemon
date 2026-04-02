@@ -12,16 +12,24 @@ from able.core.buddy.model import (
     BuddyNeeds,
     Species,
     Stage,
+    CATCH_PROGRESS_TARGET,
     EVOLUTION_REQUIREMENTS,
     LEGENDARY_REQUIREMENTS,
     load_buddy,
+    load_buddy_collection,
+    list_buddies,
+    record_collection_progress,
+    reset_buddy_collection,
     save_buddy,
+    switch_active_buddy,
+    update_collection_profile,
     create_starter_buddy,
     level_from_xp,
     xp_for_level,
 )
 from able.core.buddy.renderer import (
     render_banner,
+    render_backpack,
     render_header,
     render_full,
     render_evolution,
@@ -156,6 +164,9 @@ def test_save_and_load_buddy(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "able.core.buddy.model.BUDDY_PATH", tmp_path / "buddy.yaml"
     )
+    monkeypatch.setattr(
+        "able.core.buddy.model.BUDDY_COLLECTION_PATH", tmp_path / "buddy_collection.yaml"
+    )
     buddy = BuddyState(
         name="Volt",
         species="spark",
@@ -191,7 +202,107 @@ def test_load_buddy_returns_none_when_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "able.core.buddy.model.BUDDY_PATH", tmp_path / "nope.yaml"
     )
+    monkeypatch.setattr(
+        "able.core.buddy.model.BUDDY_COLLECTION_PATH", tmp_path / "nope_collection.yaml"
+    )
     assert load_buddy() is None
+
+
+def test_record_collection_progress_unlocks_new_species(tmp_path, monkeypatch):
+    monkeypatch.setattr("able.core.buddy.model.BUDDY_PATH", tmp_path / "buddy.yaml")
+    monkeypatch.setattr("able.core.buddy.model.BUDDY_COLLECTION_PATH", tmp_path / "buddy_collection.yaml")
+
+    starter = create_starter_buddy(
+        name="Ember",
+        species=Species.BLAZE,
+        created_at="2026-04-02T00:00:00+00:00",
+    )
+    save_buddy(starter)
+
+    update = record_collection_progress("security", points=CATCH_PROGRESS_TARGET)
+    collection = load_buddy_collection()
+
+    assert collection is not None
+    assert any(buddy.species == "phantom" for buddy in collection.list_buddies())
+    assert len(update["new_buddies"]) == 1
+    assert update["new_buddies"][0].species == "phantom"
+
+
+def test_switch_active_buddy_changes_active_species(tmp_path, monkeypatch):
+    monkeypatch.setattr("able.core.buddy.model.BUDDY_PATH", tmp_path / "buddy.yaml")
+    monkeypatch.setattr("able.core.buddy.model.BUDDY_COLLECTION_PATH", tmp_path / "buddy_collection.yaml")
+
+    blaze = BuddyState(name="Ember", species="blaze")
+    wave = BuddyState(name="Current", species="wave")
+    save_buddy(blaze)
+    save_buddy(wave)
+
+    switched = switch_active_buddy("wave")
+    active = load_buddy()
+
+    assert switched is not None
+    assert active is not None
+    assert active.species == "wave"
+
+
+def test_update_collection_profile_persists_operator_setup(tmp_path, monkeypatch):
+    monkeypatch.setattr("able.core.buddy.model.BUDDY_PATH", tmp_path / "buddy.yaml")
+    monkeypatch.setattr("able.core.buddy.model.BUDDY_COLLECTION_PATH", tmp_path / "buddy_collection.yaml")
+
+    save_buddy(BuddyState(name="Ember", species="blaze"))
+    collection = update_collection_profile(
+        {
+            "focus": "coding",
+            "work_style": "solo-operator",
+            "distillation_track": "9b-fast-local",
+            "completed_at": "2026-04-02T00:00:00+00:00",
+        }
+    )
+
+    assert collection.operator_profile["focus"] == "coding"
+    loaded = load_buddy_collection()
+    assert loaded is not None
+    assert loaded.operator_profile["distillation_track"] == "9b-fast-local"
+
+
+def test_reset_buddy_collection_removes_persisted_files(tmp_path, monkeypatch):
+    monkeypatch.setattr("able.core.buddy.model.BUDDY_PATH", tmp_path / "buddy.yaml")
+    monkeypatch.setattr("able.core.buddy.model.BUDDY_COLLECTION_PATH", tmp_path / "buddy_collection.yaml")
+
+    save_buddy(BuddyState(name="Ember", species="blaze"))
+    reset_buddy_collection()
+
+    assert load_buddy() is None
+    assert load_buddy_collection() is None
+
+
+def test_full_collection_unlocks_badges_and_easter_egg(tmp_path, monkeypatch):
+    monkeypatch.setattr("able.core.buddy.model.BUDDY_PATH", tmp_path / "buddy.yaml")
+    monkeypatch.setattr("able.core.buddy.model.BUDDY_COLLECTION_PATH", tmp_path / "buddy_collection.yaml")
+
+    for species in Species:
+        buddy = BuddyState(
+            name=species.value.capitalize(),
+            species=species.value,
+            stage=Stage.EVOLVED.value,
+            xp=xp_for_level(LEGENDARY_REQUIREMENTS["min_level"]),
+            eval_passes=LEGENDARY_REQUIREMENTS["min_eval_passes"],
+            battles_won=LEGENDARY_REQUIREMENTS["min_battles_won"],
+            best_battle_streak=LEGENDARY_REQUIREMENTS["min_battle_streak"],
+            distillation_pairs=LEGENDARY_REQUIREMENTS["min_distillation_pairs"],
+            evolution_deploys=LEGENDARY_REQUIREMENTS["min_evolution_deploys"],
+            legendary_title="Unlocked",
+        )
+        save_buddy(buddy)
+
+    collection = load_buddy_collection()
+    assert collection is not None
+    badge_ids = {badge["id"] for badge in collection.badges}
+    assert "full-dex" in badge_ids
+    assert "evolution-league" in badge_ids
+    assert "legendary-league" in badge_ids
+    assert "master-trainer" in badge_ids
+    assert collection.easter_egg_title
 
 
 # ── Renderer tests ───────────────────────────────────────────────────────
@@ -265,6 +376,25 @@ def test_render_starter_selection_explains_roles_and_routing_scope():
     assert "Lightning" in output
     assert "Shadow" in output
     assert "Best for:" in output
+
+
+def test_render_backpack_shows_owned_and_uncaught_species(tmp_path, monkeypatch):
+    monkeypatch.setattr("able.core.buddy.model.BUDDY_PATH", tmp_path / "buddy.yaml")
+    monkeypatch.setattr("able.core.buddy.model.BUDDY_COLLECTION_PATH", tmp_path / "buddy_collection.yaml")
+    save_buddy(BuddyState(name="Ember", species="blaze"))
+    update_collection_profile(
+        {
+            "focus": "coding",
+            "work_style": "solo-operator",
+            "distillation_track": "9b-fast-local",
+            "completed_at": "2026-04-02T00:00:00+00:00",
+        }
+    )
+    output = render_backpack(load_buddy_collection())
+    assert "Buddy Backpack" in output
+    assert "Caught: 1/5" in output
+    assert "Operator profile:" in output
+    assert "Uncaught" in output
 
 
 def test_render_evolution_announcement():

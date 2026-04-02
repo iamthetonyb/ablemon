@@ -63,10 +63,15 @@ Inside the chat, these are handled locally (no model call):
 | `/eval` | Distillation corpus progress |
 | `/evolve` | Run a single evolution cycle |
 | `/buddy` | Your buddy's stats, needs, and mood |
+| `/buddy bag` | Backpack, caught roster, badges, and profile |
+| `/buddy switch <name>` | Switch the active buddy in your roster |
+| `/buddy setup` | Re-run buddy onboarding/profile setup |
 | `/battle <domain>` | Eval-based battle (security, code, etc.) |
 | `/exit` | Quit |
 
-On first interactive run, ABLE can offer a buddy starter selection. That choice affects buddy theme and bonus XP only. It does not change routing, tools, or model selection.
+On first interactive run, ABLE now requires starter selection plus a short onboarding profile. The starter affects buddy theme and bonus XP, while the onboarding stores your focus, work style, and preferred distillation lane. Non-interactive sessions skip this flow so scripted smokes do not block.
+
+Research scout outputs are written to `~/.able/reports/research/latest.md` and `~/.able/reports/research/latest.json`, with a JSON mirror still kept under `data/research_reports/`.
 
 ### Auth Setup (Optional)
 

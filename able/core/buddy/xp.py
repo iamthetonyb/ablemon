@@ -19,6 +19,7 @@ from .model import (
     XP_APPROVAL_GRANTED,
     XP_DOMAIN_BONUS,
     load_buddy,
+    record_collection_progress,
     save_buddy,
 )
 
@@ -92,6 +93,17 @@ def award_interaction_xp(
             "Buddy %s unlocked legendary form: %s",
             buddy.name, legendary_title,
         )
+
+    collection_update = record_collection_progress(
+        domain,
+        points=2 if used_tools else 1,
+    )
+    for unlocked in collection_update["new_buddies"]:
+        logger.info("New buddy caught: %s (%s)", unlocked.name, unlocked.meta["label"])
+    for badge in collection_update["new_badges"]:
+        logger.info("Buddy badge unlocked: %s", badge["title"])
+    if collection_update["easter_egg_unlocked"]:
+        logger.info("Buddy collection easter egg unlocked: full completion reached")
 
     return xp
 
