@@ -396,7 +396,24 @@ Current streaming (`stream_message()`) handles text-only responses. For tool dis
 
 The CLI parser can already surface streamed reasoning markers, but most providers currently only stream visible answer text. Add provider-level support where available (Anthropic/OpenAI reasoning deltas) so live `thinking` previews are grounded in actual provider events.
 
-### Priority 5: Distillation corpus growth
+### Priority 5: Federation live setup
+
+Configure the `able-network-corpus` GitHub repo and `GITHUB_TOKEN` for live federation sync:
+- Create the GitHub repo for network corpus distribution
+- Test a full contribution → publish → fetch → ingest cycle end-to-end
+- Verify PII scrubbing and TrustGate rejection on real data
+- Confirm `tenant_id='network'` pairs flow through `CorpusBuilder` correctly
+
+### Priority 6: First Colab training run
+
+Run the first real Unsloth fine-tuning using the current corpus:
+- Export a notebook: `UnslothExporter().export_notebook("9b", corpus_path, hf_repo="able-nano-9b")`
+- Upload to Colab, connect free T4 runtime, execute all cells
+- Validate GGUF output loads in Ollama
+- Compare fine-tuned model vs base on reasoning + tools eval configs
+- Document real training time and memory usage for the handoff
+
+### Priority 7: Distillation corpus growth
 
 Push toward 100+ pairs for H100 fine-tuning:
 - Run reasoning + tools eval configs to generate T4 gold outputs
@@ -404,8 +421,9 @@ Push toward 100+ pairs for H100 fine-tuning:
 - Verify interaction logger correctly marks corpus-eligible interactions
 - CLI sessions now feed the pipeline automatically — every `able chat` conversation is harvestable
 - External tool sessions can be dropped in `~/.able/external_sessions/` for cross-tool learning
+- Federation network pairs supplement local corpus automatically after sync
 
-### Priority 6: Keep docs and runtime in lockstep
+### Priority 8: Keep docs and runtime in lockstep
 
 - Refresh `README.md` only when code changes make its current commands stale.
 - Keep `CODE_HANDOFF.md` and `NEXT_RUN_PROMPT.md` updated at the end of each pass.
@@ -434,7 +452,8 @@ For targeted runs:
 python3 -m pytest able/tests/test_buddy.py -x                # Buddy + onboarding + backpack + rarity + orchestration bonuses
 python3 -m pytest able/tests/test_cli_chat.py -x             # CLI + streaming + slash-command UX
 python3 -m pytest able/tests/test_weekly_research.py -x       # Research report persistence
-python3 -m pytest able/tests/test_harvesters.py -x            # Distillation
+python3 -m pytest able/tests/test_harvesters.py -x            # Distillation harvesters + scaffolding strip
+python3 -m pytest able/tests/test_federation.py -x -v         # Federation network + PII scrub + ingestion + Unsloth exporter
 python3 -m pytest able/tests/test_evolution_split_tests.py -x  # Evolution daemon
 ```
 

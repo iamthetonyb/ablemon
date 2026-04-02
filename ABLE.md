@@ -281,7 +281,7 @@ Run: `scripts/run-evals.sh` | Config: `able/evals/`
 
 ## DISTILLATION PIPELINE (H100 Fine-Tuning)
 
-Data accumulation phase — building T4-quality training pairs for custom local models.
+Data accumulation phase — building T4-quality training pairs for custom local models. The federated distillation network automatically ingests high-quality pairs from other ABLE instances and supplements the local corpus.
 
 ### Base Models (Unsloth Dynamic 2.0 Quants)
 
@@ -292,11 +292,12 @@ Data accumulation phase — building T4-quality training pairs for custom local 
 | Edge (balanced) | Qwen 3.5 9B | UD-Q4_K_XL | 5.97GB | When device has more room |
 
 ### Pipeline
-1. **CPU phase**: Eval runs generate T4 (gold) vs T1 outputs
-2. **Export**: Distillation JSONL pairs (`data/distillation_*.jsonl`)
-3. **H100 phase**: Fine-tune Qwen 3.5 base models on Colab (10-20 hours available)
-4. **Requant**: Re-quantize fine-tuned model to UD targets via Unsloth
-5. **Deploy**: Register fine-tuned models in Ollama, swap into T5 (then promote to T1)
+1. **Harvest**: 8 harvesters collect training data from all channels (CLI, Claude Code, Codex, external tools, etc.)
+2. **Federation**: Network pairs from other ABLE instances ingested via nightly sync (3:30am cron)
+3. **Export**: Distillation JSONL pairs (`data/distillation_*.jsonl`) — ChatML format
+4. **Train**: Unsloth fine-tuning via Colab notebooks (9B on free T4, 27B on H100). `UnslothExporter` generates ready-to-run notebooks and VS Code scripts.
+5. **Requant**: Export to GGUF via Unsloth Dynamic 2.0 quants (Q4_K_XL, IQ2_M)
+6. **Deploy**: Register fine-tuned models in Ollama, swap into T5 (then promote to T1)
 
 ### Ollama Setup
 ```bash
@@ -690,6 +691,10 @@ ABLE/
 │   │   ├── swarm/              <- Agent swarm coordination
 │   │   ├── security/           <- TrustGate, CommandGuard
 │   │   ├── approval/           <- Human-in-the-loop workflow
+│   │   ├── distillation/        <- Training pipeline, harvesters, corpus builder
+│   │   │   ├── training/       <- GPU budget, Unsloth exporter, model configs
+│   │   │   └── harvesters/     <- 8 source harvesters + scaffolding strip
+│   │   ├── federation/          <- Cross-instance corpus sharing (auto-enroll)
 │   │   ├── factcheck/          <- Hallucination detection
 │   │   ├── ratelimit/          <- Token bucket + sliding window
 │   │   └── commands/           <- Slash command handlers

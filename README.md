@@ -1,18 +1,21 @@
 # ABLE
 
-ABLE is the local/operator-controlled runtime for the Autonomous Business & Learning Engine. This repo contains the Python gateway, the `able-studio` control center, the distillation pipeline, and the deployment assets used to run the packaged `able` service on the server.
+ABLE is the local/operator-controlled runtime for the Autonomous Business & Learning Engine. This repo contains the Python gateway, the `able-studio` control center, a federated distillation pipeline with cross-instance corpus sharing, and the deployment assets used to run the packaged `able` service on the server.
 
 ## What Is In Scope
 
 - Registry-backed tool runtime shared by the gateway and studio
 - Nomad-style resource plane for services, models, storage, and optional local bundles
-- Distillation pipeline with pinned 27B/9B quant targets
+- Federated distillation pipeline with pinned 27B/9B quant targets and cross-instance corpus sharing
 - Telegram gateway, approvals, routing, memory, audit, and background jobs
 - ABLE Studio for audit, clients, CRM, settings, resources, collections, and setup
 
 ## Repo Layout
 
 - `able/`: Python package and runtime entrypoint
+- `able/core/distillation/`: harvesters, corpus builder, training pipeline, validation gate
+- `able/core/federation/`: cross-instance corpus sharing (auto-enrolls on buddy creation)
+- `able/evals/`: promptfoo eval configs feeding gold outputs into the distillation corpus
 - `able-studio/`: Next.js control center
 - `config/`: routing, distillation, Ollama, and tenant config
 - `docs/`: deeper system docs
@@ -209,6 +212,69 @@ python -m able.core.distillation.training --train 9b --gpu-class t4_colab --runt
 ```
 
 Use the 9B lane for regular T4 runs. Keep the 27B lane for H100 sessions only.
+
+### Unsloth Fine-Tuning (Colab + VS Code)
+
+The `UnslothExporter` generates ready-to-run Colab notebooks and standalone Python scripts for fine-tuning via Unsloth (2x speed, 70% less VRAM):
+
+```bash
+# Generate a Colab notebook for 9B training on free T4
+python3 -c "
+from able.core.distillation.training.unsloth_exporter import UnslothExporter
+e = UnslothExporter()
+e.export_notebook('9b', 'data/distillation_corpus.jsonl', 'your-hf-org/able-nano-9b')
+e.export_training_script('9b', 'data/distillation_corpus.jsonl')
+"
+```
+
+Notebooks auto-install Unsloth, load the ChatML corpus, train with SFTTrainer, export GGUF (Dynamic 2.0 quants), and generate an Ollama Modelfile. The 9B model trains on Colab's free T4 runtime (12-24 hours available). The 27B model requires an H100 session.
+
+## Distillation Pipeline (CPU-First Design)
+
+The entire distillation pipeline is designed to run on CPU, reserving GPU only for the final fine-tuning step:
+
+| Stage | Runs On | Frequency |
+|-------|---------|-----------|
+| **Harvest** — 8 source harvesters (CLI, Claude Code, Codex, external tools, inbox, etc.) | CPU | Nightly (2am cron) |
+| **Scaffolding strip** — 13+ XML tag types, base64, analytics, side channels | CPU | During harvest |
+| **PII scrub** — emails, phones, IPs, paths, API keys (10 regex patterns) | CPU | During federation export |
+| **Quality gate** — score threshold, length validation, content hash dedup | CPU | During harvest + ingestion |
+| **Federation sync** — contribute/fetch/ingest via GitHub Releases | CPU | Nightly (3:30am cron) |
+| **Corpus build** — domain balancing, ChatML format, train/val split | CPU | On demand |
+| **Promptfoo eval** — gold output generation, regression testing | CPU | On demand / battle |
+| **Fine-tuning** — Unsloth SFTTrainer + GGUF export | **GPU (free T4)** | When corpus reaches threshold |
+
+The promptfoo eval configs (`able/evals/`) serve double duty: they validate model quality AND generate gold T4 outputs that feed back into the distillation corpus via `corpus_eligible` flagging in the interaction log. The evolution daemon (M2.7, 6h cycles) tunes routing weights based on these eval results, closing the self-improvement loop.
+
+Phoenix/OTel observability (optional `.[observability]` install) provides tracing across the full pipeline when enabled on server deploys. The CLI skips Phoenix entirely to keep startup fast.
+
+## Federated Distillation Network
+
+When a new ABLE installation creates a buddy during `able chat` first-run, the instance auto-enrolls in the federated distillation network via `~/.able/instance.yaml` (UUID4 identity, zero config). The network shares anonymized training pairs across instances:
+
+```
+Instance A (security) ──→ GitHub Releases ──→ Instance B (coding)
+   contributor                                    ingester
+   (PII scrub + quality gate)                    (TrustGate + dedup)
+```
+
+**Domain snowball**: More users working in a domain = more training pairs = better fine-tuned models for that domain = better outputs = more training pairs. The network grows autonomously.
+
+**Security** (4-layer ingestion):
+1. TrustGate — 52+ injection pattern detection, reject if trust_score < 0.7
+2. Scaffolding strip — defense-in-depth re-strip on all incoming text
+3. Quality re-validation — prompt ≥ 20 chars, response ≥ 50 chars
+4. Content hash dedup — SHA256 unique index, identical pairs from 100 instances = 1 stored pair
+
+Network pairs are stored with `tenant_id='network'` and flow through the existing `CorpusBuilder` path. The sync runs at 3:30am daily, after the 2am harvest and 3am evolution cycle.
+
+```bash
+# Check federation status
+python3 -c "from able.core.federation.identity import get_instance_config; print(get_instance_config())"
+
+# Opt out of network sharing
+python3 -c "from able.core.federation.identity import set_network_enabled; set_network_enabled(False)"
+```
 
 ## Deployment
 

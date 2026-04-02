@@ -8,10 +8,12 @@ from able.core.distillation.training.training_orchestrator import TrainingOrches
 from able.core.distillation.training.gpu_budget import GPUBudget
 from able.core.distillation.training.gpu_preflight import GPUPreflight
 from able.core.distillation.training.quantizer import GGUFQuantizer
+from able.core.distillation.training.unsloth_exporter import UnslothExporter
 
 __all__ = [
     "TrainingOrchestrator",
     "GPUBudget",
     "GPUPreflight",
     "GGUFQuantizer",
+    "UnslothExporter",
 ]

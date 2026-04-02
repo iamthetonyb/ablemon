@@ -166,6 +166,15 @@ All four learning feedback loops are closed and tested:
 
 Plus: resource action tool, control-plane endpoint tests, legacy shim removal, CLI slash commands (/resources, /eval, /evolve, /buddy, /battle).
 
+## Research References (Cross-Verify)
+
+These external resources informed the federation and distillation architecture decisions. Use them to cross-verify design choices and identify improvements:
+
+- **llm-d architecture** — https://llm-d.ai/docs/architecture — Kubernetes-native distributed inference with prefix-cache-aware routing. ABLE adopted the domain-affinity routing pattern for federation ingestion prioritization.
+- **vLLM Ascend** — https://github.com/vllm-project/vllm-ascend — Hardware-pluggable interface pattern. ABLE adopted the `DistributionBackend` protocol for pluggable federation backends (GitHub Releases first, future: HTTP, IPFS, S3).
+- **Ollama 0.19 MLX** — https://www.macrumors.com/2026/03/31/ollama-now-runs-faster-apple-silicon-macs/ — 1.6x prefill, ~2x decode on Apple Silicon via MLX backend. Validates ABLE's Qwen 3.5 quant choices (27B at 17.6GB, 9B at 3.65GB both fit 32GB unified memory). Faster T5 inference accelerates the distillation flywheel.
+- **Unsloth** — https://github.com/unslothai/unsloth — 2x faster training + 70% less VRAM via custom Triton kernels. Dynamic 2.0 GGUFs with layer-selective quantization. Used for `UnslothExporter` notebook/script generation.
+
 ## Core Mission
 
 Advance ABLE's scaffolding and operator usefulness. Prefer work that makes ABLE more self-owned, more testable, more deployable, and more capable of learning from its own behavior.
