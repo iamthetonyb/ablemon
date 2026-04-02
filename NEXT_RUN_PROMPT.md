@@ -49,11 +49,13 @@ All four learning feedback loops are closed and tested:
 - Mood system with context-aware messages and cross-channel nudges
 - Battles tied to real promptfoo evals, domain bonuses per species
 - XP awards in the gateway (fires on Telegram, CLI, API — not channel-specific)
+- **Autonomous buddy progression** via cron: buddy-walk every 2h (passive XP + decay), evolution daemon awards deploy XP, distillation harvest awards pair XP, research/autopilot count as domain exploration, morning report includes buddy status
 - Proactive engine `BuddyNeedsCheck` runs every 2h for auto-nudges
-- Telegram nudges appended to responses when needs are low
+- Telegram nudges on evolution, legendary unlock, level-up, or low mood during autonomous runs
 - CLI renders rarity badges, streaks, legendary unlock state, and operator profile/backpack status correctly
-- Starter selection now explains each species in plain language: element, role, best-for domains, abilities, and the fact that the choice affects buddy flavor/bonus XP rather than routing
-- 53 buddy tests covering model, persistence, onboarding/profile state, rendering, battles, rarity, XP, needs, and mood
+- Starter selection locked to 5 species (Aether hidden); exit handling works at every setup prompt
+- `_handle_slash` uses `SlashCtx` context object instead of 18 positional args
+- 58 buddy tests covering model, persistence, onboarding/profile state, rendering, battles, rarity, XP, needs, mood, and autonomous tick
 
 **Streaming + approval UX**:
 - `stream_message()` async generator in the gateway — runs full pipeline then streams AI response
@@ -93,8 +95,8 @@ All four learning feedback loops are closed and tested:
 - 62 focused CLI/buddy tests (9 CLI chat + 53 buddy).
 
 **Test suite**:
-- This pass revalidated CLI smoke, buddy, and focused new-surface tests
-- Last recorded full-suite pass in the handoff was 583 tests; rerun if you need a fresh full-suite claim
+- Full-suite pass: 602 tests, 0 deprecation warnings
+- datetime.utcnow() replaced with datetime.now(timezone.utc) across all tenant modules
 
 Plus: resource action tool, control-plane endpoint tests, legacy shim removal, CLI slash commands (/resources, /eval, /evolve, /buddy, /battle).
 

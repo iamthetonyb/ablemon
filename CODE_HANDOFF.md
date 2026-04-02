@@ -1,7 +1,7 @@
 # ABLE — Code Handoff
 
 Date: 2026-04-02
-Branch: `main` is the current production baseline. Active improvement branch: `codex/cli-speed-and-ux-hardening`.
+Branch: `main` is the current production baseline. `codex/cli-speed-and-ux-hardening` has been merged.
 Git state: always verify with `git log --oneline -10` before starting work.
 
 ## Source Of Truth
@@ -187,8 +187,10 @@ Training lanes:
 3. **Control-plane hardened**: all endpoints token-gated, `perform_action()` requires `service_token_verified`, HTTP status codes corrected.
 4. **Operator slash commands expanded**: `/resources`, `/eval`, `/evolve` added to `able chat`. README updated.
 5. **Test coverage**:
-   - Buddy suite: 53 tests passing
+   - Buddy suite: 58 tests passing
+   - CLI chat: 9 tests passing
    - Focused new-surface suite: 23 tests across control plane, resource tools, learning loops, collect_results, and evolution cycle passing
+   - Full suite: 602 tests, 0 deprecation warnings
 6. **Legacy cleanup**: all 87 bare imports migrated, 5 root-level shims removed, pyproject.toml simplified.
 7. **Buddy system (system-wide)**: Pokemon + Tamagotchi gamified agent companion in `able/core/buddy/`:
    - 5 starter species (Blaze/Wave/Root/Spark/Phantom) with domain bonuses
@@ -215,7 +217,18 @@ Training lanes:
    - **Telegram nudges**: buddy status appended to responses when needs are low
    - **Proactive engine**: `BuddyNeedsCheck` runs every 2h, dispatches nudge notifications
    - Nudge module (`able/core/buddy/nudge.py`) for cross-channel care reminders
-   - 53 buddy tests covering model, persistence, backpack collection, badges/late-game progression, rendering, battles, rarity, XP engine, needs, and mood
+   - **Autonomous buddy progression** (cron-driven, not just interactive):
+     - `buddy-walk` cron job runs every 2h: applies needs decay, awards 5 passive XP, restores 8 energy via `self_explore` walk, checks evolution/legendary
+     - Evolution daemon awards 30 XP + thirst on successful weight deploy
+     - Nightly distillation awards 3 XP per new pair harvested
+     - Nightly/weekly research counts as domain exploration (research domain XP + energy)
+     - Autopilot awards XP for objectives + distillation pairs generated
+     - Morning report appends buddy name, level, and mood to Telegram summary
+     - Telegram nudges fire on evolution, legendary unlock, level-up, or low mood during autonomous runs
+   - **Starter selection locked to 5 species only** — Aether cannot be picked during setup (was a bug where `list(Species)` gave 6 options including the hidden unlock)
+   - **Exit handling in setup flow**: `/exit`, `/quit`, `/q` work at every prompt during buddy setup (starter pick, name, catch phrase, onboarding options)
+   - **SlashCtx refactor**: `_handle_slash` now takes a `SlashCtx` context object instead of 18 positional args
+   - 58 buddy tests covering model, persistence, backpack collection, badges/late-game progression, rendering, battles, rarity, XP engine, needs, mood, and autonomous tick
 8. **Streaming output for `able chat`**:
    - Gateway: `stream_message()` async generator runs full pipeline then streams AI response
    - CLI: tokens printed as they arrive via `async for chunk in gateway.stream_message(...)`
@@ -278,33 +291,31 @@ Training lanes:
 
 ## Next-Run Objectives
 
-### Priority 1: Cut live startup + first-response latency further
+### Priority 1: Studio dashboard buddy integration
 
-The local CLI path is now clean and operator-usable, but latency is still dominated by gateway initialization and provider round-trips. The next best pass is:
-- Profile `ABLEGateway.__init__()` again after the wrapper/import cleanup
-- Lazy-load any remaining heavy gateway imports that are not needed before the first prompt
-- Add provider/tier latency breakdown in CLI verbose mode so local overhead and upstream model latency are separated
+The buddy system works across all channels (CLI, Telegram, API, cron) but the Studio web dashboard doesn't display buddy state yet. Wire buddy status, operator profile, roster/backpack progress, badges, and battle history into the Studio API so operators can see their buddy progression from the web.
 
-### Priority 2: Studio dashboard buddy integration
+### Priority 2: Cut live startup + first-response latency further
 
-The buddy system works across all channels (CLI, Telegram, API) but the Studio web dashboard doesn't display buddy state yet. Wire buddy status, operator profile, roster/backpack progress, badges, and battle history into the Studio API so operators can see their buddy progression from the web.
+The local CLI path is clean and operator-usable, but latency is still dominated by gateway initialization and provider round-trips. Next:
+- Profile `ABLEGateway.__init__()` — lazy-load providers not needed before first prompt
+- Add provider/tier latency breakdown in CLI verbose mode
 
 ### Priority 3: Streaming for tool-dispatch iterations
 
-Current streaming (`stream_message()`) handles the common case (text-only responses). For messages that trigger tool dispatch, the full `process_message()` still blocks. Investigate whether tool iterations can stream partial results and tool execution notifications.
+Current streaming (`stream_message()`) handles text-only responses. For tool dispatch, `process_message()` still blocks. Investigate partial result streaming during tool iterations.
 
 ### Priority 4: Distillation corpus growth
 
-The harvester and prompt bank are improved but the corpus still needs more pairs. Focus on:
-- Running the new eval configs (reasoning, tools) to generate T4 gold outputs
-- Monitoring the corpus pair count (`/eval` in the CLI) and pushing toward 100+
-- Verifying the interaction logger correctly marks corpus-eligible interactions
+Push toward 100+ pairs for H100 fine-tuning:
+- Run reasoning + tools eval configs to generate T4 gold outputs
+- Monitor corpus pair count (`/eval` in CLI)
+- Verify interaction logger correctly marks corpus-eligible interactions
 
 ### Priority 5: Keep docs and runtime in lockstep
 
 - Refresh `README.md` only when code changes make its current commands stale.
 - Keep `CODE_HANDOFF.md` and `NEXT_RUN_PROMPT.md` updated at the end of each pass.
-- Do not let buddy onboarding behavior or research report paths drift from the actual CLI/runtime.
 
 ## Validation Commands
 
