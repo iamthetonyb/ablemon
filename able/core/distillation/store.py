@@ -432,6 +432,65 @@ class DistillationStore:
         finally:
             conn.close()
 
+    # ── Retroactive scrubbing ────────────────────────────────────
+
+    def scrub_corpus(self) -> Dict:
+        """Retroactively strip scaffolding artifacts from all existing pairs.
+
+        Applies the same ``_strip_scaffolding()`` logic used by harvesters
+        to every prompt and gold_response already in the store.  This ensures
+        old data collected before the filter was added gets cleaned too.
+
+        Returns a dict with counts: ``{"scrubbed": N, "deleted": M}``.
+        ``deleted`` counts pairs that became empty after stripping.
+        """
+        from able.core.distillation.harvesters.base import BaseHarvester
+
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT id, prompt, gold_response, gold_thinking FROM distillation_pairs"
+            ).fetchall()
+
+            scrubbed = 0
+            deleted = 0
+            for row in rows:
+                prompt = BaseHarvester._strip_scaffolding(row["prompt"])
+                response = BaseHarvester._strip_scaffolding(row["gold_response"])
+                thinking = row["gold_thinking"]
+                if thinking:
+                    thinking = BaseHarvester._strip_scaffolding(thinking)
+
+                # If stripping emptied the pair, remove it
+                if not prompt.strip() or not response.strip():
+                    conn.execute(
+                        "DELETE FROM distillation_pairs WHERE id = ?",
+                        (row["id"],),
+                    )
+                    deleted += 1
+                    continue
+
+                # Only update if content actually changed
+                if (prompt != row["prompt"]
+                        or response != row["gold_response"]
+                        or thinking != row["gold_thinking"]):
+                    conn.execute(
+                        "UPDATE distillation_pairs "
+                        "SET prompt = ?, gold_response = ?, gold_thinking = ? "
+                        "WHERE id = ?",
+                        (prompt, response, thinking, row["id"]),
+                    )
+                    scrubbed += 1
+
+            conn.commit()
+            logger.info(
+                "[scrub] Scrubbed %d pairs, deleted %d empty pairs",
+                scrubbed, deleted,
+            )
+            return {"scrubbed": scrubbed, "deleted": deleted}
+        finally:
+            conn.close()
+
     @property
     def db_path(self) -> str:
         return self._db_path

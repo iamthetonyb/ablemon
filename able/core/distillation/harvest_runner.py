@@ -263,8 +263,20 @@ async def run_harvest(
     result.total_formatted = len(training_pairs)
     logger.info("[harvest] Normalized training pairs: %d", len(training_pairs))
 
-    # ── 4. Persist harvested conversations + canonical pairs ─────
+    # ── 3b. Retroactively scrub existing corpus (idempotent) ──────
+    from able.core.distillation.store import DistillationStore
     store = DistillationStore()
+    try:
+        scrub = store.scrub_corpus()
+        if scrub["scrubbed"] or scrub["deleted"]:
+            logger.info(
+                "[harvest] Corpus scrub: %d pairs cleaned, %d empty pairs removed",
+                scrub["scrubbed"], scrub["deleted"],
+            )
+    except Exception as e:
+        logger.warning("[harvest] Corpus scrub failed (non-fatal): %s", e)
+
+    # ── 4. Persist harvested conversations + canonical pairs ─────
     saved_records = 0
     saved_pairs = 0
 

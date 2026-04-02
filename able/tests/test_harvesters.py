@@ -836,3 +836,242 @@ class TestSessionWriter:
         assert len(results) == 1
         assert results[0].source == "able_cli"
         assert len(results[0].messages) == 2
+
+
+# ── Scaffolding stripping (BaseHarvester) ─────────────────────
+
+
+class TestScaffoldingStripping:
+    """Verify that AI-tool scaffolding tags are stripped from training data."""
+
+    def test_strips_system_reminder_tags(self):
+        from able.core.distillation.harvesters.base import BaseHarvester
+        text = 'Hello world <system-reminder>This is injected context</system-reminder> more text'
+        result = BaseHarvester._strip_scaffolding(text)
+        assert "<system-reminder>" not in result
+        assert "Hello world" in result
+        assert "more text" in result
+
+    def test_strips_command_name_tags(self):
+        from able.core.distillation.harvesters.base import BaseHarvester
+        text = '<command-name>/effort</command-name> <command-message>effort</command-message> real content here'
+        result = BaseHarvester._strip_scaffolding(text)
+        assert "<command-name>" not in result
+        assert "real content here" in result
+
+    def test_strips_function_schema_dumps(self):
+        from able.core.distillation.harvesters.base import BaseHarvester
+        text = 'Before <functions><function>{"name":"Read"}</function></functions> After'
+        result = BaseHarvester._strip_scaffolding(text)
+        assert "<functions>" not in result
+        assert "Before" in result
+        assert "After" in result
+
+    def test_strips_antml_tags(self):
+        from able.core.distillation.harvesters.base import BaseHarvester
+        text = 'Plan: <antml_function_calls><antml_invoke name="Read"><antml_parameter name="path">foo</antml_parameter></antml_invoke></antml_function_calls> done'
+        result = BaseHarvester._strip_scaffolding(text)
+        assert "<antml_function_calls>" not in result
+        assert "Plan:" in result
+        assert "done" in result
+
+    def test_strips_task_notification_tags(self):
+        from able.core.distillation.harvesters.base import BaseHarvester
+        text = 'Working <task-notification>agent completed</task-notification> continued'
+        result = BaseHarvester._strip_scaffolding(text)
+        assert "<task-notification>" not in result
+        assert "Working" in result
+
+    def test_preserves_clean_text(self):
+        from able.core.distillation.harvesters.base import BaseHarvester
+        text = "This is clean text with no scaffolding at all."
+        assert BaseHarvester._strip_scaffolding(text) == text
+
+    def test_truncates_bloated_tool_results(self):
+        from able.core.distillation.harvesters.base import BaseHarvester
+        content = "x" * 5000
+        result = BaseHarvester._truncate_tool_result(content)
+        assert len(result) < 5000
+        assert "truncated for training" in result
+
+    def test_preserves_short_tool_results(self):
+        from able.core.distillation.harvesters.base import BaseHarvester
+        content = "short result"
+        assert BaseHarvester._truncate_tool_result(content) == content
+
+    def test_clean_messages_strips_all(self):
+        from able.core.distillation.harvesters.base import BaseHarvester
+
+        class _Stub(BaseHarvester):
+            source_name = "test"
+            def harvest(self, **kw): return []
+
+        h = _Stub()
+        msgs = [
+            {"role": "user", "content": "Hello <system-reminder>noise</system-reminder> world"},
+            {"role": "assistant", "content": "Response <command-name>x</command-name> here"},
+            {"role": "system", "content": "<system-reminder>all noise</system-reminder>"},
+        ]
+        cleaned = h._clean_messages(msgs)
+        assert len(cleaned) == 2  # system message became empty, removed
+        assert "<system-reminder>" not in cleaned[0]["content"]
+        assert "<command-name>" not in cleaned[1]["content"]
+
+
+# ── Claude Code harvester filtering ───────────────────────────
+
+
+class TestClaudeCodeScaffoldingFilter:
+    """Verify Claude Code harvester filters metadata entry types and sidechain noise."""
+
+    def test_skips_metadata_entry_types(self, tmp_path):
+        """file-history-snapshot, queue-operation, etc. should be filtered."""
+        session_file = tmp_path / "session.jsonl"
+        records = [
+            {"type": "file-history-snapshot", "uuid": "fh1"},
+            {"type": "queue-operation", "uuid": "qo1"},
+            {"type": "permission-mode", "uuid": "pm1"},
+            {"type": "user", "uuid": "u1", "timestamp": "2026-04-02T00:00:00Z",
+             "message": {"content": "Explain how async/await works in Python and give examples."}},
+            {"type": "assistant", "uuid": "a1", "timestamp": "2026-04-02T00:00:01Z",
+             "message": {"model": "claude-opus-4-6", "role": "assistant",
+                         "content": [{"type": "text", "text": "Async/await lets you write concurrent code with coroutines."}]}},
+        ]
+        session_file.write_text(
+            "\n".join(json.dumps(r) for r in records), encoding="utf-8"
+        )
+        harvester = ClaudeCodeHarvester()
+        results = harvester.harvest(source_path=str(tmp_path))
+        assert len(results) == 1
+        # Should only have user + assistant, not the 3 metadata entries
+        assert len(results[0].messages) == 2
+
+    def test_skips_sidechain_records(self, tmp_path):
+        session_file = tmp_path / "session.jsonl"
+        records = [
+            {"type": "user", "uuid": "u1", "timestamp": "2026-04-02T00:00:00Z",
+             "message": {"content": "Explain decorator pattern in Python with real-world examples."}},
+            {"type": "assistant", "uuid": "a1", "isSidechain": True,
+             "timestamp": "2026-04-02T00:00:01Z",
+             "message": {"model": "claude-opus-4-6", "role": "assistant",
+                         "content": [{"type": "text", "text": "Sidechain agent output that should be filtered."}]}},
+            {"type": "assistant", "uuid": "a2", "timestamp": "2026-04-02T00:00:02Z",
+             "message": {"model": "claude-opus-4-6", "role": "assistant",
+                         "content": [{"type": "text", "text": "Decorators are functions that modify other functions using @syntax."}]}},
+        ]
+        session_file.write_text(
+            "\n".join(json.dumps(r) for r in records), encoding="utf-8"
+        )
+        harvester = ClaudeCodeHarvester()
+        results = harvester.harvest(source_path=str(tmp_path))
+        assert len(results) == 1
+        assert len(results[0].messages) == 2
+        assert "Sidechain" not in results[0].messages[1]["content"]
+
+    def test_strips_system_reminder_from_content(self, tmp_path):
+        session_file = tmp_path / "session.jsonl"
+        records = [
+            {"type": "user", "uuid": "u1", "timestamp": "2026-04-02T00:00:00Z",
+             "message": {"content": "Explain how dependency injection works in Python with practical examples using constructor injection and factory patterns <system-reminder>Task tools reminder noise that should be stripped</system-reminder>"}},
+            {"type": "assistant", "uuid": "a1", "timestamp": "2026-04-02T00:00:01Z",
+             "message": {"model": "claude-opus-4-6", "role": "assistant",
+                         "content": [{"type": "text", "text": "Dependency injection passes dependencies externally instead of creating them internally. Constructor injection is the most common pattern."}]}},
+        ]
+        session_file.write_text(
+            "\n".join(json.dumps(r) for r in records), encoding="utf-8"
+        )
+        harvester = ClaudeCodeHarvester()
+        results = harvester.harvest(source_path=str(tmp_path))
+        assert len(results) == 1
+        assert "<system-reminder>" not in results[0].messages[0]["content"]
+        assert "dependency injection" in results[0].messages[0]["content"].lower()
+
+    def test_skips_system_scaffolding_subtypes(self, tmp_path):
+        session_file = tmp_path / "session.jsonl"
+        records = [
+            {"type": "system", "subtype": "stop_hook_summary", "uuid": "s1",
+             "message": {"content": "hook summary data"}},
+            {"type": "system", "subtype": "turn_duration", "uuid": "s2",
+             "message": {"content": ""}},
+            {"type": "user", "uuid": "u1", "timestamp": "2026-04-02T00:00:00Z",
+             "message": {"content": "Explain the SOLID principles in software engineering with examples."}},
+            {"type": "assistant", "uuid": "a1", "timestamp": "2026-04-02T00:00:01Z",
+             "message": {"model": "claude-opus-4-6", "role": "assistant",
+                         "content": [{"type": "text", "text": "SOLID is a set of five design principles for maintainable code."}]}},
+        ]
+        session_file.write_text(
+            "\n".join(json.dumps(r) for r in records), encoding="utf-8"
+        )
+        harvester = ClaudeCodeHarvester()
+        results = harvester.harvest(source_path=str(tmp_path))
+        assert len(results) == 1
+        # System scaffolding subtypes should not appear in messages
+        for msg in results[0].messages:
+            assert "hook summary" not in msg["content"]
+
+
+# ── Corpus scrubber ───────────────────────────────────────────
+
+
+class TestCorpusScrubber:
+    """Verify retroactive scrubbing of existing distillation pairs."""
+
+    def test_scrubs_existing_pairs(self, tmp_path):
+        from able.core.distillation.store import DistillationStore
+        from able.core.distillation.models import DistillationPair
+        from datetime import timezone
+
+        db_path = str(tmp_path / "test_distill.db")
+        store = DistillationStore(db_path=db_path)
+
+        # Insert a pair with scaffolding artifacts
+        pair = DistillationPair(
+            id="test-1",
+            prompt="What is Python? <system-reminder>Task reminder noise</system-reminder>",
+            gold_response="Python is a programming language. <command-name>/help</command-name>",
+            gold_model="claude-opus-4-6",
+            gold_thinking=None,
+            domain="coding",
+            quality_score=0.9,
+            created_at=datetime.now(timezone.utc),
+            content_hash="abc123",
+        )
+        store.save_pair(pair)
+
+        result = store.scrub_corpus()
+        assert result["scrubbed"] == 1
+
+        # Verify the pair was cleaned
+        pairs = store.get_pairs(limit=10)
+        assert len(pairs) == 1
+        assert "<system-reminder>" not in pairs[0].prompt
+        assert "<command-name>" not in pairs[0].gold_response
+        assert "What is Python?" in pairs[0].prompt
+
+    def test_deletes_empty_after_scrub(self, tmp_path):
+        from able.core.distillation.store import DistillationStore
+        from able.core.distillation.models import DistillationPair
+        from datetime import timezone
+
+        db_path = str(tmp_path / "test_distill.db")
+        store = DistillationStore(db_path=db_path)
+
+        # Insert a pair that's entirely scaffolding
+        pair = DistillationPair(
+            id="test-empty",
+            prompt="<system-reminder>All noise, no real content</system-reminder>",
+            gold_response="Real response here",
+            gold_model="claude-opus-4-6",
+            gold_thinking=None,
+            domain="coding",
+            quality_score=0.5,
+            created_at=datetime.now(timezone.utc),
+            content_hash="empty123",
+        )
+        store.save_pair(pair)
+
+        result = store.scrub_corpus()
+        assert result["deleted"] == 1
+
+        pairs = store.get_pairs(limit=10)
+        assert len(pairs) == 0

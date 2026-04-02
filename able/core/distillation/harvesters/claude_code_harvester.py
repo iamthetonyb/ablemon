@@ -25,6 +25,44 @@ logger = logging.getLogger(__name__)
 _DEFAULT_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 _THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL)
 
+# Entry types in Claude Code JSONL that are NOT conversation data.
+# These are session metadata, UI state, and internal bookkeeping.
+# Training on them teaches the model to hallucinate transcript noise.
+_SKIP_ENTRY_TYPES: frozenset[str] = frozenset({
+    "file-history-snapshot",    # File state tracking
+    "queue-operation",          # Message queue state
+    "permission-mode",          # Permission mode changes
+    "attachment",               # File/image attachments (binary refs, not text)
+    "last-prompt",              # Last prompt bookmark
+    "summary",                  # Session summary metadata
+    "custom-title",             # User-set title
+    "ai-title",                 # AI-generated title
+    "tag",                      # Session tags
+    "agent-name",               # Agent name metadata
+    "agent-color",              # Agent color metadata
+    "agent-setting",            # Agent config metadata
+    "pr-link",                  # GitHub PR link metadata
+    "mode",                     # coordinator/normal mode flag
+    "worktree-state",           # Worktree session state
+    "content-replacement",      # Content stub replacements
+    "marble-origami-commit",    # Context collapse commit (obfuscated type)
+    "marble-origami-snapshot",  # Context collapse snapshot
+    "speculation-accept",       # Speculative execution accept
+    "attribution-snapshot",     # File attribution tracking
+    "task-summary",             # Agent task summary
+    "stream_event",             # Raw API stream events
+    "tombstone",                # Removal signals
+    "progress",                 # Tool execution progress
+})
+
+# System message subtypes that are scaffolding, not reasoning
+_SKIP_SYSTEM_SUBTYPES: frozenset[str] = frozenset({
+    "stop_hook_summary",    # Hook execution summary
+    "turn_duration",        # Timing metadata
+    "compact_boundary",     # Context compaction marker
+    "api_error",            # API error passthrough
+})
+
 # File-extension hints for domain tagging
 _EXT_DOMAIN_MAP: dict[str, str] = {
     ".py": "coding",
@@ -111,6 +149,11 @@ class ClaudeCodeHarvester(BaseHarvester):
         if not messages:
             return []
 
+        # Final scaffolding pass on all message content
+        messages = self._clean_messages(messages)
+        if not messages:
+            return []
+
         if self._is_meta_conversation(messages):
             return []
 
@@ -146,8 +189,20 @@ class ClaudeCodeHarvester(BaseHarvester):
         (``user`` / ``assistant`` / ``system``), with assistant records
         containing a nested ``message`` dict that holds the API-style
         ``content`` list (text / thinking / tool_use blocks).
+
+        Filters out:
+        - 20+ metadata entry types (file-history-snapshot, queue-operation, etc.)
+        - System messages with scaffolding subtypes (stop_hook_summary, etc.)
+        - isMeta-flagged session bookkeeping records
+        - Agent sidechain records (isSidechain=True)
+        - Scaffolding XML tags (<system-reminder>, <command-name>, etc.)
+        - Bloated tool_result content (file dumps >2000 chars)
         """
         record_type = record.get("type", "")
+
+        # Skip metadata entry types (file-history-snapshot, queue-operation, etc.)
+        if record_type in _SKIP_ENTRY_TYPES:
+            return
 
         # Skip non-conversation records
         if record_type not in ("user", "assistant", "system"):
@@ -156,6 +211,16 @@ class ClaudeCodeHarvester(BaseHarvester):
         # Skip meta messages (session bookkeeping)
         if record.get("isMeta"):
             return
+
+        # Skip sidechain records (agent sub-conversations)
+        if record.get("isSidechain"):
+            return
+
+        # Skip system messages with scaffolding subtypes
+        if record_type == "system":
+            subtype = record.get("subtype", "")
+            if subtype in _SKIP_SYSTEM_SUBTYPES:
+                return
 
         role = record_type  # user/assistant/system map directly
 
@@ -178,16 +243,42 @@ class ClaudeCodeHarvester(BaseHarvester):
             for block in content:
                 if not isinstance(block, dict):
                     continue
-                if block.get("type") == "text":
-                    text_parts.append(block.get("text", ""))
-                elif block.get("type") == "thinking":
+                block_type = block.get("type", "")
+                if block_type == "text":
+                    text = self._strip_scaffolding(block.get("text", ""))
+                    if text:
+                        text_parts.append(text)
+                elif block_type == "thinking":
                     thinking_blocks.append(block.get("thinking", ""))
-                elif block.get("type") == "tool_use":
+                elif block_type == "tool_use":
                     tool_uses.append(block)
                     self._collect_extensions(block, file_extensions_seen)
+                elif block_type == "tool_result":
+                    # Keep tool results but truncate bloated ones
+                    result_content = block.get("content", "")
+                    if isinstance(result_content, str):
+                        result_content = self._strip_scaffolding(result_content)
+                        result_content = self._truncate_tool_result(result_content)
+                    elif isinstance(result_content, list):
+                        # Content blocks inside tool_result
+                        for sub in result_content:
+                            if isinstance(sub, dict) and sub.get("type") == "text":
+                                text = self._strip_scaffolding(sub.get("text", ""))
+                                text = self._truncate_tool_result(text)
+                                if text:
+                                    text_parts.append(f"[tool output] {text}")
+                        continue
+                    # Skip empty tool results
+                    if not result_content:
+                        continue
+                elif block_type == "tool_use_summary":
+                    # Skip — runtime bookkeeping, not reasoning
+                    continue
             content = "\n".join(text_parts)
 
         if isinstance(content, str):
+            # Strip scaffolding tags from string content
+            content = self._strip_scaffolding(content)
             # Extract inline <think> blocks
             for match in _THINK_RE.finditer(content):
                 thinking_blocks.append(match.group(1).strip())

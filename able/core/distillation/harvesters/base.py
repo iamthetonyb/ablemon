@@ -4,6 +4,11 @@ Base classes for conversation harvesters.
 Every harvester converts platform-specific conversation data into
 HarvestedConversation objects that the TrainingFormatter can turn
 into ChatML training pairs.
+
+Scaffolding stripping: Claude Code, Codex, and other AI tools inject
+metadata tags into message content that must be removed before training.
+Without this, fine-tuned models learn to hallucinate system-reminder
+blocks, fake tool calls, command XML tags, and other artifacts.
 """
 
 from __future__ import annotations
@@ -49,6 +54,45 @@ _DOMAIN_KEYWORDS: dict[str, list[str]] = {
         "copy", "tone", "audience", "CTA", "subject line",
     ],
 }
+
+# ── Scaffolding tag patterns (stripped from training data) ────────
+
+# Claude Code / Codex inject these into message content. If a model
+# trains on them it will hallucinate system-reminder blocks, fake
+# tool schemas, memory index dumps, and command XML in production.
+_SCAFFOLDING_TAG_RE = re.compile(
+    r"<(?:"
+    r"system-reminder|"            # Claude Code task/memory/git reminders
+    r"command-name|"               # Slash command echoes
+    r"command-message|"            # Slash command payload
+    r"local-command-stdout|"       # Local command output wrappers
+    r"local-command-caveat|"       # Caveat about local commands
+    r"local-command-stderr|"       # Stderr wrappers
+    r"user-prompt-submit-hook|"    # Pre-submit hook output
+    r"functions|function|"         # Deferred tool schema dumps
+    r"antml_function_calls|"       # Anthropic function call XML
+    r"antml_invoke|"               # Anthropic invoke XML
+    r"antml_parameter|"            # Anthropic parameter XML
+    r"task-notification"           # Background task notifications
+    r")(?:\s[^>]*)?>.*?</(?:"
+    r"system-reminder|command-name|command-message|"
+    r"local-command-stdout|local-command-caveat|local-command-stderr|"
+    r"user-prompt-submit-hook|functions|function|"
+    r"antml_function_calls|antml_invoke|antml_parameter|task-notification"
+    r")>",
+    re.DOTALL,
+)
+
+# Self-closing or orphaned opening tags (sometimes the closing tag is missing)
+_SCAFFOLDING_OPEN_RE = re.compile(
+    r"<(?:system-reminder|local-command-caveat|local-command-stdout|"
+    r"local-command-stderr|user-prompt-submit-hook|task-notification)"
+    r"(?:\s[^>]*)?>",
+)
+
+# Tool result content over this size is truncated — raw file dumps and
+# git diffs are not useful for teaching reasoning.
+_MAX_TOOL_RESULT_CHARS = 2000
 
 # Phrases that signal meta-conversation (not useful for training)
 _META_PATTERNS: list[re.Pattern] = [
@@ -98,6 +142,52 @@ class BaseHarvester(ABC):
         ...
 
     # ── Shared helpers ─────────────────────────────────────────────
+
+    @staticmethod
+    def _strip_scaffolding(text: str) -> str:
+        """Remove AI-tool scaffolding tags from message content.
+
+        Claude Code, Codex, and similar tools inject XML tags like
+        ``<system-reminder>``, ``<command-name>``, ``<functions>``, and
+        ``<antml_function_calls>`` into conversation transcripts.  These
+        are runtime artifacts — NOT part of the reasoning.  If they leak
+        into training data, fine-tuned models learn to hallucinate them.
+        """
+        # Strip matched pairs first
+        text = _SCAFFOLDING_TAG_RE.sub("", text)
+        # Then orphaned opening tags
+        text = _SCAFFOLDING_OPEN_RE.sub("", text)
+        # Collapse leftover whitespace
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()
+        return text
+
+    @staticmethod
+    def _truncate_tool_result(content: str) -> str:
+        """Truncate bloated tool results (file dumps, diffs).
+
+        Tool results over 2000 chars are almost always raw file content
+        or git diffs — not useful for teaching reasoning.  Keep the first
+        and last lines so the model sees what tool was called and a hint
+        of the output shape, but discard the bulk.
+        """
+        if len(content) <= _MAX_TOOL_RESULT_CHARS:
+            return content
+        head = content[:800]
+        tail = content[-200:]
+        return f"{head}\n[... {len(content) - 1000} chars truncated for training ...]\n{tail}"
+
+    def _clean_messages(self, messages: list[dict]) -> list[dict]:
+        """Strip scaffolding and truncate tool dumps from all messages."""
+        cleaned: list[dict] = []
+        for msg in messages:
+            content = msg.get("content", "")
+            if not isinstance(content, str):
+                continue
+            content = self._strip_scaffolding(content)
+            if not content:
+                continue
+            cleaned.append({**msg, "content": content})
+        return cleaned
 
     def _detect_domain(self, messages: list[dict]) -> str:
         """Auto-detect domain from message content using keyword matching.
