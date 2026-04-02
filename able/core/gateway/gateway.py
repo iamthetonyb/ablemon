@@ -93,12 +93,31 @@ from able.tools.search.web_search import WebSearch
 
 logger = logging.getLogger(__name__)
 
-try:
-    from able.tools.voice.transcription import VoiceTranscriber
-    _VOICE_AVAILABLE = True
-except ImportError:
-    _VOICE_AVAILABLE = False
-    VoiceTranscriber = None
+_VOICE_IMPORT_ATTEMPTED = False
+
+
+def _voice_transcriber_enabled() -> bool:
+    """Only activate ASR when the operator explicitly configures it."""
+    return bool(
+        os.environ.get("ABLE_ASR_PROVIDER", "").strip()
+        or os.environ.get("ABLE_ASR_ENDPOINT", "").strip()
+        or os.environ.get("ABLE_ASR_LOCAL_MODEL", "").strip()
+    )
+
+
+def _load_voice_transcriber():
+    """Lazy-load optional ASR support on first real use."""
+    global _VOICE_IMPORT_ATTEMPTED
+    if _VOICE_IMPORT_ATTEMPTED:
+        return globals().get("VoiceTranscriber")
+    _VOICE_IMPORT_ATTEMPTED = True
+    try:
+        from able.tools.voice.transcription import VoiceTranscriber as _VoiceTranscriber
+    except ImportError:
+        globals()["VoiceTranscriber"] = None
+        return None
+    globals()["VoiceTranscriber"] = _VoiceTranscriber
+    return _VoiceTranscriber
 
 try:
     from able.core.auth.manager import AuthManager
@@ -441,11 +460,7 @@ class ABLEGateway:
         self._tool_failure_window = 300  # 5 minute window
 
         # Voice transcription
-        if _VOICE_AVAILABLE:
-            self.voice_transcriber = VoiceTranscriber()
-            logger.info("Voice transcription available")
-        else:
-            self.voice_transcriber = None
+        self.voice_transcriber = None
 
         # Proactive Persistence Layer
         self.scheduler = CronScheduler()
@@ -559,6 +574,24 @@ class ABLEGateway:
         # Evolution daemon (started in _start_background_tasks)
         self.evolution_daemon = None
         self._health_runner: Optional[web.AppRunner] = None
+
+    def _get_voice_transcriber(self):
+        """Instantiate ASR only when explicitly configured and first needed."""
+        if self.voice_transcriber is not None:
+            return self.voice_transcriber
+        if not _voice_transcriber_enabled():
+            return None
+        voice_cls = _load_voice_transcriber()
+        if voice_cls is None:
+            logger.warning("Voice transcription requested but optional ASR deps are unavailable")
+            return None
+        try:
+            self.voice_transcriber = voice_cls()
+            logger.info("Voice transcription available")
+        except Exception as e:
+            logger.warning(f"Voice transcription failed to initialize: {e}")
+            self.voice_transcriber = None
+        return self.voice_transcriber
 
     def _init_providers(self) -> ProviderChain:
         """
@@ -1698,11 +1731,12 @@ class ABLEGateway:
 
         # Handle voice messages — transcribe to text
         if update.message.voice or update.message.audio:
-            if self.voice_transcriber:
+            transcriber = self._get_voice_transcriber()
+            if transcriber:
                 try:
                     voice_file = await (update.message.voice or update.message.audio).get_file()
                     voice_bytes = await voice_file.download_as_bytearray()
-                    result = await self.voice_transcriber.transcribe(bytes(voice_bytes), filename="voice.ogg")
+                    result = await transcriber.transcribe(bytes(voice_bytes), filename="voice.ogg")
                     message_text = result.text
                     await update.message.reply_text(f"🎙️ *Transcribed:* {result.text}", parse_mode="Markdown")
                 except Exception as e:
@@ -1760,11 +1794,15 @@ class ABLEGateway:
                     {"type": "text", "text": message_text or "Describe this image."},
                     {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_doc}"}},
                 ]
-            elif mime.startswith("audio/") and self.voice_transcriber:
+            elif mime.startswith("audio/"):
+                transcriber = self._get_voice_transcriber()
+                if not transcriber:
+                    await update.message.reply_text("⚠️ Voice transcription not available")
+                    return
                 try:
                     doc_file = await doc.get_file()
                     doc_bytes = await doc_file.download_as_bytearray()
-                    result = await self.voice_transcriber.transcribe(bytes(doc_bytes), filename=doc.file_name or "audio.wav")
+                    result = await transcriber.transcribe(bytes(doc_bytes), filename=doc.file_name or "audio.wav")
                     message_text = result.text
                     message = message_text
                     await update.message.reply_text(f"🎙️ *Transcribed:* {result.text}", parse_mode="Markdown")

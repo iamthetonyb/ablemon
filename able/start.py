@@ -4,6 +4,8 @@ ABLE — Gateway startup script.
 Modular Gateway Architecture for the Autonomous Business & Learning Engine.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
@@ -35,14 +37,14 @@ try:
 except ImportError:
     pass
 
-from able.core.gateway.gateway import ABLEGateway
-
 async def main():
     # Root the service working directory in the package directory so
     # relative config paths resolve correctly.  This is intentionally
     # deferred to main() so that importing this module (e.g. from
     # ``able chat``) does NOT change the caller's working directory.
     os.chdir(_PACKAGE_DIR)
+
+    from able.core.gateway.gateway import ABLEGateway
 
     print("=" * 60)
     print("ABLE - Autonomous Business & Learning Engine")

@@ -582,7 +582,7 @@ class StripePaymentGate:
         # Log to billing tracker
         if self.billing_tracker:
             try:
-                from billing.tracker import UsageRecord
+                from able.billing.tracker import UsageRecord
                 self.billing_tracker.log_usage(UsageRecord(
                     timestamp=datetime.now(timezone.utc),
                     client_id=client_id,

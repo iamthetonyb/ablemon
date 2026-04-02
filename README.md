@@ -2,6 +2,8 @@
 
 ABLE is the local/operator-controlled runtime for the Autonomous Business & Learning Engine. This repo contains the Python gateway, the `able-studio` control center, a federated distillation pipeline with cross-instance corpus sharing, and the deployment assets used to run the packaged `able` service on the server.
 
+The runtime is maintained with a runtime-first boundary policy: keep the operator path lean, keep optional systems in-repo but off the default startup path, and keep sample/template assets available without forcing them into the hot path. See [docs/RUNTIME_REFACTOR_AUDIT.md](/Users/abenton333/Desktop/ABLE/docs/RUNTIME_REFACTOR_AUDIT.md) for the current boundary map.
+
 ## What Is In Scope
 
 - Registry-backed tool runtime shared by the gateway and studio
@@ -9,6 +11,26 @@ ABLE is the local/operator-controlled runtime for the Autonomous Business & Lear
 - Federated distillation pipeline with pinned 27B/9B quant targets and cross-instance corpus sharing
 - Telegram gateway, approvals, routing, memory, audit, and background jobs
 - ABLE Studio for audit, clients, CRM, settings, resources, collections, and setup
+
+## Runtime Boundaries
+
+Default operator/runtime path:
+
+- `able`, `able chat`, gateway routing, approvals, memory, distillation, buddy, control plane
+- Studio settings/resources/collections/setup surfaces
+
+Optional but kept in-repo:
+
+- billing (`Stripe`, `x402`) — webhook/server-only, config-gated
+- channel adapters (`Slack`, `Discord`) — adapter library, not a primary runtime surface
+- ASR backends — only loaded when explicitly configured or invoked
+- Strix sidecar, federation publish/sync, and cron extras
+
+Seed assets kept for local/server use:
+
+- copywriting skill/evals/prompts
+- prompt-bank seed data
+- sample corpus/template assets
 
 ## Repo Layout
 
@@ -104,6 +126,8 @@ able
 
 Environment is read from your shell or `/home/able/.able/.env` in the systemd deployment. `ABLE_SERVICE_TOKEN` protects the control-plane API when set.
 
+Payment endpoints are not activated on the default runtime path. Stripe/x402 only bootstrap on the webhook server when the relevant payment env vars are enabled.
+
 ### Optional Observability Extras
 
 Base installs skip Phoenix and OpenTelemetry so the CLI stays lighter. If you want the Phoenix dashboard on a local machine, install the extra explicitly:
@@ -113,6 +137,8 @@ Base installs skip Phoenix and OpenTelemetry so the CLI stays lighter. If you wa
 ```
 
 The CLI shows a short dim `thinking` preview only when the current provider actually streams reasoning markers. That preview is provider-dependent; it is not universal chain-of-thought streaming across every backend.
+
+Audio transcription is also opt-in. The CLI and gateway only initialize ASR support when you explicitly configure an audio backend such as `ABLE_ASR_PROVIDER` or `ABLE_ASR_ENDPOINT`.
 
 ```bash
 ollama serve
@@ -146,6 +172,8 @@ Studio now reads the live tool catalog from the gateway and stores only per-org 
 - `/resources`: service/model/storage inventory
 - `/collections`: curated install bundles
 - `/setup`: first-run validation for gateway, control API, Ollama, and memory
+
+The Studio build is part of the runtime boundary checks. Empty duplicate route folders were removed during the runtime-first cleanup so the app tree matches what Next actually builds.
 
 ## Tool System
 

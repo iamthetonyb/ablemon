@@ -59,7 +59,7 @@ class WebhookEvent:
     event_type: str                      # e.g. "push", "pull_request", "payment.succeeded"
     payload: Dict[str, Any]             # Raw payload from the source
     headers: Dict[str, str]             # Request headers
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     verified: bool = False               # Whether signature was verified
 
 
@@ -727,20 +727,22 @@ class WebhookServer:
 
         # ── Payment integrations ────────────────────────────────
         # Stripe (credit cards) — adds /webhook/stripe, /api/billing/*
-        try:
-            from billing.stripe_billing import setup_stripe
-            self._stripe_gate = setup_stripe(app)
-        except Exception as e:
-            self._stripe_gate = None
-            logger.debug(f"Stripe not configured: {e}")
+        self._stripe_gate = None
+        if os.environ.get("STRIPE_ENABLED", "false").lower() == "true":
+            try:
+                from able.billing.stripe_billing import setup_stripe
+                self._stripe_gate = setup_stripe(app)
+            except Exception as e:
+                logger.debug(f"Stripe not configured: {e}")
 
         # x402 (crypto/USDC) — adds middleware on /api/chat, /api/completion
-        try:
-            from billing.x402 import setup_x402
-            self._x402_gate = setup_x402(app)
-        except Exception as e:
-            self._x402_gate = None
-            logger.debug(f"x402 not configured: {e}")
+        self._x402_gate = None
+        if os.environ.get("X402_ENABLED", "false").lower() == "true":
+            try:
+                from able.billing.x402 import setup_x402
+                self._x402_gate = setup_x402(app)
+            except Exception as e:
+                logger.debug(f"x402 not configured: {e}")
 
         return app
 

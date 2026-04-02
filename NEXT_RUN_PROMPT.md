@@ -79,6 +79,15 @@ All four learning feedback loops are closed and tested:
 - Existing `/opt/able/ABLE` working trees are re-owned by `able` before fetch/checkout
 - This fixes Git's `dubious ownership` failure during deploy without weakening `safe.directory`
 
+**Runtime-first boundary cleanup**:
+- `docs/RUNTIME_REFACTOR_AUDIT.md` classifies the repo into `Core`, `Optional but kept`, `Seed / template assets`, and `Dead / accidental`
+- `able.__main__` and `able.start` now lazy-import chat/serve paths so `able chat --help` stays off the full gateway startup path
+- Billing imports are fully-qualified and webhook billing bootstrap is config-gated behind `STRIPE_ENABLED` / `X402_ENABLED`
+- Voice transcription is opt-in at runtime; the gateway only initializes ASR when explicitly configured and media actually needs it
+- Empty duplicate source dirs (`* 2`) were removed from Studio, prompt-bank seed data, and the remotion skill tree
+- Hygiene tests now block duplicate source dirs and banned bare imports
+- Runtime-boundary tests prove chat help stays off optional subsystems, billing only boots when configured, and channels still import cleanly as an optional package
+
 **Reports + Security Sidecars**:
 - Research scout writes readable operator-facing output to `~/.able/reports/research/latest.md` plus `latest.json`
 - Dated JSON still mirrors to `data/research_reports/`
@@ -165,7 +174,7 @@ All four learning feedback loops are closed and tested:
 - Ollama confirmed as the right T5 backend (vs LM Studio) — headless, multi-model, API-native, Modelfile-first
 
 **Test suite**:
-- Full-suite pass: 742 tests, 0 deprecation warnings
+- Repo-wide documented suite pass: 712 tests, 0 deprecation warnings (`able/tests/`, excluding `test_routing.py` and `test_gateway.py`)
 - 40 federation tests (identity, models, PII scrubbing, ingestion, sync, store since, Unsloth exporter)
 - 70 harvester tests (scaffolding, entry types, harvesters, session writers, corpus scrubber)
 - 11 security tests (injection, command guard, binary hijack, cd+git, dangerous paths, subcommand cap)
@@ -192,6 +201,7 @@ Good work usually looks like:
 - harden runtime seams (deploy, gateway, approval, control plane)
 - add Studio dashboard integration for buddy, roster, operator profile, and routing metrics
 - add provider-level reasoning streaming where backends support it
+- keep optional subsystems off the hot path unless explicitly configured or promoted to a validated operator surface
 - add missing tests around new or risky surfaces
 - fix doc/runtime drift
 
@@ -219,12 +229,14 @@ At minimum, rerun the CLI smoke test:
 ```bash
 python3 -m able chat --help
 python3 -m pytest able/tests/test_cli_chat.py -x
+python3 -m pytest able/tests/test_package_layout.py able/tests/test_runtime_boundaries.py -x
 cd /tmp && ~/.local/bin/able chat --help
 cd /tmp && printf '/q\n' | ~/.local/bin/able chat --control-port 0
 cd /tmp && printf '/resources\n/q\n' | ~/.local/bin/able chat --control-port 0
 cd /tmp && printf '/battle\n/q\n' | ~/.local/bin/able chat --control-port 0
 cd /tmp && printf '/compact\n/q\n' | ~/.local/bin/able chat --control-port 0
 python3 -m pytest able/tests/test_weekly_research.py -x
+cd able-studio && pnpm build
 ```
 
 Then run the full suite:

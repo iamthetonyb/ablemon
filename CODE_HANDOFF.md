@@ -1,7 +1,7 @@
 # ABLE — Code Handoff
 
 Date: 2026-04-02
-Branch: `main` is the current production baseline. `codex/buddy-ui-and-orchestration` is the active working branch for the latest CLI and buddy UX pass.
+Branch: `main` is the current production baseline. `codex/runtime-boundary-cleanup` is the active working branch for the runtime-first refactor audit pass.
 Git state: always verify with `git log --oneline -10` before starting work.
 
 ## Source Of Truth
@@ -70,6 +70,7 @@ ABLE/
 ├── pyproject.toml                 # Package config — entry points: `able`, `able-chat`
 ├── CODE_HANDOFF.md                # This file — canonical cross-agent handoff
 ├── NEXT_RUN_PROMPT.md                # Reusable next-run prompt for any coding agent
+├── docs/RUNTIME_REFACTOR_AUDIT.md # Runtime boundary map: core vs optional vs seed vs dead
 ├── CLAUDE.md                      # Optional Claude Code session context
 ├── SOUL.md                        # Personality directives
 ├── ABLE.md                        # Full system documentation (~700 lines)
@@ -192,7 +193,7 @@ Training lanes:
    - CLI chat: 17 tests passing (added input validation, rate limiting, oversized message tests)
    - Routing tests: 50 tests (added circuit breaker + stream fallback tests)
    - Focused new-surface suite: 23 tests across control plane, resource tools, learning loops, collect_results, and evolution cycle passing
-   - Full suite: 662 tests, 0 deprecation warnings
+   - Repo-wide documented suite: 712 tests, 0 deprecation warnings (`able/tests/` excluding `test_routing.py` and `test_gateway.py`)
 6. **Legacy cleanup**: all 87 bare imports migrated, 5 root-level shims removed, pyproject.toml simplified.
 7. **Buddy system (system-wide)**: Pokemon + Tamagotchi gamified agent companion in `able/core/buddy/`:
    - 5 starter species (Blaze/Wave/Root/Spark/Phantom) with domain bonuses
@@ -251,7 +252,7 @@ Training lanes:
 11. **Test fixes**:
     - Morning reporter test: correct table name (`interaction_log` not `interactions`)
     - Split test daemon: fully-qualified import patches after shim removal
-    - Total: 602 tests passing across the full test suite
+    - Repo-wide documented suite now validates at 712 passing tests
 12. **Deploy hardening**:
     - Git operations on the DigitalOcean host now run as the `able` user in both `.github/workflows/deploy.yml` and `deploy-to-server.sh`
     - Existing `/opt/able/ABLE` working trees are re-owned by `able` before clone/fetch/checkout
@@ -261,7 +262,7 @@ Training lanes:
     - **Claude Code-style header**: `render_header()` places buddy ASCII art mascot on the left with name, level, XP bar, stage, mood, needs, and battle record on the right — mirrors Claude Code's robot mascot layout.
     - **Required interactive setup**: first-run interactive sessions must complete starter selection plus onboarding before the buddy system is considered initialized. Non-interactive CLI sessions still skip the flow so scripted smokes do not block.
     - **Graceful no-buddy**: all buddy code paths handle `buddy is None` without blocking or crashing.
-    - 74 focused CLI/buddy tests passing (14 CLI chat + 60 buddy).
+    - 77 focused CLI/buddy tests passing (17 CLI chat + 60 buddy).
 14. **One-command installer and global `able` command**:
     - `install.sh`: checks Python 3.11+ (auto-installs via brew/apt/dnf if missing), creates `.venv`, installs deps + package, places `able` and `able-chat` wrappers in `~/.local/bin/`, adds to PATH if needed, runs `able-setup.sh` for workspace init.
     - `able` wrapper at `~/.local/bin/able` is now repo-backed (`PYTHONPATH=<repo>` + venv Python), so it works from outside the repo root instead of relying on a fragile editable-console-script path.
@@ -358,6 +359,14 @@ Training lanes:
     - **Zero-config enrollment**: buddy creation in `able chat` auto-enrolls in federation network (non-fatal)
     - **Contributor**: exports high-quality pairs (≥0.85), strips PII (emails, phones, IPs, home paths, API keys, SSH keys), removes tenant_id/gold_model
     - **Ingester**: 4-layer defense (TrustGate 52+ injection patterns, scaffolding strip, quality re-validation, content hash dedup via SQLite unique index)
+31. **Runtime-first boundary cleanup**:
+    - Added `docs/RUNTIME_REFACTOR_AUDIT.md` to classify the repo into `Core`, `Optional but kept`, `Seed / template assets`, and `Dead / accidental` so refactor decisions stay consistent.
+    - `able.__main__` and `able.start` now lazy-import chat and serve paths, so `python -m able chat --help` no longer drags the gateway/service path into the default startup flow.
+    - Voice transcription is now opt-in at runtime: the gateway only initializes `VoiceTranscriber` when ASR is explicitly configured and media actually needs transcription.
+    - Webhook payment integrations are now fully-qualified (`able.billing...`) and config-gated behind `STRIPE_ENABLED` / `X402_ENABLED` before import.
+    - Removed empty duplicate source directories under `able-studio/app/* 2`, `able/core/distillation/prompt_bank_data/* 2`, and `able/skills/library/remotion-video/rules 2`.
+    - Added hygiene tests for duplicate source directories and banned bare imports, plus runtime-boundary subprocess tests for chat help, webhook billing bootstrap, and optional channel imports.
+    - Restored missing Studio components (`ChatPanel`, `ControlArtifact`) so the production build is green again.
     - **Distributor**: pluggable `DistributionBackend` protocol (inspired by vLLM Ascend plugin pattern), `GitHubReleasesBackend` as first implementation, outbox/inbox queuing for offline resilience
     - **Sync orchestrator**: cron at 3:30am daily (after harvest 2am + evolution 3am), incremental via `last_sync_cursor`
     - **Store enhancement**: `DistillationStore.get_pairs()` now accepts `since: Optional[datetime]` for incremental export
@@ -433,6 +442,11 @@ Push toward 100+ pairs for H100 fine-tuning:
 - Refresh `README.md` only when code changes make its current commands stale.
 - Keep `CODE_HANDOFF.md` and `NEXT_RUN_PROMPT.md` updated at the end of each pass.
 
+### Priority 9: Promote optional systems only when justified
+
+- Keep billing, channels, ASR, Strix, and federation live sync off the default hot path unless they are explicitly configured or a real operator-facing entrypoint is being shipped.
+- When one of those systems becomes active work again, modernize it on its own merits instead of silently letting it drift back into the startup path.
+
 ## Validation Commands
 
 ```bash
@@ -444,10 +458,12 @@ cd /tmp && printf '/resources\n/q\n' | ~/.local/bin/able chat --control-port 0
 cd /tmp && printf '/battle\n/q\n' | ~/.local/bin/able chat --control-port 0
 cd /tmp && printf '/compact\n/q\n' | ~/.local/bin/able chat --control-port 0
 python3 -m pytest able/tests/test_cli_chat.py -x
+python3 -m pytest able/tests/test_package_layout.py able/tests/test_runtime_boundaries.py -x
 python3 -m pytest able/tests/test_buddy.py -q
 python3 -m pytest able/tests/test_weekly_research.py -x
 python3 -m pytest able/tests/test_control_plane.py able/tests/test_resource_tools.py able/tests/test_learning_loops.py able/tests/test_collect_results.py able/tests/test_evolution_cycle.py -x
 python3 -m pytest able/tests/ -x --ignore=able/tests/test_routing.py --ignore=able/tests/test_gateway.py -q
+cd able-studio && pnpm build
 bash -n deploy-to-server.sh
 bash -n install.sh
 ```

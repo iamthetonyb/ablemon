@@ -26,7 +26,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -322,9 +322,9 @@ def x402_middleware(payment_gate: X402PaymentGate, protected_paths: List[str] = 
         # Track in billing
         if payment_gate.billing_tracker:
             try:
-                from billing.tracker import UsageRecord
+                from able.billing.tracker import UsageRecord
                 payment_gate.billing_tracker.log_usage(UsageRecord(
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                     client_id=payer,
                     provider="x402",
                     model="api",

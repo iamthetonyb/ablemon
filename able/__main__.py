@@ -6,9 +6,6 @@ import argparse
 import asyncio
 import sys
 
-from able.cli.chat import configure_parser as configure_chat_parser, run_chat
-from able.start import main as async_main
-
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -21,6 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
         "chat",
         help="Start the local terminal chat.",
     )
+    from able.cli.chat import configure_parser as configure_chat_parser
     configure_chat_parser(chat_parser)
     return parser
 
@@ -39,14 +37,17 @@ def main(argv: list[str] | None = None) -> None:
         if sys.stdin.isatty():
             args = parser.parse_args(["chat"] + (argv or []))
         else:
+            from able.start import main as async_main
             asyncio.run(async_main())
             return
 
     if args.command == "serve":
+        from able.start import main as async_main
         asyncio.run(async_main())
         return
 
     if args.command == "chat":
+        from able.cli.chat import run_chat
         raise SystemExit(asyncio.run(run_chat(args)))
 
     parser.error(f"unknown command: {args.command}")
