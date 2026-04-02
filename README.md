@@ -2,7 +2,7 @@
 
 ABLE is the local/operator-controlled runtime for the Autonomous Business & Learning Engine. This repo contains the Python gateway, the `able-studio` control center, a federated distillation pipeline with cross-instance corpus sharing, and the deployment assets used to run the packaged `able` service on the server.
 
-The runtime is maintained with a runtime-first boundary policy: keep the operator path lean, keep optional systems in-repo but off the default startup path, and keep sample/template assets available without forcing them into the hot path. See [docs/RUNTIME_REFACTOR_AUDIT.md](/Users/abenton333/Desktop/ABLE/docs/RUNTIME_REFACTOR_AUDIT.md) for the current boundary map.
+The runtime is maintained with a runtime-first boundary policy: keep the operator path lean, keep optional systems in-repo but off the default startup path, and keep sample/template assets available without forcing them into the hot path. See [docs/RUNTIME_REFACTOR_AUDIT.md](docs/RUNTIME_REFACTOR_AUDIT.md) for the current boundary map.
 
 ## What Is In Scope
 
