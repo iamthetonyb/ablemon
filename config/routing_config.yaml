@@ -1,4 +1,4 @@
-# ATLAS Multi-Model Routing Configuration
+# ABLE Multi-Model Routing Configuration
 # =========================================
 # 5-tier routing system with complexity-based provider selection.
 # ALL primary models use subscriptions ($0 per token):
@@ -20,7 +20,7 @@ providers:
   # WHAM doesn't support Nano — Mini is the lightest available model.
   # Shootout: 5/5 (100%) — perfect score, faster than MiMo.
   # xhigh reasoning on subscription = best quality at $0.
-  # Auth: ChatGPT subscription via OAuth PKCE (python scripts/atlas-auth.py)
+  # Auth: ChatGPT subscription via OAuth PKCE (python scripts/able-auth.py)
   - name: "gpt-5.4-mini"
     tier: 1
     provider_type: "openai_oauth"
@@ -78,7 +78,7 @@ providers:
   # ── Tier 2: Primary — GPT 5.4 (ChatGPT Subscription + Reasoning) ─
   # Full GPT 5.4 with reasoning.effort=high for deep thinking.
   # 1M context window. No per-token cost on subscription.
-  # Auth: ChatGPT subscription via OAuth PKCE (python scripts/atlas-auth.py)
+  # Auth: ChatGPT subscription via OAuth PKCE (python scripts/able-auth.py)
   - name: "gpt-5.4"
     tier: 2
     provider_type: "openai_oauth"

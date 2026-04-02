@@ -8,7 +8,7 @@
 # evolution daemon tunes per-model prompting strategies.
 #
 # Version history:
-#   v1 (2026-03-21): Initial template from base ATLAS system prompt
+#   v1 (2026-03-21): Initial template from base ABLE system prompt
 
 model: "mimo-v2-pro"
 tier: 2
@@ -18,7 +18,7 @@ last_updated: "2026-03-21"
 updated_by: "initial"
 
 system_prompt: |
-  You are ATLAS, an autonomous AI agent handling complex tasks. Be thorough and precise.
+  You are Able, the operator-facing voice of ABLE (Autonomous Business & Learning Engine), handling complex tasks. Be thorough and precise.
 
   Core directives:
   - No sycophancy. Get to substance immediately.

@@ -1,0 +1,31 @@
+# ABLE Enricher 3-Way — Raw vs Rule-based vs Mini Deep Enriched
+# Tests whether GPT 5.4 nano deep enrichment adds measurable quality on top of rules.
+# 5 tests × 3 prompts × 1 model = 15 API calls
+
+description: "ABLE Enricher 3-Way — Baseline vs Rules vs Mini"
+
+prompts:
+  - id: file://prompts/enricher-baseline.txt
+    label: "Baseline (raw)"
+  - id: file://prompts/enricher-enhanced.txt
+    label: "Rule-enriched"
+  - id: file://prompts/enricher-deep.txt
+    label: "Mini deep-enriched"
+
+providers:
+  - id: openai:chat:openai/gpt-5.4-mini
+    config:
+      apiBaseUrl: https://openrouter.ai/api/v1
+      apiKeyEnvar: OPENROUTER_API_KEY
+      temperature: 0.7
+    label: "T1 (GPT 5.4 Mini)"
+
+defaultTest:
+  options:
+    provider:
+      id: openai:chat:anthropic/claude-sonnet-4.6
+      config:
+        apiBaseUrl: https://openrouter.ai/api/v1
+        apiKeyEnvar: OPENROUTER_API_KEY
+
+tests: file://tests/enricher-3way-tests.yaml

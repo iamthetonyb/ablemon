@@ -1,5 +1,5 @@
 # Qwen 3.5 27B — Unsloth Dynamic 2.0 Q4_K_XL (17.6GB)
-# Server-grade distillation base model for ATLAS T1 fine-tuning.
+# Server-grade distillation base model for ABLE T1 fine-tuning.
 #
 # Setup:
 #   huggingface-cli download unsloth/Qwen3.5-27B-GGUF Qwen3.5-27B-UD-Q4_K_XL.gguf --local-dir ./models

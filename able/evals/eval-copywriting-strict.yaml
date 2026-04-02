@@ -1,0 +1,36 @@
+# Copywriting Skill Eval (STRICT) — 7 tests × 2 providers = 14 API calls
+# Run: cd able/evals && npx promptfoo@latest eval -c eval-copywriting-strict.yaml
+# Strict = cheapest possible eval (Mini grader, no T4 Sonnet calls)
+
+description: "ABLE Copywriting Skill — T1 vs T2 (strict/cheap)"
+
+providers:
+  - id: openai:chat:openai/gpt-5.4-mini
+    config:
+      apiBaseUrl: https://openrouter.ai/api/v1
+      apiKeyEnvar: OPENROUTER_API_KEY
+      temperature: 0.7
+    label: "T1 (GPT 5.4 Mini)"
+
+  - id: openai:chat:openai/gpt-5.4
+    config:
+      apiBaseUrl: https://openrouter.ai/api/v1
+      apiKeyEnvar: OPENROUTER_API_KEY
+      temperature: 0.7
+    label: "T2 (GPT 5.4)"
+
+# Grader: GPT 5.4 Mini (cheapest quality gate)
+# Use non-strict config for Sonnet T4 comparison + distillation
+defaultTest:
+  options:
+    provider:
+      id: openai:chat:openai/gpt-5.4-mini
+      config:
+        apiBaseUrl: https://openrouter.ai/api/v1
+        apiKeyEnvar: OPENROUTER_API_KEY
+
+prompts:
+  - file://prompts/copywriting.txt
+
+tests:
+  - file://tests/copywriting-tests.yaml

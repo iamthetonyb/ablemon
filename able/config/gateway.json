@@ -1,0 +1,24 @@
+{
+  "_note": "Credentials (bot token, owner ID) are loaded from environment variables. Set TELEGRAM_BOT_TOKEN and ABLE_OWNER_TELEGRAM_ID in your .env file.",
+  "ai_backends": {
+    "primary": {
+      "name": "kimi-k2.5",
+      "endpoint": "https://integrate.api.nvidia.com/v1",
+      "model": "moonshotai/kimi-k2.5"
+    },
+    "fallback": {
+      "name": "claude-sonnet",
+      "endpoint": "https://api.anthropic.com/v1",
+      "model": "claude-sonnet-4-20250514"
+    }
+  },
+  "security": {
+    "min_trust_threshold": 0.7,
+    "require_approval_below": 0.85,
+    "max_command_risk": 5
+  },
+  "logging": {
+    "audit_retention_days": 180,
+    "transcript_retention_days": 365
+  }
+}
