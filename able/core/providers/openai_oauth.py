@@ -203,7 +203,7 @@ class OpenAIChatGPTProvider(LLMProvider):
 
     def __init__(self, config: ProviderConfig, auth_manager=None, reasoning_effort: str = "none"):
         super().__init__(config)
-        from core.auth.manager import AuthManager
+        from able.core.auth.manager import AuthManager
         self.auth_manager = auth_manager or AuthManager()
         self.base_url = "https://chatgpt.com/backend-api/wham"
         self.reasoning_effort = reasoning_effort if reasoning_effort in self.VALID_EFFORTS else "none"

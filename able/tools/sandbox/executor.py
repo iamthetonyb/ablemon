@@ -203,7 +203,7 @@ for _k, _v in _inputs.items():
 
     def execute_shell(self, command: str) -> ExecutionResult:
         """Execute shell command through CommandGuard"""
-        from core.security.command_guard import CommandGuard, CommandVerdict
+        from able.core.security.command_guard import CommandGuard, CommandVerdict
 
         start_time = datetime.now()
 

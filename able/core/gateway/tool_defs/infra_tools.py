@@ -7,7 +7,7 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from core.gateway.tool_registry import ToolRegistry, ToolContext
+    from able.core.gateway.tool_registry import ToolRegistry, ToolContext
 
 logger = logging.getLogger(__name__)
 

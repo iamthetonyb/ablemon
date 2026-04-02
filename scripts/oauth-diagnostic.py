@@ -8,8 +8,8 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'able'))
 os.chdir(os.path.expanduser('~/.able'))
 
-from core.auth.storage import SecureStorage
-from core.auth.manager import AuthManager
+from able.core.auth.storage import SecureStorage
+from able.core.auth.manager import AuthManager
 
 auth_path = os.path.expanduser('~/.able/auth.json')
 

@@ -188,7 +188,7 @@ async def feed_to_agi(all_parsed: List[Dict], dry_run: bool = False):
         return
 
     try:
-        from core.agi.self_improvement import SelfImprovementEngine
+        from able.core.agi.self_improvement import SelfImprovementEngine
     except ImportError:
         logger.warning("SelfImprovementEngine not importable — writing to data/ instead")
         out_dir = Path("../data")
@@ -348,7 +348,7 @@ def main():
     # Auto-improvement from eval failures
     if args.auto_improve:
         try:
-            from core.evolution.auto_improve import AutoImprover
+            from able.core.evolution.auto_improve import AutoImprover
             improver = AutoImprover(auto_apply=not args.dry_run)
             report = asyncio.run(improver.run(all_parsed))
             print(f"\n  [AUTO-IMPROVE] {report.actions_proposed} proposed, "

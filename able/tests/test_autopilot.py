@@ -247,7 +247,7 @@ async def test_run_auto_prompting(
     autopilot_with_prompts: AutoPilot, tmp_path: Path, monkeypatch,
 ):
     """run_auto_prompting generates comparison pairs."""
-    from core.distillation.prompt_bank import PromptBank, PromptEntry
+    from able.core.distillation.prompt_bank import PromptBank, PromptEntry
 
     # Create a bank with known data
     bank_dir = tmp_path / "bank_data"
@@ -278,7 +278,7 @@ async def test_run_auto_prompting_empty_bank(
     autopilot_with_prompts: AutoPilot, monkeypatch,
 ):
     """run_auto_prompting handles empty prompt bank gracefully."""
-    from core.distillation.prompt_bank import PromptBank
+    from able.core.distillation.prompt_bank import PromptBank
 
     def mock_bank_init(self, data_dir=None):
         self.data_dir = Path("/nonexistent")
@@ -298,7 +298,7 @@ async def test_auto_prompting_saves_jsonl(
     autopilot_with_prompts: AutoPilot, tmp_path: Path, monkeypatch,
 ):
     """Comparison pairs are saved to distillation JSONL."""
-    from core.distillation.prompt_bank import PromptBank
+    from able.core.distillation.prompt_bank import PromptBank
 
     bank_dir = tmp_path / "bank2"
     coding_dir = bank_dir / "coding"

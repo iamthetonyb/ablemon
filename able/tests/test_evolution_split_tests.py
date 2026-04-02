@@ -456,7 +456,7 @@ def mock_daemon_deps():
         }
 
         # Analyzer returns a recommendation that will produce a large improvement
-        from core.evolution.analyzer import AnalysisResult
+        from able.core.evolution.analyzer import AnalysisResult
 
         analyzer_inst = mock_analyzer.return_value
         analyzer_inst.analyze = AsyncMock(return_value=AnalysisResult(
@@ -472,7 +472,7 @@ def mock_daemon_deps():
         ))
 
         # Deployer succeeds
-        from core.evolution.deployer import DeployResult
+        from able.core.evolution.deployer import DeployResult
 
         deployer_inst = mock_deployer.return_value
         deployer_inst.deploy.return_value = DeployResult(
@@ -496,7 +496,7 @@ def test_daemon_without_split_policy_deploys_normally(
     mock_daemon_deps, current_weights, tmp_path
 ):
     """Backward compat: daemon without split_policy deploys directly."""
-    from core.evolution.daemon import EvolutionDaemon, EvolutionConfig
+    from able.core.evolution.daemon import EvolutionDaemon, EvolutionConfig
 
     config = EvolutionConfig(
         auto_deploy=True,
@@ -524,7 +524,7 @@ def test_daemon_with_split_policy_creates_proposal(
 ):
     """Daemon with split_policy creates proposal instead of deploying
     when changes are large enough to trigger split testing."""
-    from core.evolution.daemon import EvolutionDaemon, EvolutionConfig
+    from able.core.evolution.daemon import EvolutionDaemon, EvolutionConfig
 
     proposals_dir = str(tmp_path / "proposals")
     split_policy = EvolutionSplitTestPolicy(

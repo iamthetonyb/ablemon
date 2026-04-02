@@ -47,7 +47,14 @@ The integration branch already lands these major changes:
   - `able serve`
   - `able-chat`
 - Registry-backed gateway tool system shared with studio
-- Nomad-style resource plane and control-plane endpoints
+- Nomad-style resource plane and control-plane endpoints:
+  - `GET /health` — no auth required
+  - `GET /control/tools/catalog` — full tool catalog + effective settings
+  - `GET /control/resources` — resource inventory
+  - `GET /control/resources/{id}` — resource detail + logs
+  - `POST /control/resources/{id}/action` — lifecycle action (requires `approved_by` + service token)
+  - `GET /control/collections` — curated install bundles
+  - `GET /control/setup-wizard` — first-run validation steps
 - T4-first 9B distillation lane and quant-pinned model roster
 - Deploy path aligned to the packaged service
 - Server deploy bootstrap for the `able` system user/group

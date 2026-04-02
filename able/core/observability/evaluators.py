@@ -18,7 +18,7 @@ from typing import Dict, Optional
 try:
     from able.core.factcheck.checker import HALLUCINATION_MARKERS
 except ImportError:
-    from core.factcheck.checker import HALLUCINATION_MARKERS
+    from able.core.factcheck.checker import HALLUCINATION_MARKERS
 
 logger = logging.getLogger(__name__)
 

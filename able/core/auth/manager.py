@@ -15,8 +15,8 @@ class AuthManager:
     
     async def authenticate_openai_oauth(self) -> bool:
         """Interactive OAuth flow for OpenAI"""
-        from core.providers.openai_oauth import OpenAIOAuthProvider
-        
+        from able.core.providers.openai_oauth import OpenAIOAuthProvider
+
         print("🔐 Authenticating with OpenAI (ChatGPT Plus/Pro)")
         print("A browser window will open. Please log in with your ChatGPT account.")
         
@@ -50,8 +50,8 @@ class AuthManager:
         # Check if token is expired or near expiration (within 5 minutes)
         if time.time() > data['expires_at'] - 300:
             if provider_name == 'openai_oauth':
-                from core.providers.openai_oauth import OpenAIOAuthProvider
-                
+                from able.core.providers.openai_oauth import OpenAIOAuthProvider
+
                 logger.info(f"Refreshing {provider_name} token...")
                 oauth = OpenAIOAuthProvider()
                 oauth.tokens = {

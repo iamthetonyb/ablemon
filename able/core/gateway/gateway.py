@@ -61,8 +61,8 @@ except ImportError:
     VoiceTranscriber = None
 
 try:
-    from core.auth.manager import AuthManager
-    from core.providers.openai_oauth import OpenAIChatGPTProvider, OpenAIOAuthProvider
+    from able.core.auth.manager import AuthManager
+    from able.core.providers.openai_oauth import OpenAIChatGPTProvider, OpenAIOAuthProvider
     _AUTH_AVAILABLE = True
 except ImportError as _auth_err:
     _AUTH_AVAILABLE = False
@@ -400,7 +400,7 @@ class ABLEGateway:
             self.memory = None
 
         # Self-Improvement Engine
-        from core.agi.self_improvement import SelfImprovementEngine
+        from able.core.agi.self_improvement import SelfImprovementEngine
         try:
             self.self_improvement = SelfImprovementEngine(
                 v2_path=Path("."),
@@ -477,15 +477,15 @@ class ABLEGateway:
         self.phoenix = None
         self.evaluator = None
         try:
-            from core.observability.instrumentors import ABLETracer, JSONLExporter
-            from core.observability.evaluators import ABLEEvaluator
+            from able.core.observability.instrumentors import ABLETracer, JSONLExporter
+            from able.core.observability.evaluators import ABLEEvaluator
             traces_path = str(_PROJECT_ROOT / "data" / "traces.jsonl")
             self.tracer = ABLETracer(exporter=JSONLExporter(path=traces_path))
             self.evaluator = ABLEEvaluator()
             logger.info("ABLETracer + ABLEEvaluator initialized (JSONL → %s)", traces_path)
 
             # Try to start Phoenix dashboard (localhost:6006)
-            from core.observability.phoenix_setup import PhoenixObserver
+            from able.core.observability.phoenix_setup import PhoenixObserver
             self.phoenix = PhoenixObserver(
                 project_name="able",
                 fallback_path=traces_path,
@@ -736,7 +736,7 @@ class ABLEGateway:
             try:
                 async def _nano_call(system: str, user: str) -> str:
                     """Quick model call via the T4 chain for deep enrichment."""
-                    from core.providers.base import Message, Role
+                    from able.core.providers.base import Message, Role
                     _msgs = [Message(role=Role.SYSTEM, content=system),
                              Message(role=Role.USER, content=user)]
                     # Use T2 chain (cheap but capable) for enrichment refinement
@@ -1885,7 +1885,7 @@ class ABLEGateway:
 
         # Start the Evolution Daemon (M2.7 background self-improvement)
         try:
-            from core.evolution.daemon import EvolutionDaemon, EvolutionConfig
+            from able.core.evolution.daemon import EvolutionDaemon, EvolutionConfig
             evo_config = EvolutionConfig(
                 weights_path=str(_PROJECT_ROOT / "config" / "scorer_weights.yaml"),
                 interaction_db=str(_PROJECT_ROOT / "data" / "interaction_log.db"),
@@ -1905,7 +1905,7 @@ class ABLEGateway:
             # Wire split test policy for A/B testing weight changes
             split_policy = None
             try:
-                from core.evolution.split_test_integration import EvolutionSplitTestPolicy
+                from able.core.evolution.split_test_integration import EvolutionSplitTestPolicy
                 split_policy = EvolutionSplitTestPolicy()
             except Exception as e:
                 logger.warning(f"Split test policy unavailable: {e}")

@@ -523,7 +523,7 @@ class AutoImprover:
         applied = 0
 
         try:
-            from core.agi.self_improvement import SelfImprovementEngine
+            from able.core.agi.self_improvement import SelfImprovementEngine
             engine = SelfImprovementEngine()
         except ImportError:
             logger.warning("[AUTO_IMPROVE] SelfImprovementEngine not importable — skipping apply")

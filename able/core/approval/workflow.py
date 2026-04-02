@@ -15,7 +15,7 @@ import logging
 import os
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Dict, List, Optional, Callable, Any
 import json
@@ -525,7 +525,7 @@ class ApprovalWorkflow:
             "operation": operation,
             "status": status.value,
             "reason": reason,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         })
         # Keep log bounded
         if len(self._approval_log) > 500:

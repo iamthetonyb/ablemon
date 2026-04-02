@@ -8,7 +8,7 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from core.gateway.tool_registry import ToolRegistry, ToolContext
+    from able.core.gateway.tool_registry import ToolRegistry, ToolContext
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +131,7 @@ async def handle_push_files(args: dict, ctx: "ToolContext") -> str:
     github = ctx.metadata["github"]
     # Handle <EXTRACT> bypass for massive code blocks
     if ctx.msgs:
-        from core.providers.base import Role
+        from able.core.providers.base import Role
         for path, content in args.get("files", {}).items():
             if content == "<EXTRACT>":
                 for m in reversed(ctx.msgs):

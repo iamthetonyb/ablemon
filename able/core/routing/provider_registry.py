@@ -58,7 +58,7 @@ class ProviderTierConfig:
         # OAuth providers check auth.json, not env vars
         if self.provider_type == "openai_oauth":
             try:
-                from core.auth.manager import AuthManager
+                from able.core.auth.manager import AuthManager
                 return AuthManager().is_authenticated("openai_oauth")
             except Exception:
                 return False
@@ -208,11 +208,11 @@ class ProviderRegistry:
         tier 3 (background-only) providers. Providers whose API keys are
         missing are silently skipped.
         """
-        from core.providers.nvidia_nim import NVIDIANIMProvider
-        from core.providers.openrouter import OpenRouterProvider
-        from core.providers.anthropic_provider import AnthropicProvider
-        from core.providers.ollama import OllamaProvider
-        from core.providers.base import ProviderConfig
+        from able.core.providers.nvidia_nim import NVIDIANIMProvider
+        from able.core.providers.openrouter import OpenRouterProvider
+        from able.core.providers.anthropic_provider import AnthropicProvider
+        from able.core.providers.ollama import OllamaProvider
+        from able.core.providers.base import ProviderConfig
 
         providers = []
 
@@ -232,11 +232,11 @@ class ProviderRegistry:
 
     def _instantiate_provider(self, config: ProviderTierConfig) -> Optional[Any]:
         """Create an LLMProvider instance from a tier config."""
-        from core.providers.nvidia_nim import NVIDIANIMProvider
-        from core.providers.openrouter import OpenRouterProvider
-        from core.providers.anthropic_provider import AnthropicProvider
-        from core.providers.ollama import OllamaProvider
-        from core.providers.base import ProviderConfig
+        from able.core.providers.nvidia_nim import NVIDIANIMProvider
+        from able.core.providers.openrouter import OpenRouterProvider
+        from able.core.providers.anthropic_provider import AnthropicProvider
+        from able.core.providers.ollama import OllamaProvider
+        from able.core.providers.base import ProviderConfig
 
         key = config.api_key
         ptype = config.provider_type
@@ -276,7 +276,7 @@ class ProviderRegistry:
 
         elif ptype == "claude_code":
             try:
-                from core.providers.claude_code_provider import ClaudeCodeProvider
+                from able.core.providers.claude_code_provider import ClaudeCodeProvider
                 return ClaudeCodeProvider(model=config.model_id)
             except ImportError as e:
                 logger.warning(f"Claude Code provider deps missing for {config.name}: {e}")
@@ -284,8 +284,8 @@ class ProviderRegistry:
 
         elif ptype == "openai_oauth":
             try:
-                from core.providers.openai_oauth import OpenAIChatGPTProvider
-                from core.auth.manager import AuthManager
+                from able.core.providers.openai_oauth import OpenAIChatGPTProvider
+                from able.core.auth.manager import AuthManager
                 auth_mgr = AuthManager()
                 if not auth_mgr.is_authenticated("openai_oauth"):
                     logger.warning(f"OpenAI OAuth not authenticated for {config.name}")
@@ -306,7 +306,7 @@ class ProviderRegistry:
 
     def build_provider_chain(self) -> Any:
         """Build a ProviderChain from the registry (full fallback chain)."""
-        from core.providers.base import ProviderChain
+        from able.core.providers.base import ProviderChain
 
         llm_providers = self.build_llm_providers()
         if not llm_providers:
@@ -315,7 +315,7 @@ class ProviderRegistry:
 
     def build_chain_for_tier(self, tier: int) -> Any:
         """Build a ProviderChain starting from a specific tier."""
-        from core.providers.base import ProviderChain
+        from able.core.providers.base import ProviderChain
 
         chain_configs = self.get_fallback_chain(starting_tier=tier)
         providers = []

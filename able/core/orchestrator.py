@@ -284,7 +284,7 @@ class ModelRouter:
     def _init_scorer(self):
         """Try to initialize the complexity scorer from config."""
         try:
-            from core.routing.complexity_scorer import ComplexityScorer
+            from able.core.routing.complexity_scorer import ComplexityScorer
             from pathlib import Path
             weights_path = Path("config/scorer_weights.yaml")
             if weights_path.exists():

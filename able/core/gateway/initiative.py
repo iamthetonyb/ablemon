@@ -23,7 +23,7 @@ class InitiativeEngine:
 
     def __init__(self, gateway):
         self.gateway = gateway
-        from core.gateway.goals import GoalTracker
+        from able.core.gateway.goals import GoalTracker
         self.goal_tracker = GoalTracker()
         self._results_log = Path(gateway.audit_dir) / "initiative_results.jsonl" if hasattr(gateway, 'audit_dir') else None
 
@@ -137,7 +137,7 @@ class InitiativeEngine:
 
         Uses the standard provider chain with fallback — no provider routing overrides.
         """
-        from core.providers.base import Message, Role
+        from able.core.providers.base import Message, Role
 
         system_rules = (
             "You are ABLE, an autonomous AGI system generating a proactive briefing. "

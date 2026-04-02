@@ -111,7 +111,7 @@ def tmp_split_config(tmp_path):
 @pytest.fixture
 def server(tmp_db):
     """Create a WebhookServer with temp db."""
-    from tools.webhooks.server import WebhookServer
+    from able.tools.webhooks.server import WebhookServer
     return WebhookServer(port=0, host="127.0.0.1", db_path=tmp_db)
 
 
@@ -255,7 +255,7 @@ class TestSplitTestManager:
     """Test SplitTestManager create/assign/record/conclude lifecycle."""
 
     def test_create_test(self, tmp_split_config, tmp_db):
-        from core.routing.split_test import SplitTestManager
+        from able.core.routing.split_test import SplitTestManager
         mgr = SplitTestManager(config_path=tmp_split_config, db_path=tmp_db)
 
         test = mgr.create_test(
@@ -274,7 +274,7 @@ class TestSplitTestManager:
         assert test.min_samples == 50
 
     def test_create_test_default_equal_weights(self, tmp_split_config, tmp_db):
-        from core.routing.split_test import SplitTestManager
+        from able.core.routing.split_test import SplitTestManager
         mgr = SplitTestManager(config_path=tmp_split_config, db_path=tmp_db)
 
         test = mgr.create_test(
@@ -285,7 +285,7 @@ class TestSplitTestManager:
         assert abs(test.assignment_weights["B"] - 0.5) < 0.01
 
     def test_create_test_custom_weights(self, tmp_split_config, tmp_db):
-        from core.routing.split_test import SplitTestManager
+        from able.core.routing.split_test import SplitTestManager
         mgr = SplitTestManager(config_path=tmp_split_config, db_path=tmp_db)
 
         test = mgr.create_test(
@@ -297,7 +297,7 @@ class TestSplitTestManager:
         assert test.assignment_weights["experiment"] == 0.1
 
     def test_create_test_bad_weights_rejected(self, tmp_split_config, tmp_db):
-        from core.routing.split_test import SplitTestManager
+        from able.core.routing.split_test import SplitTestManager
         mgr = SplitTestManager(config_path=tmp_split_config, db_path=tmp_db)
 
         with pytest.raises(ValueError, match="sum to 1.0"):
@@ -308,7 +308,7 @@ class TestSplitTestManager:
             )
 
     def test_create_test_too_few_groups_rejected(self, tmp_split_config, tmp_db):
-        from core.routing.split_test import SplitTestManager
+        from able.core.routing.split_test import SplitTestManager
         mgr = SplitTestManager(config_path=tmp_split_config, db_path=tmp_db)
 
         with pytest.raises(ValueError, match="at least 2 groups"):
@@ -316,7 +316,7 @@ class TestSplitTestManager:
 
     def test_assign_group_deterministic(self, tmp_split_config, tmp_db):
         """Same request_hash always gets the same group."""
-        from core.routing.split_test import SplitTestManager
+        from able.core.routing.split_test import SplitTestManager
         mgr = SplitTestManager(config_path=tmp_split_config, db_path=tmp_db)
 
         test = mgr.create_test(
@@ -334,7 +334,7 @@ class TestSplitTestManager:
 
     def test_assign_group_distributes_traffic(self, tmp_split_config, tmp_db):
         """Different hashes should distribute across groups roughly evenly."""
-        from core.routing.split_test import SplitTestManager
+        from able.core.routing.split_test import SplitTestManager
         mgr = SplitTestManager(config_path=tmp_split_config, db_path=tmp_db)
 
         test = mgr.create_test(
@@ -353,7 +353,7 @@ class TestSplitTestManager:
         assert 350 < counts["experiment"] < 650
 
     def test_assign_group_not_running_raises(self, tmp_split_config, tmp_db):
-        from core.routing.split_test import SplitTestManager
+        from able.core.routing.split_test import SplitTestManager
         mgr = SplitTestManager(config_path=tmp_split_config, db_path=tmp_db)
 
         test = mgr.create_test(
@@ -366,7 +366,7 @@ class TestSplitTestManager:
             mgr.assign_group(test.id, "some-hash")
 
     def test_record_outcome(self, tmp_split_config, tmp_db):
-        from core.routing.split_test import SplitTestManager
+        from able.core.routing.split_test import SplitTestManager
         mgr = SplitTestManager(config_path=tmp_split_config, db_path=tmp_db)
 
         test = mgr.create_test(
@@ -385,7 +385,7 @@ class TestSplitTestManager:
         assert results["groups"]["experiment"]["successes"] == 1
 
     def test_record_outcome_wrong_group_ignored(self, tmp_split_config, tmp_db):
-        from core.routing.split_test import SplitTestManager
+        from able.core.routing.split_test import SplitTestManager
         mgr = SplitTestManager(config_path=tmp_split_config, db_path=tmp_db)
 
         test = mgr.create_test(
@@ -400,7 +400,7 @@ class TestSplitTestManager:
         assert results["groups"]["B"]["count"] == 0
 
     def test_get_results_structure(self, tmp_split_config, tmp_db):
-        from core.routing.split_test import SplitTestManager
+        from able.core.routing.split_test import SplitTestManager
         mgr = SplitTestManager(config_path=tmp_split_config, db_path=tmp_db)
 
         test = mgr.create_test(
@@ -418,7 +418,7 @@ class TestSplitTestManager:
         assert results["winner"] == "inconclusive"  # No data yet
 
     def test_conclude_test(self, tmp_split_config, tmp_db):
-        from core.routing.split_test import SplitTestManager
+        from able.core.routing.split_test import SplitTestManager
         mgr = SplitTestManager(config_path=tmp_split_config, db_path=tmp_db)
 
         test = mgr.create_test(
@@ -435,7 +435,7 @@ class TestSplitTestManager:
         assert len(mgr.list_tests(status="concluded")) == 1
 
     def test_list_tests(self, tmp_split_config, tmp_db):
-        from core.routing.split_test import SplitTestManager
+        from able.core.routing.split_test import SplitTestManager
         mgr = SplitTestManager(config_path=tmp_split_config, db_path=tmp_db)
 
         mgr.create_test(name="test-1", groups={"A": {}, "B": {}})
@@ -448,7 +448,7 @@ class TestSplitTestManager:
         assert len(mgr.list_tests(status="concluded")) == 1
 
     def test_cancel_test(self, tmp_split_config, tmp_db):
-        from core.routing.split_test import SplitTestManager
+        from able.core.routing.split_test import SplitTestManager
         mgr = SplitTestManager(config_path=tmp_split_config, db_path=tmp_db)
 
         test = mgr.create_test(name="cancel-me", groups={"A": {}, "B": {}})
@@ -459,7 +459,7 @@ class TestSplitTestManager:
 
     def test_persistence_across_instances(self, tmp_split_config, tmp_db):
         """Tests should survive manager restart."""
-        from core.routing.split_test import SplitTestManager
+        from able.core.routing.split_test import SplitTestManager
 
         mgr1 = SplitTestManager(config_path=tmp_split_config, db_path=tmp_db)
         test = mgr1.create_test(name="persist-test", groups={"A": {}, "B": {}})
@@ -480,7 +480,7 @@ class TestSignificanceCheck:
     """Test the chi-squared significance check."""
 
     def test_significance_returns_p_value(self, tmp_split_config, tmp_db):
-        from core.routing.split_test import SplitTestManager
+        from able.core.routing.split_test import SplitTestManager
         mgr = SplitTestManager(config_path=tmp_split_config, db_path=tmp_db)
 
         group_a = {"successes": 80, "failures": 20}
@@ -495,7 +495,7 @@ class TestSignificanceCheck:
 
     def test_significance_clear_difference(self, tmp_split_config, tmp_db):
         """Large difference should be statistically significant."""
-        from core.routing.split_test import SplitTestManager
+        from able.core.routing.split_test import SplitTestManager
         mgr = SplitTestManager(config_path=tmp_split_config, db_path=tmp_db)
 
         # 95% vs 50% success — should be very significant
@@ -508,7 +508,7 @@ class TestSignificanceCheck:
 
     def test_significance_no_difference(self, tmp_split_config, tmp_db):
         """Identical groups should not be significant."""
-        from core.routing.split_test import SplitTestManager
+        from able.core.routing.split_test import SplitTestManager
         mgr = SplitTestManager(config_path=tmp_split_config, db_path=tmp_db)
 
         group_a = {"successes": 50, "failures": 50}
@@ -520,7 +520,7 @@ class TestSignificanceCheck:
 
     def test_significance_empty_groups(self, tmp_split_config, tmp_db):
         """Empty groups should return not significant."""
-        from core.routing.split_test import SplitTestManager
+        from able.core.routing.split_test import SplitTestManager
         mgr = SplitTestManager(config_path=tmp_split_config, db_path=tmp_db)
 
         group_a = {"successes": 0, "failures": 0}
@@ -532,7 +532,7 @@ class TestSignificanceCheck:
 
     def test_significance_insufficient_data(self, tmp_split_config, tmp_db):
         """Small sample should flag insufficient data."""
-        from core.routing.split_test import SplitTestManager
+        from able.core.routing.split_test import SplitTestManager
         mgr = SplitTestManager(config_path=tmp_split_config, db_path=tmp_db)
 
         group_a = {"successes": 9, "failures": 1}
@@ -543,7 +543,7 @@ class TestSignificanceCheck:
 
     def test_full_lifecycle_with_significance(self, tmp_split_config, tmp_db):
         """End-to-end: create test, record many outcomes, check significance in results."""
-        from core.routing.split_test import SplitTestManager
+        from able.core.routing.split_test import SplitTestManager
         mgr = SplitTestManager(config_path=tmp_split_config, db_path=tmp_db)
 
         test = mgr.create_test(
@@ -583,7 +583,7 @@ class TestThreeGroupSplit:
     """Test split tests with more than 2 groups."""
 
     def test_three_way_split(self, tmp_split_config, tmp_db):
-        from core.routing.split_test import SplitTestManager
+        from able.core.routing.split_test import SplitTestManager
         mgr = SplitTestManager(config_path=tmp_split_config, db_path=tmp_db)
 
         test = mgr.create_test(

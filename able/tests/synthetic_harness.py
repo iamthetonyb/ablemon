@@ -516,7 +516,7 @@ class SyntheticHarness:
 
 def test_circuit_breaker():
     """Validate circuit breaker behavior."""
-    from core.providers.base import CircuitBreaker
+    from able.core.providers.base import CircuitBreaker
 
     cb = CircuitBreaker(failure_threshold=3, cooldown_seconds=2)
 
@@ -561,7 +561,7 @@ def test_circuit_breaker():
 
 def test_approval_learning():
     """Validate approval preference learning."""
-    from core.approval.workflow import ApprovalWorkflow, ApprovalStatus
+    from able.core.approval.workflow import ApprovalWorkflow, ApprovalStatus
 
     print("\n--- Approval Learning Tests ---")
 
@@ -609,7 +609,7 @@ async def feed_results_to_agi(results: List[TestResult]):
     - JSON export → data/ for evolution daemon weight tuning
     """
     try:
-        from core.agi.self_improvement import SelfImprovementEngine
+        from able.core.agi.self_improvement import SelfImprovementEngine
     except ImportError:
         logger.warning("SelfImprovementEngine not importable, skipping AGI feedback")
         return

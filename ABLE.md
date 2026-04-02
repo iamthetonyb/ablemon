@@ -146,11 +146,12 @@ When Opus budget is exhausted, Tier 4 tasks cap at Tier 2.
 ### Budget Caps
 
 ```yaml
-opus_daily_usd: 15.00
-opus_monthly_usd: 100.00
-evolution_daily_usd: 5.00
+opus_api_daily_usd: 25.00       # Anthropic API fallback only (primary is $0 via Max)
+opus_api_monthly_usd: 150.00
+evolution_daily_usd: 5.00       # M2.7 on OpenRouter (background daemon)
 evolution_monthly_usd: 50.00
-total_monthly_cap_usd: 200.00
+openrouter_monthly_usd: 75.00   # MiMo fallback + M2.7
+total_monthly_cap_usd: 250.00
 ```
 
 ### Model Shootout Results (2026-03-19)

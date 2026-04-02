@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 try:
     from able.core.routing.log_queries import LogQueries
 except ImportError:
-    from core.routing.log_queries import LogQueries
+    from able.core.routing.log_queries import LogQueries
 
 logger = logging.getLogger(__name__)
 

@@ -467,7 +467,7 @@ RULES:
             try:
                 from able.core.providers.openrouter import OpenRouterProvider
             except ImportError:
-                from core.providers.openrouter import OpenRouterProvider
+                from able.core.providers.openrouter import OpenRouterProvider
 
             api_key = os.environ.get("OPENROUTER_API_KEY", "")
             if not api_key:

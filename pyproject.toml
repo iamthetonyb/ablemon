@@ -18,4 +18,4 @@ able-chat = "able.cli.chat:main"
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["able*", "core", "tools", "memory", "scheduler", "clients"]
+include = ["able*"]

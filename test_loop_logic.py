@@ -16,9 +16,9 @@ aiohttp.ClientSession.__init__ = new_client_session_init
 import sys
 sys.path.append(os.path.abspath('able'))
 
-from core.providers.base import Message, Role, ToolCall
-from core.providers.openrouter import OpenRouterProvider
-from core.gateway.gateway import ABLE_TOOL_DEFS, ABLE_SYSTEM_PROMPT
+from able.core.providers.base import Message, Role, ToolCall
+from able.core.providers.openrouter import OpenRouterProvider
+from able.core.gateway.gateway import ABLE_TOOL_DEFS, ABLE_SYSTEM_PROMPT
 
 async def test_api():
     api_key = os.environ.get("OPENROUTER_API_KEY")

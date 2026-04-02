@@ -262,7 +262,7 @@ class SQLiteStore:
 
     def _row_to_entry(self, row):
         """Convert database row to MemoryEntry, decompressing content"""
-        from memory.hybrid_memory import MemoryEntry, MemoryType
+        from able.memory.hybrid_memory import MemoryEntry, MemoryType
 
         return MemoryEntry(
             id=row['id'],
