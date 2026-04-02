@@ -150,9 +150,16 @@ All four learning feedback loops are closed and tested:
 - `install.sh` seeds federation identity during workspace init
 - Research integration: llm-d prefix-cache routing → domain affinity, vLLM Ascend → pluggable backend pattern, Ollama 0.19 MLX → 2x T5 decode speed validates distillation flywheel
 
+**Unsloth training pipeline** (`able/core/distillation/training/unsloth_exporter.py`):
+- `UnslothExporter` generates Colab-ready notebooks and VS Code training scripts
+- Federation corpus → Unsloth fine-tuning (2x speed, 70% less VRAM) → GGUF export (Dynamic 2.0) → Ollama T5
+- 9B model: Colab free T4 runtime (12-24 hours available), 27B: H100 session
+- Notebooks auto-install Unsloth, load ChatML corpus, train with SFTTrainer, export GGUF, generate Modelfile
+- Training stats JSON for federation metrics tracking
+
 **Test suite**:
-- Full-suite pass: 736 tests, 0 deprecation warnings
-- 34 federation tests (identity, models, PII scrubbing, ingestion, sync, store since)
+- Full-suite pass: 742 tests, 0 deprecation warnings
+- 40 federation tests (identity, models, PII scrubbing, ingestion, sync, store since, Unsloth exporter)
 - 70 harvester tests (scaffolding, entry types, harvesters, session writers, corpus scrubber)
 - 11 security tests (injection, command guard, binary hijack, cd+git, dangerous paths, subcommand cap)
 - datetime.utcnow() replaced with datetime.now(timezone.utc) across all tenant modules

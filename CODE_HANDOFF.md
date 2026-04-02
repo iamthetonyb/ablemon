@@ -367,7 +367,16 @@ Training lanes:
     - Network pairs stored with `tenant_id='network'`, flow through existing `CorpusBuilder.build_tenant_with_able_base()` path
     - `install.sh` seeds federation identity during workspace init
     - 34 federation tests (identity, models, PII scrubbing, ingestion validation, sync orchestrator, store since parameter)
-    - 736 tests passing total (34 federation + 702 existing)
+31. **Unsloth training exporter** (`able/core/distillation/training/unsloth_exporter.py`):
+    - `UnslothExporter.export_notebook()` generates Colab-ready .ipynb files with Unsloth 2x speed + 70% VRAM savings
+    - `UnslothExporter.export_training_script()` generates standalone Python scripts for VS Code + Colab runtime
+    - Both use model configs from `model_configs.py` (27B H100, 9B T4 Colab, 9B local)
+    - Notebooks: install Unsloth → load model → format ChatML corpus → train with SFTTrainer → export GGUF (Dynamic 2.0 quants) → generate Ollama Modelfile
+    - GGUF targets: Q4_K_M, IQ2_M, Q8_0 for 9B; Q4_K_M, Q5_K_M, Q8_0 for 27B
+    - Designed to maximize free Colab T4 runtime (12-24 hours)
+    - Training stats exported as JSON for federation metrics
+    - 6 exporter tests covering notebook generation, script generation, ChatML format, GGUF export presence
+    - 742 tests passing total (40 federation + 702 existing)
 
 ## Next-Run Objectives
 

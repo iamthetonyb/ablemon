@@ -460,3 +460,83 @@ class TestStoreSince:
         # Should not raise
         pairs = store.get_pairs(since=datetime.now(timezone.utc) - timedelta(hours=24))
         assert isinstance(pairs, list)
+
+
+# ── Unsloth exporter tests ────────────────────────────────────────
+
+
+class TestUnslothExporter:
+    """Tests for the Unsloth training exporter."""
+
+    def test_export_notebook_9b(self, tmp_path):
+        from able.core.distillation.training.unsloth_exporter import UnslothExporter
+
+        exporter = UnslothExporter(output_dir=tmp_path)
+        path = exporter.export_notebook(
+            "able-nano-9b",
+            "data/corpus/default/v001/train.jsonl",
+        )
+        assert path.exists()
+        assert path.suffix == ".ipynb"
+
+        # Verify it's valid JSON notebook
+        nb = json.loads(path.read_text())
+        assert nb["nbformat"] == 4
+        assert len(nb["cells"]) >= 8
+        # Check GPU type is T4 for nano
+        assert nb["metadata"]["colab"]["gpuType"] == "T4"
+
+    def test_export_notebook_27b(self, tmp_path):
+        from able.core.distillation.training.unsloth_exporter import UnslothExporter
+
+        exporter = UnslothExporter(output_dir=tmp_path)
+        path = exporter.export_notebook(
+            "able-student-27b",
+            "data/corpus/default/v001/train.jsonl",
+            runtime="h100_session",
+        )
+        assert path.exists()
+        nb = json.loads(path.read_text())
+        assert nb["metadata"]["colab"]["gpuType"] == "A100"
+
+    def test_export_notebook_invalid_model(self, tmp_path):
+        from able.core.distillation.training.unsloth_exporter import UnslothExporter
+
+        exporter = UnslothExporter(output_dir=tmp_path)
+        with pytest.raises(ValueError, match="Unknown model"):
+            exporter.export_notebook("nonexistent-model", "corpus.jsonl")
+
+    def test_export_training_script(self, tmp_path):
+        from able.core.distillation.training.unsloth_exporter import UnslothExporter
+
+        exporter = UnslothExporter(output_dir=tmp_path)
+        path = exporter.export_training_script(
+            "able-nano-9b",
+            "data/corpus/default/v001/train.jsonl",
+        )
+        assert path.exists()
+        assert path.suffix == ".py"
+
+        content = path.read_text()
+        assert "FastLanguageModel" in content
+        assert "Qwen3.5-9B" in content
+        assert "save_pretrained_gguf" in content
+
+    def test_notebook_contains_chatml_format(self, tmp_path):
+        from able.core.distillation.training.unsloth_exporter import UnslothExporter
+
+        exporter = UnslothExporter(output_dir=tmp_path)
+        path = exporter.export_notebook("able-nano-9b", "train.jsonl")
+        content = path.read_text()
+        assert "apply_chat_template" in content
+        assert "chatml" in content.lower() or "ChatML" in content
+
+    def test_notebook_contains_gguf_export(self, tmp_path):
+        from able.core.distillation.training.unsloth_exporter import UnslothExporter
+
+        exporter = UnslothExporter(output_dir=tmp_path)
+        path = exporter.export_notebook("able-nano-9b", "train.jsonl")
+        content = path.read_text()
+        assert "save_pretrained_gguf" in content
+        assert "iq2_m" in content
+        assert "q4_k_m" in content
