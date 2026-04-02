@@ -1,64 +1,101 @@
 # ABLE — Code Handoff
 
-This file mirrors the current cross-agent handoff state for auditors and follow-up agents.
-
+Date: 2026-04-01
 Canonical branch: `codex/able-rewrite-integration`
+Baseline head before this handoff refresh: `cd4a049`
 Canonical integration PR: `#49`
 
-Do not merge atlas-era PRs `#37` through `#48` individually. They are reference inputs only.
+## Source Of Truth
 
----
+Use this file as the canonical cross-agent handoff.
 
-# ABLE — Claude Handoff
+If any of these disagree, trust them in this order:
 
-Date: 2026-04-01
-Branch: `codex/able-rewrite-integration`
+1. This file
+2. Current branch state on `codex/able-rewrite-integration`
+3. Current code in the repo
+4. `README.md`
+5. GitHub PR text/comments
 
-## What Changed
+Important: `origin/main` does not currently contain a tracked `CODE_HANDOFF.md`. This branch introduces the canonical handoff doc. Do not assume GitHub PR body text is current.
 
-- Added a real local operator CLI in `able/cli/chat.py` and wired it into `able chat` / `able-chat`.
-- Updated `able/__main__.py` so `able` still serves the packaged gateway by default while `able chat` starts a terminal session that reuses the same pipeline, tools, routing, memory, and transcript logging.
-- Relaxed the gateway constructor so local CLI mode can run without `TELEGRAM_BOT_TOKEN`; telemetry/session logs now record `cli` as a first-class channel.
-- Updated deploy automation to bootstrap the `able` system user/group on the server before chowning runtime paths.
-- Added `CODE_HANDOFF.md` as a stable alias for this cross-agent handoff.
-- Replaced the gateway's hardcoded tool list with the shared registry in `able/core/gateway/tool_registry.py`.
-- Added control-plane endpoints in `able/core/gateway/gateway.py`:
-  - `/control/tools/catalog`
-  - `/control/resources`
-  - `/control/resources/{id}`
-  - `/control/resources/{id}/action`
-  - `/control/collections`
-  - `/control/setup-wizard`
-- Added the backend resource plane in `able/core/control_plane/resources.py`.
-- Added registry-managed resource tools in `able/core/gateway/tool_defs/resource_tools.py`.
-- Expanded tool metadata so studio and runtime share category, approval, risk, read-only, concurrency, surface, and artifact details.
-- Removed hardcoded studio defaults and switched `able-studio/app/api/settings/route.ts` + `able-studio/app/settings/page.tsx` to a backend-fed catalog with DB overrides only.
-- Added new studio surfaces:
-  - `able-studio/app/resources/page.tsx`
-  - `able-studio/app/resources/[id]/page.tsx`
-  - `able-studio/app/collections/page.tsx`
-  - `able-studio/app/setup/page.tsx`
-- Added `able-studio/lib/control-plane.ts` plus proxy API routes for tool catalog, resources, collections, and setup.
-- Updated deployment to use the packaged `able` entrypoint:
+## Merge Policy
+
+- Merge PR `#49` only.
+- Do not merge atlas-era PRs `#37` through `#48` individually.
+- Treat those PRs as salvage/reference inputs only.
+
+## North Star
+
+The goal is to turn ABLE into a self-owned operator runtime with robust scaffolding so core workflows no longer depend on external chat products as the primary interface.
+
+That means:
+
+- `able chat` is the simple local operator entrypoint
+- `able-studio` is the control center for resources, tools, approvals, setup, and operator visibility
+- deploys are consistent from local -> GitHub -> server
+- local/offline model lanes are first-class, not afterthoughts
+- distillation and evaluation move the system toward a stronger self-hosted stack over time
+
+## Current State
+
+The integration branch already lands these major changes:
+
+- Packaged `able` runtime entrypoint
+- Local operator CLI:
+  - `able chat`
+  - `able serve`
+  - `able-chat`
+- Registry-backed gateway tool system shared with studio
+- Nomad-style resource plane and control-plane endpoints
+- T4-first 9B distillation lane and quant-pinned model roster
+- Deploy path aligned to the packaged service
+- Server deploy bootstrap for the `able` system user/group
+
+## What Was Recently Added
+
+- Local chat CLI in `able/cli/chat.py`
+- `able/__main__.py` subcommands for `serve` and `chat`
+- CLI-aware channel tagging in `able/core/gateway/gateway.py`
+- `scripts/able-auth.py`
+- `scripts/able-setup.sh`
+- Deploy bootstrap fix for missing `able` user/group in:
   - `.github/workflows/deploy.yml`
   - `deploy-to-server.sh`
-  - `able/able.service`
-- Modernized distillation runtime controls:
-  - pooled GPU budgets: `t4_colab`, `h100_session`, `local`
-  - per-model runtime profiles
-  - checkpoint/resume flags
-  - T4-first 9B profile, H100-only 27B
 
-## Remote Baseline
+## Current Objectives
 
-Remote heads at the start of this handoff:
+These are the highest-value next steps for Claude or any follow-up agent:
 
-- `origin/main` = `3fe6fcf5743299b8a63286650dd79393cda18bf9`
-- `origin/feat/session-state-manager` = `830497007f134e493a9191229352aab99fc2a0ef`
+1. Verify correctness and remove drift
+- audit import paths
+- confirm entry points
+- confirm routing tier table vs docs
+- confirm quant roster vs config
 
-The local integration branch was created from `feat/session-state-manager`. The rewrite should supersede the old atlas-era branch/PR stack rather than merging those PRs directly.
+2. Close test gaps
+- add dedicated tests for `/health`
+- add dedicated tests for control-plane endpoints
+- add tests for resource tools
+- expand distillation profile tests for T4 vs H100 behavior
+
+3. Finish the operator/runtime path
+- verify `able chat` is strong enough for immediate demos
+- identify the smallest justified improvements toward a stronger OpenCode-class local interface
+- do not overbuild a TUI without evidence
+
+4. Tighten deploy parity
+- verify branch deploy via `workflow_dispatch ref=...`
+- verify the server bootstraps cleanly from an older VPS state
+- verify service health after restart
+
+5. Reduce legacy scaffolding debt
+- verify whether root-level shim packages are still required
+- remove them only if imports are actually migrated
 
 ## Quant-Pinned Model Roster
+
+These sizes are pinned. Do not change them without re-measuring and updating config/docs together.
 
 - `able-student-27b`
   - `UD-Q4_K_XL` = `17.6 GB`
@@ -78,30 +115,74 @@ Source of truth:
 - `config/ollama/Modelfile.9b-balanced`
 - `able/core/distillation/training/quantizer.py`
 
-## What To Verify Next
+## Validated Commands
 
-- Smoke test the new local path with `able chat`, including one read-only tool call and one approval-gated write tool call.
-- Decide whether `able chat` should stay terminal-first or grow into a richer TUI. The current path is functional and operator-friendly, but it is still plain terminal I/O rather than a full-screen shell UI.
-- Run targeted Python and studio validation. The control plane and new distillation runtime need fresh test coverage.
-- Review the resource action path. It currently requires explicit `approved_by` metadata and audit logging, but it is not yet wired into the full Telegram-style approval workflow.
-- Decide whether manual `workflow_dispatch ref=...` deploys should reuse the production service or get a separate preview service/path.
-- Compare surviving remote PRs `#39` through `#48` against the rewrite and salvage anything still missing before opening the integration PR.
-- Push the integration branch and open a superseding PR once the repo-level staging is complete.
-
-## Suggested Checks
+These were already verified on this branch:
 
 ```bash
-python -m pytest able/tests/test_cli_chat.py
-pytest able/tests/test_training_pipeline.py
-pytest able/tests/test_distillation_store.py
-python -m able chat --help
-python -m able.core.distillation.training --check --model 9b --gpu-class t4_colab
-cd able-studio && pnpm build
+python3 -m able --help
+python3 -m able chat --help
+printf '/exit\n' | python3 -m able chat --control-port 0
+python3 -m pytest able/tests/test_cli_chat.py -x
+python3 -m pytest able/tests/test_cli_chat.py able/tests/test_training_pipeline.py able/tests/test_distillation_store.py
+bash -n deploy-to-server.sh
+python3 -m py_compile scripts/able-auth.py
 ```
 
-## Current Gaps
+## Deploy Notes
 
-- `able chat` is now the missing operator entrypoint, but it is still a text REPL. If the target is “better than OpenCode” on UX, the next step is a richer TUI with streaming output, slash-command palettes, artifact panes, and inline approval cards.
-- Resource lifecycle actions are operator-gated but not yet approval-workflow-native.
-- The studio artifact viewer currently handles JSON/text/HTML artifacts; broader tool-output artifact rendering can extend from there.
-- The resource plane is focused on discovery plus controlled actions. Rollback/install orchestration for optional bundles is still thin.
+The recent server failure was:
+
+```text
+chown: invalid user: 'able:able'
+```
+
+That is now addressed by explicitly bootstrapping the `able` system user/group before chowning runtime paths.
+
+Files:
+
+- `.github/workflows/deploy.yml`
+- `deploy-to-server.sh`
+- `able/able.service`
+
+## Known Gaps
+
+- `able chat` is functional but still a text REPL, not a richer TUI
+- resource lifecycle actions are not yet fully approval-workflow-native across every surface
+- control-plane endpoints still need dedicated test coverage
+- import cleanup and shim removal need a real audit, not assumption-based deletion
+- PR `#49` body is likely stale relative to current branch state
+
+## Claude Tasking Guidance
+
+When Claude audits this repo, optimize for:
+
+- correctness
+- operator usefulness
+- deploy realism
+- test coverage on the actual new surfaces
+- reduction of legacy drift
+
+Do not optimize for:
+
+- marketing language
+- speculative AGI claims
+- broad refactors without a concrete payoff
+- merging the whole old PR stack
+
+## Expected Output From Claude
+
+Claude should return:
+
+- findings first, ordered by severity
+- exact file references
+- exact validation commands
+- clear merge recommendation:
+  - `merge now`
+  - `merge after X`
+  - `do not merge`
+- a short post-merge improvement list
+
+## Compatibility
+
+`CLAUDE_HANDOFF.md` now exists as a compatibility pointer. Keep this file canonical going forward so the prompt surface stays stable.
