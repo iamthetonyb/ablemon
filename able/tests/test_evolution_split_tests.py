@@ -444,10 +444,10 @@ def test_get_active_proposal_returns_running(
 @pytest.fixture
 def mock_daemon_deps():
     """Mock all daemon dependencies so run_cycle can execute."""
-    with patch("core.evolution.daemon.MetricsCollector") as mock_collector, \
-         patch("core.evolution.daemon.EvolutionAnalyzer") as mock_analyzer, \
-         patch("core.evolution.daemon.ChangeDeployer") as mock_deployer, \
-         patch("core.evolution.daemon.run_from_evals", new_callable=AsyncMock) as mock_auto:
+    with patch("able.core.evolution.daemon.MetricsCollector") as mock_collector, \
+         patch("able.core.evolution.daemon.EvolutionAnalyzer") as mock_analyzer, \
+         patch("able.core.evolution.daemon.ChangeDeployer") as mock_deployer, \
+         patch("able.core.evolution.daemon.run_from_evals", new_callable=AsyncMock) as mock_auto:
 
         # Collector returns enough interactions
         collector_inst = mock_collector.return_value
