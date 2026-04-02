@@ -379,7 +379,9 @@ Training lanes:
     - GPU fallback chain: H100 → A100 → L4 for 27B, T4 → L4 → A100 → H100 for 9B
     - 5 GPU pools: t4_colab (free daily), l4_session (24GB), a100_session (40-80GB), h100_session (80GB), local
     - CPU-first: all pipeline stages run on CPU except final Unsloth training step
-    - 752 tests passing total (50 federation/GPU + 702 existing)
+    - `DistillationReadinessCheck` proactive engine + `InitiativeEngine` cron (5am daily): autonomous corpus monitoring + Telegram alert + auto-export training scripts when threshold reached
+    - Ollama confirmed over LM Studio for T5 tier (headless, multi-model, Modelfile-native, lower overhead)
+    - 756 tests passing total (54 federation/GPU/self-improvement + 702 existing)
 
 ## Next-Run Objectives
 

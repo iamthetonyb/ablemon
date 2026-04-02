@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 import tempfile
@@ -651,6 +652,40 @@ class TestGPUFallback:
         assert "l4_session" in DEFAULT_POOLS
         assert "a100_session" in DEFAULT_POOLS
         assert DEFAULT_POOLS["t4_colab"]["monthly_hours"] == 72.0
+
+    def test_distillation_readiness_check_below_threshold(self):
+        """Check returns no actions when corpus hasn't grown enough."""
+        from able.core.agi.proactive import DistillationReadinessCheck
+
+        mock_store = MagicMock()
+        mock_store.get_pairs.return_value = [MagicMock()] * 30  # 30 pairs
+
+        check = DistillationReadinessCheck(
+            corpus_threshold=100,
+            last_training_pairs=0,
+            auto_export=False,
+        )
+        with patch("able.core.distillation.store.DistillationStore", return_value=mock_store):
+            actions = asyncio.run(check.run())
+        assert actions == []
+
+    def test_distillation_readiness_check_above_threshold(self):
+        """Check returns alert when corpus passes threshold."""
+        from able.core.agi.proactive import DistillationReadinessCheck
+
+        mock_store = MagicMock()
+        mock_store.get_pairs.return_value = [MagicMock()] * 150
+
+        check = DistillationReadinessCheck(
+            corpus_threshold=100,
+            last_training_pairs=0,
+            auto_export=False,
+        )
+        with patch("able.core.distillation.store.DistillationStore", return_value=mock_store):
+            actions = asyncio.run(check.run())
+        assert len(actions) == 1
+        assert actions[0].data["current_pairs"] == 150
+        assert actions[0].data["new_pairs"] == 150
 
     def test_orchestrator_fallback_resolves(self):
         """Fallback picks A100 when H100 budget is exhausted."""

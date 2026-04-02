@@ -71,7 +71,14 @@ class InitiativeEngine:
             description="Weekly self-penetration test (Monday 4am)",
             timeout=600
         )
-        logger.info("InitiativeEngine: Registered %d proactive AGI schedules.", 6)
+        scheduler.add_job(
+            "distillation-readiness",
+            "0 5 * * *",
+            self._distillation_readiness,
+            description="Check corpus growth + auto-export training scripts when ready",
+            timeout=120
+        )
+        logger.info("InitiativeEngine: Registered %d proactive AGI schedules.", 7)
 
     # ── Telegram Delivery ─────────────────────────────────────────────────
 
@@ -575,3 +582,78 @@ Output ONLY the learnings, no preamble."""
 
         except Exception as e:
             logger.error(f"Security pentest failed: {e}")
+
+    async def _distillation_readiness(self):
+        """Autonomous self-improvement: check corpus growth, export training scripts.
+
+        Runs daily at 5am (after harvest at 2am, evolution at 3am, federation
+        at 3:30am).  When the corpus has grown past the training threshold,
+        auto-generates MLX local + Colab T4 training scripts and notifies
+        the operator.  This is the Karpathy AutoResearch pattern applied to
+        ABLE's distillation pipeline.
+        """
+        try:
+            from able.core.distillation.store import DistillationStore
+
+            store = DistillationStore()
+            pairs = store.get_pairs(limit=100_000)
+            total = len(pairs)
+
+            # Load last training count from state
+            state_path = Path.home() / ".able" / "distillation_training_state.yaml"
+            last_count = 0
+            if state_path.exists():
+                import yaml
+                with open(state_path) as f:
+                    state = yaml.safe_load(f) or {}
+                last_count = state.get("last_training_pairs", 0)
+
+            new_pairs = total - last_count
+            threshold = 100
+
+            if new_pairs < threshold:
+                logger.info(
+                    "Distillation readiness: %d new pairs (need %d). Not ready.",
+                    new_pairs, threshold,
+                )
+                return
+
+            # Corpus is ready — auto-export training scripts
+            export_info = []
+            try:
+                from able.core.distillation.training.unsloth_exporter import UnslothExporter
+                exporter = UnslothExporter()
+
+                mlx_path = exporter.export_mlx_training_script(
+                    "able-nano-9b",
+                    str(Path.home() / ".able/distillation/corpus/default/latest/train.jsonl"),
+                )
+                export_info.append(f"MLX local: `{mlx_path}`")
+
+                nb_path = exporter.export_notebook(
+                    "able-nano-9b",
+                    str(Path.home() / ".able/distillation/corpus/default/latest/train.jsonl"),
+                )
+                export_info.append(f"Colab T4: `{nb_path}`")
+            except Exception as exc:
+                logger.warning("Training script export failed: %s", exc)
+
+            summary = (
+                f"🧬 *Distillation Corpus Ready*\n\n"
+                f"Total pairs: {total}\n"
+                f"New since last training: {new_pairs}\n"
+                f"Threshold: {threshold}\n\n"
+            )
+            if export_info:
+                summary += "*Training scripts auto-generated:*\n"
+                for line in export_info:
+                    summary += f"  {line}\n"
+                summary += (
+                    "\nRun locally: `bash notebooks/train_mlx_able-nano-9b.sh`\n"
+                    "Or upload the notebook to Colab for free T4 training."
+                )
+
+            await self._send_to_owner(summary, "distillation-readiness")
+
+        except Exception as exc:
+            logger.error("Distillation readiness check failed: %s", exc)

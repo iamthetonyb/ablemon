@@ -160,6 +160,9 @@ All four learning feedback loops are closed and tested:
 - MLX local training: `export_mlx_training_script()` generates shell scripts for Apple Silicon LoRA fine-tuning (mlx_lm.lora → fuse → llama.cpp GGUF → Ollama). 9B fits 32GB+ Macs, 27B needs 64GB+.
 - Notebooks auto-install Unsloth, load ChatML corpus, train with SFTTrainer, export GGUF, generate Modelfile
 - Training stats JSON for federation metrics tracking
+- `DistillationReadinessCheck` in proactive engine: monitors corpus growth every 12h, auto-exports training scripts (MLX + Colab) when threshold reached
+- `InitiativeEngine` distillation-readiness cron at 5am daily: Telegram notification with generated scripts when corpus is ready
+- Ollama confirmed as the right T5 backend (vs LM Studio) — headless, multi-model, API-native, Modelfile-first
 
 **Test suite**:
 - Full-suite pass: 742 tests, 0 deprecation warnings

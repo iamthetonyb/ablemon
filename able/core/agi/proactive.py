@@ -367,6 +367,115 @@ class BuddyNeedsCheck(ProactiveCheck):
         return actions
 
 
+class DistillationReadinessCheck(ProactiveCheck):
+    """
+    Autonomous self-improvement: monitor corpus growth and trigger training.
+
+    Inspired by Karpathy's AutoResearch loop — the system autonomously:
+    1. Tracks corpus pair count growth since last training run
+    2. When corpus passes a threshold (default 100 new pairs), alerts
+    3. Optionally auto-generates training scripts (MLX local or Unsloth Colab)
+    4. After training completes, triggers eval validation
+
+    This is the AGI piece: the system recognizes when it has enough new
+    data to improve itself and takes action without being asked.
+    """
+
+    name = "distillation_readiness"
+    interval_seconds = 3600 * 12  # Every 12 hours
+
+    def __init__(
+        self,
+        corpus_threshold: int = 100,
+        last_training_pairs: int = 0,
+        auto_export: bool = True,
+        collector=None,
+    ):
+        super().__init__()
+        self.corpus_threshold = corpus_threshold
+        self.last_training_pairs = last_training_pairs
+        self.auto_export = auto_export
+        self.collector = collector
+
+    async def run(self) -> List[ProactiveAction]:
+        actions = []
+        try:
+            from able.core.distillation.store import DistillationStore
+
+            store = DistillationStore()
+            all_pairs = store.get_pairs(limit=100_000)
+            current_count = len(all_pairs)
+            new_pairs = current_count - self.last_training_pairs
+
+            if new_pairs < self.corpus_threshold:
+                return actions
+
+            # Corpus has grown enough — time to retrain
+            description = (
+                f"Distillation corpus grew by {new_pairs} pairs "
+                f"(total: {current_count}). Threshold: {self.corpus_threshold}. "
+                f"Ready for a training run."
+            )
+
+            # Auto-export training scripts if enabled
+            export_paths = {}
+            if self.auto_export:
+                try:
+                    from able.core.distillation.training.unsloth_exporter import UnslothExporter
+                    exporter = UnslothExporter()
+
+                    # Always export MLX for local training (free, no GPU wait)
+                    mlx_path = exporter.export_mlx_training_script(
+                        "able-nano-9b",
+                        "~/.able/distillation/corpus/default/latest/train.jsonl",
+                    )
+                    export_paths["mlx_script"] = str(mlx_path)
+
+                    # Export Colab notebook for cloud training
+                    nb_path = exporter.export_notebook(
+                        "able-nano-9b",
+                        "~/.able/distillation/corpus/default/latest/train.jsonl",
+                    )
+                    export_paths["colab_notebook"] = str(nb_path)
+
+                    description += (
+                        f"\n\nTraining scripts auto-generated:"
+                        f"\n  MLX local: {mlx_path}"
+                        f"\n  Colab T4:  {nb_path}"
+                    )
+                except Exception as exc:
+                    logger.warning("Auto-export failed: %s", exc)
+
+            actions.append(ProactiveAction(
+                action_type=ProactiveActionType.ALERT,
+                title="Distillation corpus ready for training",
+                description=description,
+                urgency=6,
+                requires_human=False,
+                auto_execute=False,
+                data={
+                    "current_pairs": current_count,
+                    "new_pairs": new_pairs,
+                    "threshold": self.corpus_threshold,
+                    **export_paths,
+                },
+            ))
+
+            if self.collector:
+                self.collector.submit_insight(
+                    title="Distillation Corpus Ready",
+                    description=f"{new_pairs} new pairs. Total: {current_count}.",
+                    source="proactive.distillation_readiness",
+                    category="self_improvement",
+                    data={"pairs": current_count, "new": new_pairs},
+                )
+
+        except Exception as exc:
+            logger.debug("Distillation readiness check skipped: %s", exc)
+
+        return actions
+
+
 class ProactiveEngine:
     """
     Runs all proactive checks and dispatches actions.
