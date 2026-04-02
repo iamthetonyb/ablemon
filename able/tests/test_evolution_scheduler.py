@@ -391,13 +391,13 @@ class TestMorningReporter:
         """Test with actual SQLite data."""
         conn = sqlite3.connect(self.interaction_db)
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS interactions (
+            CREATE TABLE IF NOT EXISTS interaction_log (
                 id INTEGER PRIMARY KEY,
                 timestamp REAL,
                 selected_tier INTEGER,
                 selected_provider TEXT,
                 success INTEGER,
-                override_tier INTEGER,
+                escalated INTEGER DEFAULT 0,
                 cost_usd REAL
             )
         """)
@@ -405,13 +405,13 @@ class TestMorningReporter:
         # Insert some test data
         for i in range(10):
             conn.execute(
-                "INSERT INTO interactions (timestamp, selected_tier, selected_provider, success, cost_usd) "
+                "INSERT INTO interaction_log (timestamp, selected_tier, selected_provider, success, cost_usd) "
                 "VALUES (?, ?, ?, ?, ?)",
                 (now - i * 100, 1, "gpt-5.4-mini", 1, 0.001),
             )
         # Insert a failure
         conn.execute(
-            "INSERT INTO interactions (timestamp, selected_tier, selected_provider, success, cost_usd) "
+            "INSERT INTO interaction_log (timestamp, selected_tier, selected_provider, success, cost_usd) "
             "VALUES (?, ?, ?, ?, ?)",
             (now - 50, 2, "mimo-v2-pro", 0, 0.01),
         )
