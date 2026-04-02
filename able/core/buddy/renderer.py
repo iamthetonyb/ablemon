@@ -42,6 +42,26 @@ def _need_bar(value: float, width: int = 8) -> str:
     return f"{indicator * filled}{'\u2591' * empty}"
 
 
+def _profile_label(value: str) -> str:
+    labels = {
+        "solo-operator": "Solo operator",
+        "builder": "Builder",
+        "client-delivery": "Client delivery",
+        "mixed-team": "Mixed team",
+        "all-terrain": "All-terrain",
+        "coding": "Coding",
+        "research": "Research",
+        "operations": "Operations",
+        "creative": "Creative",
+        "security": "Security",
+        "general-business": "General business",
+        "9b-fast-local": "9B fast local",
+        "27b-deep-h100": "27B deep H100",
+        "hybrid": "Hybrid",
+    }
+    return labels.get(value, value.replace("-", " "))
+
+
 def render_banner(buddy: BuddyState) -> str:
     """Compact one-line buddy banner for the chat startup."""
     meta = buddy.meta
@@ -56,7 +76,7 @@ def render_banner(buddy: BuddyState) -> str:
         f"  {emoji} {buddy.name} the {label}{rarity}  "
         f"Lv.{buddy.level}  {bar}  "
         f"Stage: {stage_name}  "
-        f"W:{buddy.battles_won} D:{buddy.battles_drawn} L:{buddy.battles_lost}  "
+        f"Wins:{buddy.battles_won} Draws:{buddy.battles_drawn} Losses:{buddy.battles_lost}  "
         f"{mood_icon} {needs.mood.title()}"
     )
 
@@ -86,8 +106,8 @@ def render_header(buddy: BuddyState, provider_count: int) -> str:
     info = [
         f"ABLE",
         f"{buddy.display_emoji} {buddy.name} the {meta['label']}  Lv.{buddy.level}  {xp_bar}{rarity}",
-        f"{stage_name} \u00b7 {mood_icon} {needs.mood.title()} \u00b7 {provider_count} providers",
-        f"\u2764\ufe0f {needs.hunger:.0f}  \U0001f4a7 {needs.thirst:.0f}  \u26a1 {needs.energy:.0f}  \u00b7  W{buddy.battles_won} D{buddy.battles_drawn} L{buddy.battles_lost}",
+        f"{stage_name} \u00b7 {mood_icon} {needs.mood.title()} \u00b7 {provider_count} AI providers ready",
+        f"\u2764\ufe0f {needs.hunger:.0f}  \U0001f4a7 {needs.thirst:.0f}  \u26a1 {needs.energy:.0f}  \u00b7  Wins {buddy.battles_won}  Draws {buddy.battles_drawn}  Losses {buddy.battles_lost}",
     ]
 
     # Pad art to consistent width
@@ -126,6 +146,10 @@ def render_full(buddy: BuddyState, stats: BuddyStats | None = None) -> str:
     for art_line in art_lines:
         lines.append(f"         {art_line}")
 
+    lines.append(f"{'─' * 42}")
+    lines.append(f"  Type: {meta['element']}  ·  Role: {meta['role']}")
+    lines.append(f"  Best for: {meta['best_for']}")
+    lines.append(f"  Abilities: {', '.join(meta['abilities'])}")
     lines.append(f"{'─' * 42}")
     lines.append(
         f"  Level {buddy.level}  "
@@ -268,15 +292,18 @@ def render_backpack(collection: BuddyCollection | None) -> str:
         focus = collection.operator_profile.get("focus", "unset")
         work_style = collection.operator_profile.get("work_style", "unset")
         distillation = collection.operator_profile.get("distillation_track", "unset")
+        lines.append("  Operator profile")
         lines.append(
-            f"  Operator profile: {focus} · {work_style} · {distillation}"
+            f"    Focus: {_profile_label(focus)}  ·  "
+            f"Style: {_profile_label(work_style)}  ·  "
+            f"Distill: {_profile_label(distillation)}"
         )
     for buddy in starter_owned:
         active = "▶" if collection.active_species == buddy.species else " "
         stage = STAGE_NAMES[buddy.stage_enum]
         lines.append(
             f"  {active} {buddy.display_emoji} {buddy.name:<12} "
-            f"Lv.{buddy.level:<3} {stage:<8} {buddy.rarity_label}"
+            f"Lv.{buddy.level:<3} {stage:<8} {buddy.rarity_label:<16} {buddy.meta['role']}"
         )
 
     missing = [species for species in STARTER_SPECIES if species.value not in collection.buddies]

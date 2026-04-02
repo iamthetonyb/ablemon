@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import atexit
 import json
 import logging
 import os
 import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from able.core.approval.workflow import ApprovalResult, ApprovalStatus, ApprovalWorkflow
@@ -31,10 +33,104 @@ def _supports_color() -> bool:
 
 
 _COLOR = _supports_color()
+_READLINE_READY = False
+_READLINE_HISTORY_PATH = Path.home() / ".able" / "history" / "cli_history.txt"
 
 
 def _c(code: str, text: str) -> str:
     return f"{code}{text}{RESET}" if _COLOR else text
+
+
+def _save_readline_history() -> None:
+    try:
+        import readline
+    except ImportError:
+        return
+    try:
+        _READLINE_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        readline.write_history_file(str(_READLINE_HISTORY_PATH))
+    except OSError:
+        return
+
+
+def _enable_line_editing() -> None:
+    """Enable arrow-key editing/history for local terminal prompts."""
+    global _READLINE_READY
+    if _READLINE_READY or not sys.stdin.isatty():
+        return
+    try:
+        import readline
+    except ImportError:
+        _READLINE_READY = True
+        return
+
+    try:
+        _READLINE_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        if _READLINE_HISTORY_PATH.exists():
+            readline.read_history_file(str(_READLINE_HISTORY_PATH))
+        readline.set_history_length(1000)
+        doc = (readline.__doc__ or "").lower()
+        if "libedit" in doc:
+            readline.parse_and_bind("bind ^I rl_insert")
+        else:
+            readline.parse_and_bind("tab: self-insert")
+        atexit.register(_save_readline_history)
+    except OSError:
+        pass
+    _READLINE_READY = True
+
+
+def _prompt_input(prompt: str) -> str:
+    _enable_line_editing()
+    return input(prompt)
+
+
+def _clear_terminal() -> None:
+    if hasattr(sys.stdout, "isatty") and sys.stdout.isatty():
+        sys.stdout.write("\033[2J\033[H")
+        sys.stdout.flush()
+    else:
+        print("\n" * 3)
+
+
+def _truncate_text(text: str, limit: int = 120) -> str:
+    compact = " ".join((text or "").split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 1].rstrip() + "…"
+
+
+def _print_chat_header(buddy, provider_count: int, render_header) -> None:
+    if buddy:
+        print(f"\n{render_header(buddy, provider_count)}")
+    else:
+        print(f"\n    {_c(BOLD, 'ABLE')} | {provider_count} AI providers ready")
+    print(f"    {_c(DIM, '/help for commands')}\n")
+
+
+def _print_compact_view(gateway, args, buddy, render_header) -> None:
+    _clear_terminal()
+    providers = getattr(getattr(gateway, "provider_chain", None), "providers", []) or []
+    _print_chat_header(buddy, len(providers), render_header)
+    print(f"    {_c(DIM, 'compacted view — transcripts, routing logs, and distillation traces are preserved')}")
+    session = gateway.session_mgr.get_or_create(args.session) if getattr(gateway, "session_mgr", None) else None
+    if session:
+        print(
+            f"    {_c(DIM, f'session {args.session} · {session.messages} turns · {session.total_tokens} tokens · avg complexity {session.avg_complexity:.2f}')}"
+        )
+    recent = []
+    try:
+        recent = list(reversed(gateway.transcript_manager.get_recent_messages(args.client, limit=4)))
+    except Exception:
+        recent = []
+    if recent:
+        print("    recent context")
+        for entry in recent:
+            direction = str(entry.get("direction", "outbound")) if isinstance(entry, dict) else "outbound"
+            label = "you" if direction == "inbound" else "able"
+            content = entry.get("message", "") if isinstance(entry, dict) else str(getattr(entry, "content", ""))
+            print(f"      {label}: {_truncate_text(content)}")
+    print("")
 
 
 class TerminalApprovalWorkflow(ApprovalWorkflow):
@@ -98,7 +194,7 @@ class TerminalApprovalWorkflow(ApprovalWorkflow):
                 try:
                     answer = await asyncio.wait_for(
                         asyncio.to_thread(
-                            input,
+                            _prompt_input,
                             "approve? [y]es / [n]o / [a]lways for this session: ",
                         ),
                         timeout=timeout_seconds or self.default_timeout,
@@ -227,6 +323,52 @@ class _Spinner:
             self._task = None
 
 
+class _ReasoningPreview:
+    """Turn streamed <think> blocks into a short on-screen preview."""
+
+    def __init__(self, limit: int = 220):
+        self._in_think = False
+        self._shown_chars = 0
+        self._limit = limit
+
+    def consume(self, chunk: str) -> tuple[str, str]:
+        data = chunk or ""
+        thought_parts: list[str] = []
+        answer_parts: list[str] = []
+
+        while data:
+            if self._in_think:
+                end = data.find("</think>")
+                if end == -1:
+                    thought_parts.append(data)
+                    data = ""
+                else:
+                    thought_parts.append(data[:end])
+                    data = data[end + len("</think>"):]
+                    self._in_think = False
+            else:
+                start = data.find("<think>")
+                if start == -1:
+                    answer_parts.append(data)
+                    data = ""
+                else:
+                    answer_parts.append(data[:start])
+                    data = data[start + len("<think>"):]
+                    self._in_think = True
+
+        thought = self._clip(" ".join(" ".join(thought_parts).split()))
+        answer = "".join(answer_parts)
+        return thought, answer
+
+    def _clip(self, text: str) -> str:
+        if not text or self._shown_chars >= self._limit:
+            return ""
+        remaining = self._limit - self._shown_chars
+        clipped = text[:remaining]
+        self._shown_chars += len(clipped)
+        return clipped
+
+
 # ── Buddy helper (inline setup) ──────────────────────────────────────────
 
 _FOCUS_OPTIONS = [
@@ -243,6 +385,7 @@ _WORK_STYLE_OPTIONS = [
     ("builder", "Mostly engineering and product build work."),
     ("client-delivery", "Customer work, launches, and delivery pressure."),
     ("mixed-team", "A rotating mix of build, ops, and review."),
+    ("all-terrain", "Dynamic mix of solo build, delivery, ops, and collaboration."),
 ]
 
 _DISTILLATION_OPTIONS = [
@@ -259,16 +402,35 @@ class _SetupExit(Exception):
 _EXIT_WORDS = {"/exit", "/quit", "/q", "exit", "quit"}
 
 
-async def _choose_profile_option(title: str, options: list[tuple[str, str]]) -> str:
+def _option_label(value: str, options: list[tuple[str, str]]) -> str:
+    for option_value, description in options:
+        if option_value == value:
+            return option_value.replace("-", " ")
+    return value.replace("-", " ")
+
+
+async def _choose_profile_option(
+    title: str,
+    options: list[tuple[str, str]],
+    *,
+    default_value: str | None = None,
+) -> str:
+    recommended_index = 0
+    if default_value:
+        for idx, (value, _) in enumerate(options):
+            if value == default_value:
+                recommended_index = idx
+                break
     print(f"\n  {_c(BOLD, title)}")
     for idx, (value, description) in enumerate(options, 1):
-        print(f"    [{idx}] {value.replace('-', ' ')} — {description}")
+        recommended = " (recommended)" if idx - 1 == recommended_index else ""
+        print(f"    [{idx}] {value.replace('-', ' ')} — {description}{recommended}")
     while True:
-        choice = (await asyncio.to_thread(input, "  pick a number (Enter for recommended): ")).strip()
+        choice = (await asyncio.to_thread(_prompt_input, "  pick a number (Enter for recommended): ")).strip()
         if choice.lower() in _EXIT_WORDS:
             raise _SetupExit()
         if not choice:
-            return options[0][0]
+            return options[recommended_index][0]
         if choice.isdigit():
             index = int(choice) - 1
             if 0 <= index < len(options):
@@ -288,10 +450,14 @@ def _distillation_hint(track: str) -> str:
 async def _buddy_onboarding_flow(update_collection_profile):
     """Capture operator-facing preferences after the starter is chosen."""
     print(f"\n  {_c(BOLD, 'buddy onboarding')}")
-    print("  This sets the companion up for your main domain focus and preferred distillation lane.")
+    print("  This tunes the companion around your real work patterns and preferred distillation lane.")
     print(f"  {_c(DIM, 'Type /exit at any prompt to quit.')}")
     focus = await _choose_profile_option("Primary focus", _FOCUS_OPTIONS)
-    work_style = await _choose_profile_option("Work style", _WORK_STYLE_OPTIONS)
+    work_style = await _choose_profile_option(
+        "Work style",
+        _WORK_STYLE_OPTIONS,
+        default_value="all-terrain" if focus == "general-business" else "solo-operator",
+    )
     distillation_track = await _choose_profile_option("Distillation track", _DISTILLATION_OPTIONS)
     profile = {
         "focus": focus,
@@ -300,7 +466,12 @@ async def _buddy_onboarding_flow(update_collection_profile):
         "completed_at": datetime.now(timezone.utc).isoformat(),
     }
     collection = update_collection_profile(profile)
-    print(f"  {_c(GREEN, 'saved')} profile: {focus} · {work_style} · {distillation_track}")
+    print(
+        f"  {_c(GREEN, 'saved')} profile: "
+        f"{_option_label(focus, _FOCUS_OPTIONS)} · "
+        f"{_option_label(work_style, _WORK_STYLE_OPTIONS)} · "
+        f"{_option_label(distillation_track, _DISTILLATION_OPTIONS)}"
+    )
     print(f"  {_c(DIM, _distillation_hint(distillation_track))}")
     return collection
 
@@ -324,7 +495,7 @@ async def _buddy_setup_flow(
     while True:
         try:
             choice = await asyncio.to_thread(
-                input,
+                _prompt_input,
                 f"  {_c(GREEN, 'pick')} [1-{starter_count}]"
                 + (" or Enter to skip: " if allow_skip else ": "),
             )
@@ -339,12 +510,12 @@ async def _buddy_setup_flow(
                 if 0 <= idx < starter_count:
                     chosen = STARTER_SPECIES[idx]
                     default_name = chosen.value.capitalize()
-                    name_input = (await asyncio.to_thread(input, f"  {_c(CYAN, 'name')} [{default_name}]: ")).strip()
+                    name_input = (await asyncio.to_thread(_prompt_input, f"  {_c(CYAN, 'name')} [{default_name}]: ")).strip()
                     if name_input.lower() in _EXIT_WORDS:
                         print(_c(DIM, "  bye"))
                         raise SystemExit(0)
                     name = name_input or default_name
-                    phrase_input = (await asyncio.to_thread(input, "  catch phrase (Enter to use the default): ")).strip()
+                    phrase_input = (await asyncio.to_thread(_prompt_input, "  catch phrase (Enter to use the default): ")).strip()
                     if phrase_input.lower() in _EXIT_WORDS:
                         print(_c(DIM, "  bye"))
                         raise SystemExit(0)
@@ -424,7 +595,7 @@ class SlashCtx:
         "load_buddy", "save_buddy", "load_buddy_collection",
         "switch_active_buddy", "update_collection_profile", "record_collection_progress",
         "STARTER_SPECIES", "create_starter_buddy",
-        "render_full", "render_banner", "render_backpack",
+        "render_full", "render_banner", "render_backpack", "render_header",
         "render_starter_selection", "render_battle_result",
         "render_evolution", "render_legendary_unlock",
     )
@@ -450,6 +621,7 @@ async def _handle_slash(message, ctx, buddy):
     render_full = ctx.render_full
     render_banner = ctx.render_banner
     render_backpack = ctx.render_backpack
+    render_header = getattr(ctx, "render_header", lambda *_args, **_kwargs: "")
     render_starter_selection = ctx.render_starter_selection
     render_battle_result = ctx.render_battle_result
     render_evolution = ctx.render_evolution
@@ -471,8 +643,20 @@ async def _handle_slash(message, ctx, buddy):
         print(f"  {_c(BOLD, '/buddy bag')}  backpack + dex progress")
         print(f"  {_c(BOLD, '/buddy switch <name>')}  switch active buddy")
         print(f"  {_c(BOLD, '/battle')}     eval-based battle")
+        print(f"  {_c(BOLD, '/clear')}      clear the screen, keep scrollback")
+        print(f"  {_c(BOLD, '/compact')}    clear + print compact session recap")
         print(f"  {_c(BOLD, '/exit')}       quit")
         print(_c(DIM, "  ─────────────────────────────────────"))
+        return True, buddy
+
+    if message in {"/clear", "-clear"}:
+        provider_count = len(getattr(gateway.provider_chain, "providers", []) or [])
+        _clear_terminal()
+        _print_chat_header(buddy, provider_count, render_header)
+        return True, buddy
+
+    if message in {"/compact", "-compact"}:
+        _print_compact_view(gateway, args, buddy, render_header)
         return True, buddy
 
     if message == "/tools":
@@ -483,13 +667,18 @@ async def _handle_slash(message, ctx, buddy):
 
     if message == "/status":
         session = gateway.session_mgr.get_or_create(args.session) if gateway.session_mgr else None
-        providers = [p.name for p in gateway.provider_chain.providers]
+        provider_rows = []
+        for provider in gateway.provider_chain.providers:
+            model = getattr(provider, "model", "")
+            provider_rows.append(f"{provider.name} ({model})" if model else provider.name)
         print(_c(DIM, "  ─────────────────────────────────────"))
         print(f"  session:    {args.session}")
         print(f"  messages:   {session.messages if session else 0}")
         print(f"  tokens:     {session.total_tokens if session else 0}")
         print(f"  cost:       ${session.cost_usd:.4f}" if session else "  cost:       $0.00")
-        print(f"  providers:  {len(providers)}")
+        print(f"  providers:  {len(provider_rows)}")
+        if provider_rows:
+            print(f"  roster:     {', '.join(provider_rows)}")
         print(f"  tools:      {gateway.tool_registry.tool_count}")
         print(_c(DIM, "  ─────────────────────────────────────"))
         return True, buddy
@@ -498,11 +687,12 @@ async def _handle_slash(message, ctx, buddy):
         try:
             from able.core.control_plane.resources import ResourcePlane
             rp = ResourcePlane()
-            inv = rp.get_inventory()
-            for r in inv.get("resources", []):
+            resources = rp.list_resources()
+            for r in resources:
                 state = r.get("state", "unknown")
-                print(f"  {r['id']}  {r['type']:10s}  {state}")
-            if not inv.get("resources"):
+                kind = r.get("kind", r.get("type", "unknown"))
+                print(f"  {r['id']}  {kind:18s}  {state}")
+            if not resources:
                 print(_c(DIM, "  (no resources registered)"))
         except Exception as e:
             print(f"  {_c(RED, 'error')}: {e}")
@@ -706,6 +896,8 @@ async def run_chat(args: argparse.Namespace) -> int:
         render_battle_result, render_evolution, render_legendary_unlock,
     )
 
+    _enable_line_editing()
+
     collection = load_buddy_collection()
     buddy = load_buddy() if _profile_is_complete(collection) else None
     if sys.stdin.isatty() and not _profile_is_complete(collection):
@@ -783,7 +975,7 @@ async def run_chat(args: argparse.Namespace) -> int:
         STARTER_SPECIES=STARTER_SPECIES,
         create_starter_buddy=create_starter_buddy,
         render_full=render_full, render_banner=render_banner,
-        render_backpack=render_backpack,
+        render_backpack=render_backpack, render_header=render_header,
         render_starter_selection=render_starter_selection,
         render_battle_result=render_battle_result,
         render_evolution=render_evolution,
@@ -795,7 +987,7 @@ async def run_chat(args: argparse.Namespace) -> int:
     try:
         while True:
             try:
-                raw = await asyncio.to_thread(input, f"{_c(GREEN, '>')} ")
+                raw = await asyncio.to_thread(_prompt_input, f"{_c(GREEN, '>')} ")
             except (EOFError, KeyboardInterrupt):
                 print(f"\n{_c(DIM, '  bye')}")
                 return 0
@@ -805,7 +997,8 @@ async def run_chat(args: argparse.Namespace) -> int:
                 continue
 
             # Slash commands
-            if message.startswith("/"):
+            command_word = message.split(None, 1)[0].lower()
+            if message.startswith("/") or command_word in {"-clear", "-compact"}:
                 handled, buddy = await _handle_slash(message, slash_ctx, buddy)
                 if handled:
                     continue
@@ -826,6 +1019,10 @@ async def run_chat(args: argparse.Namespace) -> int:
                 # Show thinking indicator then stream
                 spinner.start()
                 first_chunk = True
+                started_output = False
+                started_thinking = False
+                started_answer = False
+                reasoning_preview = _ReasoningPreview()
                 try:
                     async for chunk in gateway.stream_message(
                         message=message,
@@ -833,14 +1030,34 @@ async def run_chat(args: argparse.Namespace) -> int:
                         client_id=args.client,
                         metadata={"source": "cli", "channel": "cli", "is_owner": True},
                     ):
-                        if first_chunk:
+                        thought_chunk, visible_chunk = reasoning_preview.consume(chunk)
+                        if first_chunk and (thought_chunk or visible_chunk):
                             spinner.stop()
                             await asyncio.sleep(0.05)  # Let spinner cleanup flush
-                            sys.stdout.write(f"\n  {_c(CYAN, 'able')} ")
+                            sys.stdout.write("\n")
                             first_chunk = False
-                        sys.stdout.write(chunk)
-                        sys.stdout.flush()
-                        response_parts.append(chunk)
+                            started_output = True
+                        if thought_chunk:
+                            if not started_thinking:
+                                sys.stdout.write(f"  {_c(DIM, 'thinking')} ")
+                                started_thinking = True
+                            sys.stdout.write(_c(DIM, thought_chunk))
+                            sys.stdout.flush()
+                        if visible_chunk:
+                            if started_thinking and not started_answer:
+                                sys.stdout.write("\n")
+                            if not started_answer:
+                                if not started_output:
+                                    spinner.stop()
+                                    await asyncio.sleep(0.05)
+                                    sys.stdout.write("\n")
+                                    started_output = True
+                                    first_chunk = False
+                                sys.stdout.write(f"  {_c(CYAN, 'able')} ")
+                                started_answer = True
+                            sys.stdout.write(visible_chunk)
+                            sys.stdout.flush()
+                            response_parts.append(visible_chunk)
                 except Exception:
                     spinner.stop()
 

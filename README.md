@@ -36,6 +36,8 @@ able-chat         # direct chat wrapper
 able serve        # start the background gateway service
 ```
 
+Interactive prompts use local line editing and history when `readline` is available, so arrow keys, cursor movement, and prompt history behave like a normal shell instead of printing raw escape sequences.
+
 ### Commands
 
 ```bash
@@ -57,6 +59,8 @@ Inside the chat, these are handled locally (no model call):
 | Command | What it does |
 |---------|-------------|
 | `/help` | Show available commands |
+| `/clear` | Clear the terminal view but keep scrollback |
+| `/compact` | Clear the view and print a compact session recap |
 | `/status` | Session stats (messages, tokens, cost) |
 | `/tools` | List available tools |
 | `/resources` | Control plane resource inventory |
@@ -69,7 +73,11 @@ Inside the chat, these are handled locally (no model call):
 | `/battle <domain>` | Eval-based battle (security, code, etc.) |
 | `/exit` | Quit |
 
-On first interactive run, ABLE now requires starter selection plus a short onboarding profile. The starter affects buddy theme and bonus XP, while the onboarding stores your focus, work style, and preferred distillation lane. Non-interactive sessions skip this flow so scripted smokes do not block.
+On first interactive run, ABLE now requires starter selection plus a short onboarding profile. The starter affects buddy theme and bonus XP, while the onboarding stores your focus, work style, and preferred distillation lane. `work_style` includes an `all-terrain` option for operators who switch between solo build, delivery, ops, and collaboration instead of fitting one mode. Non-interactive sessions skip this flow so scripted smokes do not block.
+
+The chat header shows your active buddy, level, mood, needs, battle record, and how many AI providers are currently ready. Buddy battle stats are rendered as full labels (`Wins`, `Draws`, `Losses`) instead of terse counters.
+
+`/resources` and `/battle` work correctly even when you run `able` from outside the repo root through `~/.local/bin/able`.
 
 Research scout outputs are written to `~/.able/reports/research/latest.md` and `~/.able/reports/research/latest.json`, with a JSON mirror still kept under `data/research_reports/`.
 
@@ -100,6 +108,8 @@ Base installs skip Phoenix and OpenTelemetry so the CLI stays lighter. If you wa
 ```bash
 ./.venv/bin/pip install -e ".[observability]"
 ```
+
+The CLI shows a short dim `thinking` preview only when the current provider actually streams reasoning markers. That preview is provider-dependent; it is not universal chain-of-thought streaming across every backend.
 
 ```bash
 ollama serve

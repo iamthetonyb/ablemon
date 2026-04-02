@@ -1078,6 +1078,7 @@ class ABLEGateway:
                         complexity_score=_complexity,
                         used_tools=_used_tools,
                         domain=_domain,
+                        selected_tier=scoring_result.selected_tier if scoring_result else None,
                     )
                 except Exception:
                     pass  # Buddy is optional — never block the pipeline
@@ -1287,6 +1288,7 @@ class ABLEGateway:
                 complexity_score=_complexity,
                 used_tools=False,
                 domain=_domain,
+                selected_tier=scoring_result.selected_tier if scoring_result else None,
             )
         except Exception:
             pass

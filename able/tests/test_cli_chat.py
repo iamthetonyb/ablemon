@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from able.cli.chat import TerminalApprovalWorkflow, _handle_slash, SlashCtx, build_parser
+from able.cli.chat import TerminalApprovalWorkflow, _ReasoningPreview, _WORK_STYLE_OPTIONS, _handle_slash, SlashCtx, build_parser
 from able.core.approval.workflow import ApprovalStatus
 from able.core.buddy.model import BuddyState
 from able.core.gateway.gateway import ABLEGateway
@@ -20,6 +20,28 @@ def test_chat_parser_defaults():
     assert args.control_port == 0
     assert args.auto_approve is False
     assert args.verbose is False
+
+
+def test_work_style_options_include_all_terrain():
+    assert any(value == "all-terrain" for value, _description in _WORK_STYLE_OPTIONS)
+
+
+def test_reasoning_preview_extracts_think_blocks():
+    preview = _ReasoningPreview(limit=40)
+
+    thought, answer = preview.consume("<think>plan the steps</think>Final answer")
+
+    assert "plan the steps" in thought
+    assert answer == "Final answer"
+
+
+def test_reasoning_preview_passthrough_without_think():
+    preview = _ReasoningPreview()
+
+    thought, answer = preview.consume("Plain answer")
+
+    assert thought == ""
+    assert answer == "Plain answer"
 
 
 def test_terminal_approval_can_auto_approve():
@@ -197,3 +219,81 @@ async def test_buddy_slash_uses_setup_flow_when_no_active_buddy(monkeypatch):
 
     assert handled is True
     assert buddy is created
+
+
+@pytest.mark.asyncio
+async def test_resources_slash_uses_resource_plane_list_resources(monkeypatch, capsys):
+    class FakeResourcePlane:
+        def list_resources(self):
+            return [{"id": "service:able", "kind": "service", "state": "running"}]
+
+    monkeypatch.setattr("able.core.control_plane.resources.ResourcePlane", FakeResourcePlane)
+
+    ctx = SlashCtx(
+        gateway=SimpleNamespace(provider_chain=SimpleNamespace(providers=[]), tool_registry=SimpleNamespace(tool_count=0), transcript_manager=SimpleNamespace(get_recent_messages=lambda *_args, **_kwargs: []), session_mgr=None),
+        args=SimpleNamespace(session="local", client="master"),
+        load_buddy=lambda: None,
+        save_buddy=lambda value: None,
+        load_buddy_collection=lambda: None,
+        switch_active_buddy=lambda selector: None,
+        update_collection_profile=lambda profile: None,
+        record_collection_progress=lambda domain, points=1: {"new_buddies": [], "new_badges": [], "easter_egg_unlocked": False},
+        STARTER_SPECIES=object(),
+        create_starter_buddy=lambda **kwargs: None,
+        render_full=lambda current: "full",
+        render_banner=lambda current: "banner",
+        render_backpack=lambda collection: "bag",
+        render_starter_selection=lambda: "starter",
+        render_battle_result=lambda *args: "battle",
+        render_evolution=lambda *args: "evolution",
+        render_header=lambda *args: "header",
+        render_legendary_unlock=lambda *args: "legendary",
+    )
+
+    handled, buddy = await _handle_slash("/resources", ctx, None)
+
+    assert handled is True
+    assert buddy is None
+    assert "service:able" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_compact_slash_is_handled(monkeypatch, capsys):
+    ctx = SlashCtx(
+        gateway=SimpleNamespace(
+            provider_chain=SimpleNamespace(providers=[SimpleNamespace(name="stub")]),
+            tool_registry=SimpleNamespace(tool_count=0),
+            transcript_manager=SimpleNamespace(
+                get_recent_messages=lambda *_args, **_kwargs: [
+                    {"direction": "outbound", "message": "Latest answer"},
+                    {"direction": "inbound", "message": "Latest question"},
+                ]
+            ),
+            session_mgr=SimpleNamespace(
+                get_or_create=lambda _session: SimpleNamespace(messages=3, total_tokens=120, avg_complexity=0.42)
+            ),
+        ),
+        args=SimpleNamespace(session="local", client="master"),
+        load_buddy=lambda: None,
+        save_buddy=lambda value: None,
+        load_buddy_collection=lambda: None,
+        switch_active_buddy=lambda selector: None,
+        update_collection_profile=lambda profile: None,
+        record_collection_progress=lambda domain, points=1: {"new_buddies": [], "new_badges": [], "easter_egg_unlocked": False},
+        STARTER_SPECIES=object(),
+        create_starter_buddy=lambda **kwargs: None,
+        render_full=lambda current: "full",
+        render_banner=lambda current: "banner",
+        render_backpack=lambda collection: "bag",
+        render_starter_selection=lambda: "starter",
+        render_battle_result=lambda *args: "battle",
+        render_evolution=lambda *args: "evolution",
+        render_header=lambda *args: "header",
+        render_legendary_unlock=lambda *args: "legendary",
+    )
+
+    handled, buddy = await _handle_slash("/compact", ctx, None)
+
+    assert handled is True
+    assert buddy is None
+    assert "compacted view" in capsys.readouterr().out

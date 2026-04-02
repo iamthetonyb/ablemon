@@ -44,23 +44,29 @@ All four learning feedback loops are closed and tested:
 - A hidden late-game unlock exists outside the normal starter pool; do not spoil it in user-facing docs or pre-unlock UI
 - Deterministic shiny starter hatch + earned legendary form tied to real runtime milestones
 - Interactive first-run setup now requires a real starter pick plus onboarding for `focus`, `work_style`, and `distillation_track`
+- `work_style` includes `all-terrain` for operators who move across solo build, delivery, ops, and collaboration
 - Backpack/collection system is live: `/buddy bag`, `/buddy switch <name>`, badges, and full-dex progression
 - **Needs/Tamagotchi layer**: hunger (evals), thirst (evolution), energy (domain exploration) — decay over time, restored by real actions
 - Mood system with context-aware messages and cross-channel nudges
 - Battles tied to real promptfoo evals, domain bonuses per species
 - XP awards in the gateway (fires on Telegram, CLI, API — not channel-specific)
+- Aether stays outside the starter pool and is now orchestration-first internally: Psychic type, swarm planning, buddy routing, signal fusion
 - **Autonomous buddy progression** via cron: buddy-walk every 2h (passive XP + decay), evolution daemon awards deploy XP, distillation harvest awards pair XP, research/autopilot count as domain exploration, morning report includes buddy status
 - Proactive engine `BuddyNeedsCheck` runs every 2h for auto-nudges
 - Telegram nudges on evolution, legendary unlock, level-up, or low mood during autonomous runs
 - CLI renders rarity badges, streaks, legendary unlock state, and operator profile/backpack status correctly
 - Starter selection locked to 5 species (Aether hidden); exit handling works at every setup prompt
 - `_handle_slash` uses `SlashCtx` context object instead of 18 positional args
-- 58 buddy tests covering model, persistence, onboarding/profile state, rendering, battles, rarity, XP, needs, mood, and autonomous tick
+- 60 buddy tests covering model, persistence, onboarding/profile state, rendering, battles, rarity, XP, needs, mood, autonomous tick, orchestration bonuses, and repo-root-independent battle discovery
 
 **Streaming + approval UX**:
 - `stream_message()` async generator in the gateway — runs full pipeline then streams AI response
 - CLI streams tokens as they arrive, `--no-stream` flag to disable
 - Gateway fallback now only re-fetches a completion if the stream fails before the first chunk; partial stream output is preserved without duplication
+- CLI prompts now use local line editing/history, so arrow keys and cursor movement work during chat and onboarding
+- `/clear` redraws the terminal with scrollback preserved; `/compact` redraws and prints a compact session recap without losing transcript or distillation value
+- `/resources` now uses the real resource-plane inventory method, and `/battle` resolves eval configs relative to the repo root so both work from `~/.local/bin/able` outside the repo
+- The CLI can show a short dim `thinking` preview when streamed chunks include reasoning markers such as `<think>...</think>`, but this is provider-dependent rather than universal across all backends
 - Rich approval rendering: risk icons, visual bars, affected resource extraction
 
 **Distillation quality**:
@@ -92,7 +98,8 @@ All four learning feedback loops are closed and tested:
 - Claude Code-style header with buddy ASCII art mascot and stats.
 - Buddy setup is required in interactive first-run sessions, `/buddy setup` can refresh onboarding later, and non-interactive sessions auto-skip the first-run prompt.
 - Clean gateway teardown closes provider/web/studio sessions so `/exit` no longer leaks unclosed `aiohttp` sessions.
-- 62 focused CLI/buddy tests (9 CLI chat + 53 buddy).
+- Header labels now spell out `Wins`, `Draws`, `Losses`, and `/status` shows the active provider roster instead of only a count.
+- 74 focused CLI/buddy tests (14 CLI chat + 60 buddy).
 
 **Test suite**:
 - Full-suite pass: 602 tests, 0 deprecation warnings
@@ -109,6 +116,7 @@ Good work usually looks like:
 - cut live startup and first-response latency further
 - harden runtime seams (deploy, gateway, approval, control plane)
 - add Studio dashboard integration for buddy, roster, operator profile, and routing metrics
+- add provider-level reasoning streaming where backends support it
 - add missing tests around new or risky surfaces
 - fix doc/runtime drift
 
@@ -138,6 +146,9 @@ python3 -m able chat --help
 python3 -m pytest able/tests/test_cli_chat.py -x
 cd /tmp && ~/.local/bin/able chat --help
 cd /tmp && printf '/q\n' | ~/.local/bin/able chat --control-port 0
+cd /tmp && printf '/resources\n/q\n' | ~/.local/bin/able chat --control-port 0
+cd /tmp && printf '/battle\n/q\n' | ~/.local/bin/able chat --control-port 0
+cd /tmp && printf '/compact\n/q\n' | ~/.local/bin/able chat --control-port 0
 python3 -m pytest able/tests/test_weekly_research.py -x
 ```
 

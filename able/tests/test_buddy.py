@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import yaml
@@ -361,7 +362,7 @@ def test_render_banner_contains_name_and_level():
     banner = render_banner(buddy)
     assert "Ember" in banner
     assert "Lv." in banner
-    assert "W:2" in banner
+    assert "Wins:2" in banner
 
 
 def test_render_header_shows_buddy_art_and_stats():
@@ -369,8 +370,9 @@ def test_render_header_shows_buddy_art_and_stats():
     header = render_header(buddy, provider_count=8)
     assert "Ember" in header
     assert "ABLE" in header
-    assert "8 providers" in header
+    assert "8 AI providers ready" in header
     assert "Lv." in header
+    assert "Wins 2" in header
     # Should contain ASCII art characters from blaze stage 1
     assert "\u25c9" in header or "\u256d" in header or "\u2502" in header
 
@@ -391,6 +393,8 @@ def test_render_full_contains_all_sections():
     assert "Sealing cracks." in output
     assert "Trained" in output
     assert "80" in output
+    assert "Type:" in output
+    assert "Abilities:" in output
 
 
 def test_render_full_shows_rarity_and_legendary():
@@ -435,7 +439,7 @@ def test_render_backpack_shows_owned_and_uncaught_species(tmp_path, monkeypatch)
     update_collection_profile(
         {
             "focus": "coding",
-            "work_style": "solo-operator",
+            "work_style": "all-terrain",
             "distillation_track": "9b-fast-local",
             "completed_at": "2026-04-02T00:00:00+00:00",
         }
@@ -443,7 +447,9 @@ def test_render_backpack_shows_owned_and_uncaught_species(tmp_path, monkeypatch)
     output = render_backpack(load_buddy_collection())
     assert "Buddy Backpack" in output
     assert "Caught: 1/5 starters" in output
-    assert "Operator profile:" in output
+    assert "Operator profile" in output
+    assert "All-terrain" in output
+    assert "9B fast local" in output
     assert "Uncaught" in output
     assert "Collection Bonus" not in output
 
@@ -493,6 +499,16 @@ def test_battle_dry_run_returns_record():
 def test_battle_unknown_domain_returns_none():
     buddy = BuddyState(name="Ember", species="blaze")
     assert run_battle(buddy, "nonexistent_domain") is None
+
+
+def test_list_available_battles_resolves_from_repo_root(monkeypatch, tmp_path):
+    old_cwd = Path.cwd()
+    monkeypatch.chdir(tmp_path)
+    try:
+        available = list_available_battles()
+    finally:
+        os.chdir(old_cwd)
+    assert "reasoning" in available
 
 
 def test_battle_record_updates_buddy():
@@ -566,6 +582,22 @@ def test_award_interaction_xp_with_buddy(tmp_path, monkeypatch):
     assert xp is not None
     assert xp > 10  # Base + complexity + tool + domain bonus
     assert saved[0] is True
+
+
+def test_award_interaction_xp_aether_gets_orchestration_bonus(tmp_path, monkeypatch):
+    buddy = BuddyState(name="Aether", species="aether", xp=0, created_at="2026-01-01")
+
+    monkeypatch.setattr("able.core.buddy.xp.load_buddy", lambda: buddy)
+    monkeypatch.setattr("able.core.buddy.xp.save_buddy", lambda current: None)
+
+    xp = award_interaction_xp(
+        complexity_score=0.8,
+        used_tools=True,
+        domain="default",
+        selected_tier=4,
+    )
+
+    assert xp == 43
 
 
 # ── Needs / Tamagotchi tests ──────────────────────────────────────────────

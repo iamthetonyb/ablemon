@@ -200,11 +200,11 @@ SPECIES_META = {
     Species.AETHER: {
         "emoji": "\U0001f409",
         "label": "Aether",
-        "desc": "The hidden sixth signal. Orchestrates the whole field.",
+        "desc": "Reads the whole board. Coordinates the rest.",
         "element": "Psychic",
         "role": "Orchestrator",
-        "best_for": "cross-domain orchestration, synthesis, and mastery across the full ABLE stack",
-        "abilities": ["team orchestration", "cross-domain mastery", "signal fusion"],
+        "best_for": "swarm planning, multi-step orchestration, delegation, and cross-domain synthesis",
+        "abilities": ["swarm drafting", "buddy routing", "signal fusion"],
         "bonus_domains": ["coding", "research", "production", "creative", "security"],
         "art_stage1": [
             "   ╭◇╮   ",

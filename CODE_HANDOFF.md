@@ -1,7 +1,7 @@
 # ABLE — Code Handoff
 
 Date: 2026-04-02
-Branch: `main` is the current production baseline. `codex/cli-speed-and-ux-hardening` has been merged.
+Branch: `main` is the current production baseline. `codex/buddy-ui-and-orchestration` is the active working branch for the latest CLI and buddy UX pass.
 Git state: always verify with `git log --oneline -10` before starting work.
 
 ## Source Of Truth
@@ -187,8 +187,8 @@ Training lanes:
 3. **Control-plane hardened**: all endpoints token-gated, `perform_action()` requires `service_token_verified`, HTTP status codes corrected.
 4. **Operator slash commands expanded**: `/resources`, `/eval`, `/evolve` added to `able chat`. README updated.
 5. **Test coverage**:
-   - Buddy suite: 58 tests passing
-   - CLI chat: 9 tests passing
+   - Buddy suite: 60 tests passing
+   - CLI chat: 14 tests passing
    - Focused new-surface suite: 23 tests across control plane, resource tools, learning loops, collect_results, and evolution cycle passing
    - Full suite: 602 tests, 0 deprecation warnings (+ 45 routing tests separate)
 6. **Legacy cleanup**: all 87 bare imports migrated, 5 root-level shims removed, pyproject.toml simplified.
@@ -197,6 +197,7 @@ Training lanes:
    - A late-game hidden unlock exists outside the starter pool; keep it out of user-facing docs and pre-unlock UI so operators discover it organically
    - Interactive starter selection is now mandatory for first-time setup; legacy auto-created starters are forced back through selection before the buddy system is considered initialized
    - Post-selection onboarding stores operator profile (`focus`, `work_style`, `distillation_track`) so the buddy setup reflects actual domain needs instead of just mascot choice
+   - `work_style` now includes `all-terrain` for operators who move across solo build, delivery, ops, and collaboration instead of fitting one narrow mode
    - 3 evolution stages tied to real milestones (interactions, eval passes, distillation pairs, evolution deploys)
    - XP from real interactions (complexity-weighted), tool use, approvals, battles
    - **Rarity layer**:
@@ -207,7 +208,7 @@ Training lanes:
    - Collection/backpack layer: catch the full starter roster through real domain work, rotate active buddies with `/buddy switch <name>`, inspect the roster with `/buddy bag`, and unlock hidden late-game content without pre-unlock spoilers
    - Badge ladder now includes `Trainer` (first real evolution) plus hidden endgame badges that should remain undisclosed in user-facing copy until earned
    - Starter selection plus onboarding on first `able chat` run, `/buddy`, `/buddy bag`, `/buddy setup`, `/buddy switch`, and `/battle` slash commands
-   - CLI renderer now shows shiny/legendary badges, streak progress, and legendary unlock state
+   - CLI renderer now shows shiny/legendary badges, streak progress, legendary unlock state, richer species context, and a clearer operator profile/backpack summary
    - Evolution announcement bug fixed: old/new stage names now render correctly
    - **Needs/Tamagotchi layer**: hunger/thirst/energy decay over time, restored by real actions:
      - Hunger → feed by running `/battle` (evals = food)
@@ -226,9 +227,10 @@ Training lanes:
      - Morning report appends buddy name, level, and mood to Telegram summary
      - Telegram nudges fire on evolution, legendary unlock, level-up, or low mood during autonomous runs
    - **Starter selection locked to 5 species only** — Aether cannot be picked during setup (was a bug where `list(Species)` gave 6 options including the hidden unlock)
+   - Aether's internal specialty is now orchestration-first (`Psychic` type, swarm planning, buddy routing, signal fusion) so its XP bonuses align with real multi-step and delegated work instead of generic interactions
    - **Exit handling in setup flow**: `/exit`, `/quit`, `/q` work at every prompt during buddy setup (starter pick, name, catch phrase, onboarding options)
    - **SlashCtx refactor**: `_handle_slash` now takes a `SlashCtx` context object instead of 18 positional args
-   - 58 buddy tests covering model, persistence, backpack collection, badges/late-game progression, rendering, battles, rarity, XP engine, needs, mood, and autonomous tick
+   - 60 buddy tests covering model, persistence, backpack collection, badges/late-game progression, rendering, battles, rarity, XP engine, needs, mood, autonomous tick, orchestration bonuses, and repo-root-independent battle discovery
 8. **Streaming output for `able chat`**:
    - Gateway: `stream_message()` async generator runs full pipeline then streams AI response
    - CLI: tokens printed as they arrive via `async for chunk in gateway.stream_message(...)`
@@ -247,7 +249,7 @@ Training lanes:
 11. **Test fixes**:
     - Morning reporter test: correct table name (`interaction_log` not `interactions`)
     - Split test daemon: fully-qualified import patches after shim removal
-    - Total: 583 tests passing across the full test suite
+    - Total: 602 tests passing across the full test suite
 12. **Deploy hardening**:
     - Git operations on the DigitalOcean host now run as the `able` user in both `.github/workflows/deploy.yml` and `deploy-to-server.sh`
     - Existing `/opt/able/ABLE` working trees are re-owned by `able` before clone/fetch/checkout
@@ -257,7 +259,7 @@ Training lanes:
     - **Claude Code-style header**: `render_header()` places buddy ASCII art mascot on the left with name, level, XP bar, stage, mood, needs, and battle record on the right — mirrors Claude Code's robot mascot layout.
     - **Required interactive setup**: first-run interactive sessions must complete starter selection plus onboarding before the buddy system is considered initialized. Non-interactive CLI sessions still skip the flow so scripted smokes do not block.
     - **Graceful no-buddy**: all buddy code paths handle `buddy is None` without blocking or crashing.
-    - 62 focused CLI/buddy tests passing (9 CLI chat + 53 buddy).
+    - 74 focused CLI/buddy tests passing (14 CLI chat + 60 buddy).
 14. **One-command installer and global `able` command**:
     - `install.sh`: checks Python 3.11+ (auto-installs via brew/apt/dnf if missing), creates `.venv`, installs deps + package, places `able` and `able-chat` wrappers in `~/.local/bin/`, adds to PATH if needed, runs `able-setup.sh` for workspace init.
     - `able` wrapper at `~/.local/bin/able` is now repo-backed (`PYTHONPATH=<repo>` + venv Python), so it works from outside the repo root instead of relying on a fragile editable-console-script path.
@@ -269,16 +271,23 @@ Training lanes:
     - **Warnings suppressed**: `warnings.filterwarnings("ignore")` + stderr redirect during gateway init catches SAWarning, DeprecationWarning, and any remaining print() noise.
     - **Double response root fix**: `gateway.stream_message()` now falls back to `complete()` only if the stream fails before the first chunk. Partial streamed output is preserved without re-fetching and duplicating the answer.
     - **Thinking spinner**: animated braille dots while waiting for first token — clears when streaming starts.
+    - **Line editing + history**: interactive prompts now enable `readline` history and cursor editing, so arrow keys work during chat and buddy setup instead of printing escape sequences.
     - **ANSI color**: green `>` prompt, cyan `able` prefix on responses, dim timestamps and help text. Respects `NO_COLOR` env var.
     - **Response timing**: `[1.2s]` shown after each response.
     - **Cleaner prompt**: `> ` instead of `you> `, slash commands get formatted help table.
-    - **Slash command shortcuts**: `/q` for quit, `/h` for help, `/?` for help.
+    - **Slash command shortcuts**: `/q` for quit, `/h` for help, `/?` for help, `/clear` to redraw the terminal with full scrollback preserved, and `/compact` to clear the view and print a compact session recap without losing transcript/distillation value.
     - **Quieter local default**: `able chat` now defaults to `--control-port 0`, so transient local chat sessions do not boot or print the health/control server unless explicitly requested.
     - **Clean exit**: `ABLEGateway.aclose()` now closes provider sessions, web-search sessions, the shared Studio `aiohttp` session, and the health server runner; `/exit` no longer leaks unclosed client sessions on shutdown.
     - **Starter selection revamp**: first-run buddy setup now explains each starter in plain language (`element`, `role`, `best for`, `abilities`), requires a real pick in interactive sessions, and follows it with operator onboarding for focus/work style/distillation preferences.
+    - `/resources` now calls the real resource-plane inventory method (`list_resources()`), fixing the broken `get_inventory` path in chat mode.
+    - `/battle` now resolves eval config paths relative to the repo root, so battle domains are discoverable even when `able` is launched from `/tmp` through `~/.local/bin/able`.
+    - CLI status/header labels now spell out battle stats as `Wins`, `Draws`, and `Losses`, and `/status` shows the active provider roster rather than only a raw count.
+    - The CLI can display a short dim `thinking` preview when streamed chunks include reasoning markers such as `<think>...</think>`, but this is provider-dependent; it is not universal live reasoning across every backend yet.
 16. **CLI/runtime hardening validated from outside the repo root**:
     - `~/.local/bin/able chat --help` now succeeds from `/tmp`.
     - `printf '/q\n' | ~/.local/bin/able chat --control-port 0` exits cleanly with no leaked `aiohttp` session warnings.
+    - `printf '/resources\n/q\n' | ~/.local/bin/able chat --control-port 0` now returns resource inventory outside the repo root.
+    - `printf '/battle\n/q\n' | ~/.local/bin/able chat --control-port 0` now lists available battle domains outside the repo root.
     - `printf 'what is the square root of 69?\n/q\n' | ~/.local/bin/able chat --control-port 0 --no-stream` returned a clean T1 answer in ~5.2s during this pass.
 17. **Observability split for local installs**:
     - `arize-phoenix` + `opentelemetry-*` moved to `.[observability]` extras in `pyproject.toml`.
@@ -321,14 +330,18 @@ AuthManager singleton already cut init from ~1.6s to ~0.8s. Remaining opportunit
 
 Current streaming (`stream_message()`) handles text-only responses. For tool dispatch, `process_message()` still blocks. Investigate partial result streaming during tool iterations.
 
-### Priority 4: Distillation corpus growth
+### Priority 4: Provider-level reasoning streaming
+
+The CLI parser can already surface streamed reasoning markers, but most providers currently only stream visible answer text. Add provider-level support where available (for example Anthropic/OpenAI reasoning deltas) so live `thinking` previews are grounded in actual provider events instead of only `<think>`-style chunks.
+
+### Priority 5: Distillation corpus growth
 
 Push toward 100+ pairs for H100 fine-tuning:
 - Run reasoning + tools eval configs to generate T4 gold outputs
 - Monitor corpus pair count (`/eval` in CLI)
 - Verify interaction logger correctly marks corpus-eligible interactions
 
-### Priority 5: Keep docs and runtime in lockstep
+### Priority 6: Keep docs and runtime in lockstep
 
 - Refresh `README.md` only when code changes make its current commands stale.
 - Keep `CODE_HANDOFF.md` and `NEXT_RUN_PROMPT.md` updated at the end of each pass.
@@ -340,6 +353,9 @@ able --help                                     # Verify global command works
 able chat --help                                # Verify chat subcommand
 cd /tmp && ~/.local/bin/able chat --help        # Verify wrapper works outside repo root
 cd /tmp && printf '/q\n' | ~/.local/bin/able chat --control-port 0
+cd /tmp && printf '/resources\n/q\n' | ~/.local/bin/able chat --control-port 0
+cd /tmp && printf '/battle\n/q\n' | ~/.local/bin/able chat --control-port 0
+cd /tmp && printf '/compact\n/q\n' | ~/.local/bin/able chat --control-port 0
 python3 -m pytest able/tests/test_cli_chat.py -x
 python3 -m pytest able/tests/test_buddy.py -q
 python3 -m pytest able/tests/test_weekly_research.py -x
@@ -351,8 +367,8 @@ bash -n install.sh
 
 For targeted runs:
 ```bash
-python3 -m pytest able/tests/test_buddy.py -x                # Buddy + onboarding + backpack + rarity
-python3 -m pytest able/tests/test_cli_chat.py -x              # CLI + streaming
+python3 -m pytest able/tests/test_buddy.py -x                # Buddy + onboarding + backpack + rarity + orchestration bonuses
+python3 -m pytest able/tests/test_cli_chat.py -x             # CLI + streaming + slash-command UX
 python3 -m pytest able/tests/test_weekly_research.py -x       # Research report persistence
 python3 -m pytest able/tests/test_harvesters.py -x            # Distillation
 python3 -m pytest able/tests/test_evolution_split_tests.py -x  # Evolution daemon

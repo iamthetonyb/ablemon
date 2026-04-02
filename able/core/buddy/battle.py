@@ -25,6 +25,7 @@ from .model import (
 )
 
 logger = logging.getLogger(__name__)
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 # Eval configs that map to battle domains
 BATTLE_DOMAINS = {
@@ -38,11 +39,18 @@ BATTLE_DOMAINS = {
 }
 
 
+def _battle_config_path(config_path: str) -> Path:
+    path = Path(config_path)
+    if path.is_absolute():
+        return path
+    return (_PROJECT_ROOT / path).resolve()
+
+
 def list_available_battles() -> list[str]:
     """Return domain names for which an eval config exists on disk."""
     available = []
     for domain, path in BATTLE_DOMAINS.items():
-        if Path(path).exists():
+        if _battle_config_path(path).exists():
             available.append(domain)
     return available
 
@@ -60,14 +68,15 @@ def run_battle(
     In real mode, shells out to promptfoo and parses the output.
     """
     config_path = BATTLE_DOMAINS.get(domain)
-    if not config_path or not Path(config_path).exists():
+    resolved_config = _battle_config_path(config_path) if config_path else None
+    if not config_path or not resolved_config or not resolved_config.exists():
         logger.warning("No eval config for domain: %s", domain)
         return None
 
     if dry_run:
         return _simulate_battle(buddy, domain)
 
-    return _real_battle(buddy, domain, config_path)
+    return _real_battle(buddy, domain, str(resolved_config))
 
 
 def _simulate_battle(buddy: BuddyState, domain: str) -> BattleRecord:

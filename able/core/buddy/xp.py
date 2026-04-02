@@ -12,6 +12,7 @@ from typing import Optional
 
 from .model import (
     BuddyState,
+    Species,
     Stage,
     XP_PER_INTERACTION,
     XP_COMPLEXITY_MULTIPLIER,
@@ -25,6 +26,41 @@ from .model import (
 
 logger = logging.getLogger(__name__)
 
+XP_SPECIALTY_BONUS = 4
+XP_AETHER_ORCHESTRATION_BONUS = 12
+
+
+def _species_specialty_bonus(
+    buddy: BuddyState,
+    *,
+    complexity_score: float,
+    used_tools: bool,
+    approval_granted: bool,
+    domain: str,
+    selected_tier: int | None,
+) -> int:
+    species = buddy.species_enum
+    if species == Species.BLAZE and used_tools:
+        return XP_SPECIALTY_BONUS
+    if species == Species.WAVE and domain in {"research", "analysis", "data"} and complexity_score >= 0.55:
+        return XP_SPECIALTY_BONUS
+    if species == Species.ROOT and (domain in {"production", "infrastructure", "deploy"} or approval_granted):
+        return XP_SPECIALTY_BONUS
+    if species == Species.SPARK and domain in {"creative", "copywriting", "content"}:
+        return XP_SPECIALTY_BONUS
+    if species == Species.PHANTOM and domain in {"security", "audit", "threat"}:
+        return XP_SPECIALTY_BONUS
+    if species == Species.AETHER:
+        bonus = 0
+        if complexity_score >= 0.70:
+            bonus += XP_SPECIALTY_BONUS
+        if used_tools:
+            bonus += XP_SPECIALTY_BONUS
+        if selected_tier and selected_tier >= 4:
+            bonus += XP_SPECIALTY_BONUS
+        return min(bonus, XP_AETHER_ORCHESTRATION_BONUS)
+    return 0
+
 
 def award_interaction_xp(
     *,
@@ -32,6 +68,7 @@ def award_interaction_xp(
     used_tools: bool = False,
     approval_granted: bool = False,
     domain: str = "default",
+    selected_tier: int | None = None,
 ) -> Optional[int]:
     """
     Award XP for a completed interaction.  Call after process_message.
@@ -54,6 +91,15 @@ def award_interaction_xp(
     bonus_domains = buddy.meta.get("bonus_domains", [])
     if domain in bonus_domains:
         xp += XP_DOMAIN_BONUS
+
+    xp += _species_specialty_bonus(
+        buddy,
+        complexity_score=complexity_score,
+        used_tools=used_tools,
+        approval_granted=approval_granted,
+        domain=domain,
+        selected_tier=selected_tier,
+    )
 
     old_level = buddy.level
     buddy.award_xp(xp)
