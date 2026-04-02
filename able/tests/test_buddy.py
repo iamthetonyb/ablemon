@@ -256,6 +256,17 @@ def test_render_starter_selection_lists_all_species():
     assert "Phantom" in output
 
 
+def test_render_starter_selection_explains_roles_and_routing_scope():
+    output = render_starter_selection()
+    assert "This affects buddy theme + bonus XP only" in output
+    assert "Fire" in output
+    assert "Water" in output
+    assert "Earth" in output
+    assert "Lightning" in output
+    assert "Shadow" in output
+    assert "Best for:" in output
+
+
 def test_render_evolution_announcement():
     buddy = BuddyState(name="Ember", species="blaze", stage=1)
     buddy.evolve(Stage.TRAINED)

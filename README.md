@@ -32,6 +32,7 @@ That's it. The installer checks for Python 3.11+ (installs it if missing), creat
 ```bash
 able              # opens chat (interactive terminal)
 able chat         # same thing, explicit
+able-chat         # direct chat wrapper
 able serve        # start the background gateway service
 ```
 
@@ -40,7 +41,9 @@ able serve        # start the background gateway service
 ```bash
 able                                            # Chat (default in interactive terminal)
 able chat                                       # Explicit chat
+able-chat                                       # Shortcut for `able chat`
 able chat --session showcase --client master     # Custom session/client
+able chat --control-port 8080                   # Expose /health + control-plane API during chat
 able chat --no-stream                           # Wait for full response
 able chat --verbose                             # Show full startup logs
 able chat --auto-approve                        # Skip approval prompts
@@ -63,6 +66,8 @@ Inside the chat, these are handled locally (no model call):
 | `/battle <domain>` | Eval-based battle (security, code, etc.) |
 | `/exit` | Quit |
 
+On first interactive run, ABLE can offer a buddy starter selection. That choice affects buddy theme and bonus XP only. It does not change routing, tools, or model selection.
+
 ### Auth Setup (Optional)
 
 For OpenAI T1/T2 routing via your ChatGPT subscription:
@@ -82,6 +87,14 @@ able
 ```
 
 Environment is read from your shell or `/home/able/.able/.env` in the systemd deployment. `ABLE_SERVICE_TOKEN` protects the control-plane API when set.
+
+### Optional Observability Extras
+
+Base installs skip Phoenix and OpenTelemetry so the CLI stays lighter. If you want the Phoenix dashboard on a local machine, install the extra explicitly:
+
+```bash
+./.venv/bin/pip install -e ".[observability]"
+```
 
 ```bash
 ollama serve
@@ -191,6 +204,7 @@ Production deploy remains `main`-driven via `.github/workflows/deploy.yml`.
 
 Both the GitHub Action and `deploy-to-server.sh` now install the packaged runtime and start the `able` systemd unit instead of calling `python start.py` directly.
 The deploy path also bootstraps the `able` system user/group if the VPS has not been migrated yet.
+Server deploys install `.[observability]` so Phoenix/OTel remain available there without forcing them into every local CLI install.
 
 ## Notes
 

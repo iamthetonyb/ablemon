@@ -85,6 +85,14 @@ async def _get_studio_session() -> "aiohttp.ClientSession":
         _studio_session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5))
     return _studio_session
 
+
+async def _close_studio_session() -> None:
+    """Close the shared Studio dashboard session when the gateway exits."""
+    global _studio_session
+    if _studio_session is not None and not _studio_session.closed:
+        await _studio_session.close()
+    _studio_session = None
+
 # ── Model short names for response tags ──────────────────────────────────────
 MODEL_SHORT_NAMES = {
     "gpt-5.4-mini": "GPT 5.4 Mini",
@@ -502,6 +510,7 @@ class ABLEGateway:
 
         # Evolution daemon (started in _start_background_tasks)
         self.evolution_daemon = None
+        self._health_runner: Optional[web.AppRunner] = None
 
     def _init_providers(self) -> ProviderChain:
         """
@@ -1215,23 +1224,32 @@ class ABLEGateway:
 
         # Stream the AI response
         accumulated = []
+        yielded_any = False
         try:
             async for chunk in selected_chain.stream(
                 msgs, max_tokens=16384, temperature=0.60
             ):
+                yielded_any = True
                 accumulated.append(chunk)
                 yield chunk
         except Exception as e:
-            logger.warning(f"Streaming failed, falling back to complete(): {e}")
-            try:
-                result = await selected_chain.complete(
-                    msgs, max_tokens=16384, temperature=0.60, top_p=0.95
+            if yielded_any:
+                logger.warning(
+                    "Streaming interrupted after partial output; preserving streamed chunks only: %s",
+                    e,
                 )
-                yield result.content or "⚠️ No response generated."
-                accumulated = [result.content or ""]
-            except Exception as e2:
-                yield f"⚠️ AI error: {e2}"
-                return
+            else:
+                logger.warning(f"Streaming failed before first chunk, falling back to complete(): {e}")
+                try:
+                    result = await selected_chain.complete(
+                        msgs, max_tokens=16384, temperature=0.60, top_p=0.95
+                    )
+                    content = result.content or "⚠️ No response generated."
+                    yield content
+                    accumulated = [content]
+                except Exception as e2:
+                    yield f"⚠️ AI error: {e2}"
+                    return
 
         full_response = "".join(accumulated)
 
@@ -1893,7 +1911,7 @@ class ABLEGateway:
             return self._unauthorized_response()
         return web.json_response(self.resource_plane.get_setup_wizard())
 
-    async def start_health_server(self, port: int = 8080):
+    async def start_health_server(self, port: int = 8080, *, quiet: bool = False):
         """Start lightweight HTTP health check server"""
         app = web.Application()
         app.router.add_get("/health", self._health_handler)
@@ -1908,7 +1926,78 @@ class ABLEGateway:
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", port)
         await site.start()
-        print(f"✅ Health server listening on :{port}/health")
+        self._health_runner = runner
+        if not quiet:
+            print(f"✅ Health server listening on :{port}/health")
+
+    async def aclose(self) -> None:
+        """Close shared network sessions and background HTTP runners."""
+        seen_provider_ids: set[int] = set()
+
+        async def _close_provider(provider) -> None:
+            close = getattr(provider, "close", None)
+            if close and callable(close):
+                await close()
+
+        if self._health_runner is not None:
+            try:
+                await self._health_runner.cleanup()
+            except Exception:
+                pass
+            self._health_runner = None
+
+        for bot in self.client_bots.values():
+            try:
+                await bot.stop()
+            except Exception:
+                pass
+            try:
+                await bot.shutdown()
+            except Exception:
+                pass
+
+        if self.master_bot is not None:
+            try:
+                if getattr(self.master_bot, "updater", None):
+                    await self.master_bot.updater.stop()
+            except Exception:
+                pass
+            try:
+                await self.master_bot.stop()
+            except Exception:
+                pass
+            try:
+                await self.master_bot.shutdown()
+            except Exception:
+                pass
+
+        chains = [self.provider_chain, getattr(self, "vision_chain", None), *getattr(self, "tier_chains", {}).values()]
+        for chain in chains:
+            if not chain:
+                continue
+            for provider in getattr(chain, "providers", []):
+                provider_id = id(provider)
+                if provider_id in seen_provider_ids:
+                    continue
+                seen_provider_ids.add(provider_id)
+                try:
+                    await _close_provider(provider)
+                except Exception:
+                    pass
+
+        if getattr(self, "web_search", None) is not None:
+            try:
+                await self.web_search.close()
+            except Exception:
+                pass
+
+        if getattr(self, "voice_transcriber", None) is not None:
+            try:
+                await self.voice_transcriber.close()
+            except Exception:
+                pass
+
+        await _close_studio_session()
 
     async def start_master_bot(self):
         """Start the master Telegram bot"""

@@ -49,11 +49,13 @@ All four learning feedback loops are closed and tested:
 - Proactive engine `BuddyNeedsCheck` runs every 2h for auto-nudges
 - Telegram nudges appended to responses when needs are low
 - CLI renders rarity badges, streaks, and legendary unlock state correctly
-- 45 tests covering model, persistence, rendering, battles, rarity, XP, needs, and mood
+- Starter selection now explains each species in plain language: element, role, best-for domains, abilities, and the fact that the choice affects buddy flavor/bonus XP rather than routing
+- 47 tests covering model, persistence, rendering, battles, rarity, XP, needs, and mood
 
 **Streaming + approval UX**:
 - `stream_message()` async generator in the gateway — runs full pipeline then streams AI response
 - CLI streams tokens as they arrive, `--no-stream` flag to disable
+- Gateway fallback now only re-fetches a completion if the stream fails before the first chunk; partial stream output is preserved without duplication
 - Rich approval rendering: risk icons, visual bars, affected resource extraction
 
 **Distillation quality**:
@@ -67,18 +69,20 @@ All four learning feedback loops are closed and tested:
 - This fixes Git's `dubious ownership` failure during deploy without weakening `safe.directory`
 
 **Terminal UX overhaul**:
-- One-command install: `bash install.sh` — handles Python, venv, deps, PATH, workspace init. `able` works from any terminal.
+- One-command install: `bash install.sh` — handles Python, venv, deps, PATH, workspace init. `able` and `able-chat` work from any terminal.
 - Bare `able` defaults to `chat` in interactive terminals, `serve` in non-interactive.
+- `able chat` defaults to `--control-port 0` so transient local chats do not boot the control server unless requested.
 - Phoenix/OTel skipped entirely in CLI mode (`skip_phoenix=True`) — eliminates all startup print spam.
 - Warnings + stderr redirected during gateway init to catch SAWarning, DeprecationWarning residue.
-- Double response bug fixed: streaming fallback only fires if zero chunks received (was re-fetching full response on mid-stream errors).
+- Local installs now skip Phoenix/OTel entirely unless `.[observability]` is installed; server deploys still install the observability extra.
 - ANSI color: green prompt, cyan agent prefix, dim metadata. Respects `NO_COLOR`.
 - Thinking spinner (braille animation) while waiting for first token.
 - Response timing `[1.2s]` after each response.
 - Slash command shortcuts: `/q`, `/h`, `/?`. Formatted help table.
 - Claude Code-style header with buddy ASCII art mascot and stats.
-- Buddy selection skippable, `/buddy` supports mid-session setup.
-- 52 tests (6 CLI chat + 46 buddy).
+- Buddy selection is skippable, `/buddy` supports mid-session setup, and non-interactive sessions auto-skip the first-run buddy prompt.
+- Clean gateway teardown closes provider/web/studio sessions so `/exit` no longer leaks unclosed `aiohttp` sessions.
+- 55 focused CLI/buddy tests (8 CLI chat + 47 buddy).
 
 **Test suite**:
 - This pass revalidated CLI smoke, buddy, and focused new-surface tests
@@ -92,6 +96,7 @@ Advance ABLE's scaffolding and operator usefulness. Prefer work that makes ABLE 
 
 Good work usually looks like:
 - grow the distillation corpus toward 100+ pairs for H100 fine-tuning
+- cut live startup and first-response latency further
 - harden runtime seams (deploy, gateway, approval, control plane)
 - add Studio dashboard integration for buddy and routing metrics
 - add missing tests around new or risky surfaces
@@ -121,6 +126,8 @@ At minimum, rerun the CLI smoke test:
 ```bash
 python3 -m able chat --help
 python3 -m pytest able/tests/test_cli_chat.py -x
+cd /tmp && ~/.local/bin/able chat --help
+cd /tmp && printf '/q\n' | ~/.local/bin/able chat --control-port 0
 ```
 
 Then run the full suite:

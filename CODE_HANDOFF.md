@@ -1,7 +1,7 @@
 # ABLE — Code Handoff
 
 Date: 2026-04-02
-Branch: `main` is the current production baseline. `codex/able-rewrite-integration` is fully merged into `main` (no file diff).
+Branch: `main` is the current production baseline. Active improvement branch: `codex/cli-speed-and-ux-hardening`.
 Git state: always verify with `git log --oneline -10` before starting work.
 
 ## Source Of Truth
@@ -237,32 +237,43 @@ Training lanes:
 13. **Clean terminal experience for `able chat`**:
     - **Log suppression**: all logging set to ERROR by default on startup — eliminates ~40 lines of provider/ollama/enricher noise. `--verbose` flag restores full logging.
     - **Claude Code-style header**: `render_header()` places buddy ASCII art mascot on the left with name, level, XP bar, stage, mood, needs, and battle record on the right — mirrors Claude Code's robot mascot layout.
-    - **Optional buddy**: first-run buddy selection is now a single skippable prompt ("Enter to skip"). Users can set up later via `/buddy` which now supports mid-session creation.
+    - **Optional buddy**: first-run buddy selection is skippable, and non-interactive CLI sessions now skip onboarding automatically so scripted smokes do not block before chat starts.
     - **Graceful no-buddy**: all buddy code paths handle `buddy is None` without blocking or crashing.
-    - 52 tests passing (6 CLI chat + 46 buddy).
+    - 55 focused CLI/buddy tests passing (8 CLI chat + 47 buddy).
 14. **One-command installer and global `able` command**:
-    - `install.sh`: checks Python 3.11+ (auto-installs via brew/apt/dnf if missing), creates `.venv`, installs deps + package, places `able` wrapper in `~/.local/bin/`, adds to PATH if needed, runs `able-setup.sh` for workspace init.
-    - `able` wrapper at `~/.local/bin/able` delegates to the venv — no activation needed, works from any terminal.
+    - `install.sh`: checks Python 3.11+ (auto-installs via brew/apt/dnf if missing), creates `.venv`, installs deps + package, places `able` and `able-chat` wrappers in `~/.local/bin/`, adds to PATH if needed, runs `able-setup.sh` for workspace init.
+    - `able` wrapper at `~/.local/bin/able` is now repo-backed (`PYTHONPATH=<repo>` + venv Python), so it works from outside the repo root instead of relying on a fragile editable-console-script path.
     - Bare `able` in an interactive terminal now defaults to `chat` (not `serve`). Non-interactive (systemd/cron) still defaults to `serve`.
     - README rewritten with "Quick Start" section: `git clone`, `cd ABLE`, `bash install.sh` — then `able` works.
+    - Added GitHub Actions installer smoke workflow to catch wrapper regressions.
 15. **Terminal UX overhaul**:
     - **Phoenix skipped in CLI**: gateway accepts `skip_phoenix=True`, CLI passes it — eliminates Phoenix/gRPC/OTel startup spam entirely (was ~20 lines of print output).
     - **Warnings suppressed**: `warnings.filterwarnings("ignore")` + stderr redirect during gateway init catches SAWarning, DeprecationWarning, and any remaining print() noise.
-    - **Double response bug fixed**: streaming fallback now only fires if zero chunks were received. Previously, a mid-stream error triggered a full `process_message()` re-fetch, printing the response twice.
+    - **Double response root fix**: `gateway.stream_message()` now falls back to `complete()` only if the stream fails before the first chunk. Partial streamed output is preserved without re-fetching and duplicating the answer.
     - **Thinking spinner**: animated braille dots while waiting for first token — clears when streaming starts.
     - **ANSI color**: green `>` prompt, cyan `able` prefix on responses, dim timestamps and help text. Respects `NO_COLOR` env var.
     - **Response timing**: `[1.2s]` shown after each response.
     - **Cleaner prompt**: `> ` instead of `you> `, slash commands get formatted help table.
     - **Slash command shortcuts**: `/q` for quit, `/h` for help, `/?` for help.
+    - **Quieter local default**: `able chat` now defaults to `--control-port 0`, so transient local chat sessions do not boot or print the health/control server unless explicitly requested.
+    - **Clean exit**: `ABLEGateway.aclose()` now closes provider sessions, web-search sessions, the shared Studio `aiohttp` session, and the health server runner; `/exit` no longer leaks unclosed client sessions on shutdown.
+    - **Starter selection revamp**: first-run buddy setup now explains each starter in plain language (`element`, `role`, `best for`, `abilities`) and explicitly states that the choice affects buddy flavor/bonus XP, not routing.
+16. **CLI/runtime hardening validated from outside the repo root**:
+    - `~/.local/bin/able chat --help` now succeeds from `/tmp`.
+    - `printf '/q\n' | ~/.local/bin/able chat --control-port 0` exits cleanly with no leaked `aiohttp` session warnings.
+    - `printf 'what is the square root of 69?\n/q\n' | ~/.local/bin/able chat --control-port 0 --no-stream` returned a clean T1 answer in ~5.2s during this pass.
+17. **Observability split for local installs**:
+    - `arize-phoenix` + `opentelemetry-*` moved to `.[observability]` extras in `pyproject.toml`.
+    - Base local installs stay lighter; server deploys still install `.[observability]`.
 
 ## Next-Run Objectives
 
-### Priority 1: Verify the production deploy path end-to-end
+### Priority 1: Cut live startup + first-response latency further
 
-The safe-directory fix is committed, but the critical next proof is a real server run:
-- Dispatch the GitHub deploy workflow against the updated branch or push to `main`
-- Confirm clone/fetch/checkout succeeds on the VPS as `able`
-- Confirm systemd restart and `/health` pass after the repo sync
+The local CLI path is now clean and operator-usable, but latency is still dominated by gateway initialization and provider round-trips. The next best pass is:
+- Profile `ABLEGateway.__init__()` again after the wrapper/import cleanup
+- Lazy-load any remaining heavy gateway imports that are not needed before the first prompt
+- Add provider/tier latency breakdown in CLI verbose mode so local overhead and upstream model latency are separated
 
 ### Priority 2: Studio dashboard buddy integration
 
@@ -289,6 +300,8 @@ The harvester and prompt bank are improved but the corpus still needs more pairs
 ```bash
 able --help                                     # Verify global command works
 able chat --help                                # Verify chat subcommand
+cd /tmp && ~/.local/bin/able chat --help        # Verify wrapper works outside repo root
+cd /tmp && printf '/q\n' | ~/.local/bin/able chat --control-port 0
 python3 -m pytest able/tests/test_cli_chat.py -x
 python3 -m pytest able/tests/test_buddy.py -q
 python3 -m pytest able/tests/test_control_plane.py able/tests/test_resource_tools.py able/tests/test_learning_loops.py able/tests/test_collect_results.py able/tests/test_evolution_cycle.py -x

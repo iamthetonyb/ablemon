@@ -247,9 +247,11 @@ def render_starter_selection() -> str:
     """Starter selection menu for first run."""
     lines = []
     lines.append("")
-    lines.append(f"{'=' * 50}")
-    lines.append("  Choose your ABLE buddy:")
-    lines.append(f"{'=' * 50}")
+    lines.append(f"{'=' * 72}")
+    lines.append("  Choose your ABLE buddy")
+    lines.append("  This affects buddy theme + bonus XP only. It does not change routing or tools.")
+    lines.append("  If you do mixed work, any starter is fine. Root is the steadiest general operator pick.")
+    lines.append(f"{'=' * 72}")
     lines.append("")
 
     for i, species in enumerate(SPECIES_META, 1):
@@ -257,16 +259,20 @@ def render_starter_selection() -> str:
         emoji = meta["emoji"]
         label = meta["label"]
         desc = meta["desc"]
-        bonus = ", ".join(meta["bonus_domains"][:2])
+        bonus = ", ".join(meta["bonus_domains"][:3])
+        abilities = ", ".join(meta["abilities"][:3])
         art = meta["art_stage1"]
 
-        lines.append(f"  [{i}]  {emoji}  {label}")
-        lines.append(f"       {desc}")
-        lines.append(f"       Bonus domains: {bonus}")
+        lines.append(f"  [{i}] {emoji} {label}  ·  {meta['element']}  ·  {meta['role']}")
+        lines.append(f"      {desc}")
+        lines.append(f"      Best for: {meta['best_for']}")
+        lines.append(f"      Bonus XP: {bonus}")
+        lines.append(f"      Abilities: {abilities}")
         for art_line in art:
-            lines.append(f"           {art_line}")
+            lines.append(f"         {art_line}")
         lines.append("")
 
-    lines.append(f"{'=' * 50}")
+    lines.append(f"{'=' * 72}")
     lines.append("  Rare hatch chance: some starters emerge as Shiny variants.")
+    lines.append("  Skip for now if you want to start chatting immediately. Use /buddy later to set one up.")
     return "\n".join(lines)

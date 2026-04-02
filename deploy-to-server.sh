@@ -84,7 +84,7 @@ if [ ! -d ${RUNTIME_HOME}/venv ]; then
 fi
 ${RUNTIME_HOME}/venv/bin/pip install --quiet --upgrade pip
 ${RUNTIME_HOME}/venv/bin/pip install --quiet --upgrade -r ${REPO_PATH}/able/requirements.txt
-${RUNTIME_HOME}/venv/bin/pip install --quiet --upgrade -e ${REPO_PATH}
+${RUNTIME_HOME}/venv/bin/pip install --quiet --upgrade -e "${REPO_PATH}[observability]"
 "
 
 echo -e "${GREEN}[5/6] Installing systemd unit...${NC}"

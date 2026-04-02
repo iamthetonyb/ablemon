@@ -141,7 +141,7 @@ jobs:
               chown -R able:able /home/able/.able/venv
             fi
             /home/able/.able/venv/bin/pip install -r /opt/able/ABLE/able/requirements.txt --quiet --upgrade
-            /home/able/.able/venv/bin/pip install -e /opt/able/ABLE --quiet --upgrade
+            /home/able/.able/venv/bin/pip install -e "/opt/able/ABLE[observability]" --quiet --upgrade
             chown -R able:able /home/able/.able/
 
             echo "=== Updating systemd service ==="

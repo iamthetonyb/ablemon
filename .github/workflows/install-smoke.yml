@@ -1,0 +1,36 @@
+name: Installer Smoke Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  install-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run installer
+        run: bash install.sh
+
+      - name: Verify global able wrapper
+        run: ~/.local/bin/able chat --help
+
+      - name: Verify NO_COLOR help output stays clean
+        run: |
+          NO_COLOR=1 ~/.local/bin/able chat --help > /tmp/able-help.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          data = Path("/tmp/able-help.txt").read_text()
+          assert "\x1b[" not in data, "ANSI escape codes leaked into NO_COLOR output"
+          PY
