@@ -7,8 +7,10 @@ No fake numbers — the buddy IS the system's performance made tangible.
 
 from __future__ import annotations
 
+import hashlib
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -183,6 +185,8 @@ STAGE_NAMES = {
     Stage.EVOLVED: "Evolved",
 }
 
+SHINY_STARTER_ODDS = 128  # Cosmetic-only rare hatch chance.
+
 # Real milestones that trigger evolution
 EVOLUTION_REQUIREMENTS = {
     Stage.TRAINED: {
@@ -197,6 +201,28 @@ EVOLUTION_REQUIREMENTS = {
         "min_evolution_deploys": 3,
         "description": "100 distillation pairs + 3 evolution deploys + level 25",
     },
+}
+
+LEGENDARY_TITLES = {
+    Species.BLAZE: "Forge Sovereign",
+    Species.WAVE: "Tide Oracle",
+    Species.ROOT: "Ironroot Warden",
+    Species.SPARK: "Storm Scribe",
+    Species.PHANTOM: "Night Sentinel",
+}
+
+LEGENDARY_REQUIREMENTS = {
+    "min_stage": Stage.EVOLVED.value,
+    "min_level": 40,
+    "min_eval_passes": 25,
+    "min_battles_won": 10,
+    "min_battle_streak": 3,
+    "min_distillation_pairs": 250,
+    "min_evolution_deploys": 5,
+    "description": (
+        "Stage 3 + level 40 + 25 eval passes + 10 wins + 3-win streak "
+        "+ 250 distillation pairs + 5 evolution deploys"
+    ),
 }
 
 
@@ -424,6 +450,11 @@ class BuddyState:
     battle_log: List[Dict[str, Any]] = field(default_factory=list)
     created_at: str = ""
     catch_phrase: str = ""
+    is_shiny: bool = False
+    legendary_title: str = ""
+    legendary_unlocked_at: str = ""
+    current_battle_streak: int = 0
+    best_battle_streak: int = 0
     # Needs (Tamagotchi layer)
     needs_hunger: float = 80.0
     needs_thirst: float = 80.0
@@ -459,6 +490,30 @@ class BuddyState:
     def meta(self) -> Dict[str, Any]:
         return SPECIES_META[self.species_enum]
 
+    @property
+    def is_legendary(self) -> bool:
+        return bool(self.legendary_title)
+
+    @property
+    def rarity_label(self) -> str:
+        if self.is_legendary and self.is_shiny:
+            return "Legendary Shiny"
+        if self.is_legendary:
+            return "Legendary"
+        if self.is_shiny:
+            return "Shiny"
+        return "Standard"
+
+    @property
+    def display_emoji(self) -> str:
+        markers: list[str] = []
+        if self.is_legendary:
+            markers.append("\U0001f451")
+        if self.is_shiny:
+            markers.append("\u2728")
+        markers.append(self.meta["emoji"])
+        return " ".join(markers)
+
     def check_evolution(self) -> Optional[Stage]:
         """Check if the buddy qualifies for the next evolution stage."""
         current = self.stage_enum
@@ -483,6 +538,26 @@ class BuddyState:
 
     def evolve(self, to_stage: Stage) -> None:
         self.stage = to_stage.value
+
+    def qualifies_for_legendary(self) -> bool:
+        reqs = LEGENDARY_REQUIREMENTS
+        return (
+            self.stage >= reqs["min_stage"]
+            and self.level >= reqs["min_level"]
+            and self.eval_passes >= reqs["min_eval_passes"]
+            and self.battles_won >= reqs["min_battles_won"]
+            and self.best_battle_streak >= reqs["min_battle_streak"]
+            and self.distillation_pairs >= reqs["min_distillation_pairs"]
+            and self.evolution_deploys >= reqs["min_evolution_deploys"]
+        )
+
+    def unlock_legendary(self) -> Optional[str]:
+        """Promote the buddy into an earned legendary form once milestones are met."""
+        if self.is_legendary or not self.qualifies_for_legendary():
+            return None
+        self.legendary_title = LEGENDARY_TITLES[self.species_enum]
+        self.legendary_unlocked_at = datetime.now(timezone.utc).isoformat()
+        return self.legendary_title
 
     def award_xp(self, amount: int) -> int:
         """Award XP and return new level (may have leveled up)."""
@@ -573,10 +648,14 @@ class BuddyState:
     def record_battle(self, record: BattleRecord) -> None:
         if record.result == "win":
             self.battles_won += 1
+            self.current_battle_streak += 1
+            self.best_battle_streak = max(self.best_battle_streak, self.current_battle_streak)
         elif record.result == "loss":
             self.battles_lost += 1
+            self.current_battle_streak = 0
         else:
             self.battles_drawn += 1
+            self.current_battle_streak = 0
         self.xp += record.xp_earned
         self.battle_log.append({
             "domain": record.domain,
@@ -588,6 +667,43 @@ class BuddyState:
         # Keep log bounded
         if len(self.battle_log) > 50:
             self.battle_log = self.battle_log[-50:]
+        self.unlock_legendary()
+
+
+def starter_is_shiny(
+    *,
+    name: str,
+    species: Species,
+    created_at: str,
+    odds: Optional[int] = None,
+) -> bool:
+    """Stable shiny roll so the same starter seed always yields the same cosmetic variant."""
+    odds = SHINY_STARTER_ODDS if odds is None else odds
+    if odds <= 1:
+        return True
+    seed = f"{species.value}:{name.strip().lower()}:{created_at.strip()}"
+    digest = hashlib.sha256(seed.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") % odds == 0
+
+
+def create_starter_buddy(
+    *,
+    name: str,
+    species: Species,
+    catch_phrase: str = "",
+    created_at: str = "",
+) -> BuddyState:
+    """Create a starter buddy with deterministic rarity metadata."""
+    created = created_at or datetime.now(timezone.utc).isoformat()
+    return BuddyState(
+        name=name,
+        species=species.value,
+        stage=Stage.STARTER.value,
+        xp=0,
+        catch_phrase=catch_phrase or SPECIES_META[species]["desc"],
+        created_at=created,
+        is_shiny=starter_is_shiny(name=name, species=species, created_at=created),
+    )
 
 
 # ── Persistence ──────────────────────────────────────────────────────────
@@ -629,6 +745,11 @@ def save_buddy(buddy: BuddyState) -> None:
         "battle_log": buddy.battle_log,
         "created_at": buddy.created_at,
         "catch_phrase": buddy.catch_phrase,
+        "is_shiny": buddy.is_shiny,
+        "legendary_title": buddy.legendary_title,
+        "legendary_unlocked_at": buddy.legendary_unlocked_at,
+        "current_battle_streak": buddy.current_battle_streak,
+        "best_battle_streak": buddy.best_battle_streak,
         "needs_hunger": buddy.needs_hunger,
         "needs_thirst": buddy.needs_thirst,
         "needs_energy": buddy.needs_energy,

@@ -41,13 +41,15 @@ All four learning feedback loops are closed and tested:
 
 **Buddy gamification system** (system-wide, all channels):
 - 5 starter species, 3 evolution stages, XP from real interactions
+- Deterministic shiny starter hatch + earned legendary form tied to real runtime milestones
 - **Needs/Tamagotchi layer**: hunger (evals), thirst (evolution), energy (domain exploration) — decay over time, restored by real actions
 - Mood system with context-aware messages and cross-channel nudges
 - Battles tied to real promptfoo evals, domain bonuses per species
 - XP awards in the gateway (fires on Telegram, CLI, API — not channel-specific)
 - Proactive engine `BuddyNeedsCheck` runs every 2h for auto-nudges
 - Telegram nudges appended to responses when needs are low
-- 40 tests covering model, persistence, rendering, battles, XP, needs, and mood
+- CLI renders rarity badges, streaks, and legendary unlock state correctly
+- 45 tests covering model, persistence, rendering, battles, rarity, XP, needs, and mood
 
 Plus: resource action tool, control-plane endpoint tests, legacy shim removal, CLI slash commands (/resources, /eval, /evolve, /buddy, /battle).
 

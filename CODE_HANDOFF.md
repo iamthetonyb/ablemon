@@ -186,15 +186,20 @@ Training lanes:
 2. **Resource lifecycle tool**: `resource_action` in `able/core/gateway/tool_defs/resource_tools.py` with approval gating.
 3. **Control-plane hardened**: all endpoints token-gated, `perform_action()` requires `service_token_verified`, HTTP status codes corrected.
 4. **Operator slash commands expanded**: `/resources`, `/eval`, `/evolve` added to `able chat`. README updated.
-5. **Test coverage**: 40+ buddy tests + 26 tests across 6 other test files, all passing.
+5. **Test coverage**: 45 buddy tests + 26 tests across 6 other test files, all passing.
 6. **Legacy cleanup**: all 87 bare imports migrated, 5 root-level shims removed, pyproject.toml simplified.
 7. **Buddy system (system-wide)**: Pokemon + Tamagotchi gamified agent companion in `able/core/buddy/`:
    - 5 starter species (Blaze/Wave/Root/Spark/Phantom) with domain bonuses
    - 3 evolution stages tied to real milestones (interactions, eval passes, distillation pairs, evolution deploys)
    - XP from real interactions (complexity-weighted), tool use, approvals, battles
+   - **Rarity layer**:
+     - Shiny starter hatch is a deterministic rare cosmetic variant at creation time
+     - Legendary form is earned only from real runtime milestones: stage 3, level 40, eval passes, battle wins/streak, distillation pairs, and evolution deploys
    - **XP awards in the gateway** — fires on ALL channels (Telegram, CLI, API), not just CLI
    - Battle system runs real promptfoo evals — wins feed distillation, losses identify skill gaps
    - Starter selection on first `able chat` run, `/buddy` and `/battle` slash commands
+   - CLI renderer now shows shiny/legendary badges, streak progress, and legendary unlock state
+   - Evolution announcement bug fixed: old/new stage names now render correctly
    - **Needs/Tamagotchi layer**: hunger/thirst/energy decay over time, restored by real actions:
      - Hunger → feed by running `/battle` (evals = food)
      - Thirst → water by running `/evolve` or chatting (interactions = sips)
@@ -203,7 +208,7 @@ Training lanes:
    - **Telegram nudges**: buddy status appended to responses when needs are low
    - **Proactive engine**: `BuddyNeedsCheck` runs every 2h, dispatches nudge notifications
    - Nudge module (`able/core/buddy/nudge.py`) for cross-channel care reminders
-   - 40 tests covering model, persistence, rendering, battles, XP engine, needs, and mood
+   - 45 tests covering model, persistence, rendering, battles, rarity, XP engine, needs, and mood
 
 ## Next-Run Objectives
 

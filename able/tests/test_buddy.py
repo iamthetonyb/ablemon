@@ -13,8 +13,10 @@ from able.core.buddy.model import (
     Species,
     Stage,
     EVOLUTION_REQUIREMENTS,
+    LEGENDARY_REQUIREMENTS,
     load_buddy,
     save_buddy,
+    create_starter_buddy,
     level_from_xp,
     xp_for_level,
 )
@@ -22,6 +24,7 @@ from able.core.buddy.renderer import (
     render_banner,
     render_full,
     render_evolution,
+    render_legendary_unlock,
     render_battle_result,
     render_starter_selection,
 )
@@ -62,6 +65,17 @@ def test_buddy_award_xp():
     buddy.award_xp(1000)
     assert buddy.xp == 1000
     assert buddy.level >= old_level
+
+
+def test_create_starter_buddy_can_hatch_shiny(monkeypatch):
+    monkeypatch.setattr("able.core.buddy.model.SHINY_STARTER_ODDS", 1)
+    buddy = create_starter_buddy(
+        name="Ember",
+        species=Species.BLAZE,
+        created_at="2026-04-02T00:00:00+00:00",
+    )
+    assert buddy.is_shiny is True
+    assert buddy.catch_phrase == buddy.meta["desc"]
 
 
 def test_evolution_check_starter_to_trained():
@@ -107,6 +121,24 @@ def test_max_stage_returns_none():
     assert buddy.check_evolution() is None
 
 
+def test_legendary_unlock_requires_real_milestones():
+    buddy = BuddyState(
+        name="Ember",
+        species="blaze",
+        stage=Stage.EVOLVED.value,
+        xp=xp_for_level(LEGENDARY_REQUIREMENTS["min_level"]),
+        eval_passes=LEGENDARY_REQUIREMENTS["min_eval_passes"],
+        battles_won=LEGENDARY_REQUIREMENTS["min_battles_won"],
+        best_battle_streak=LEGENDARY_REQUIREMENTS["min_battle_streak"],
+        distillation_pairs=LEGENDARY_REQUIREMENTS["min_distillation_pairs"],
+        evolution_deploys=LEGENDARY_REQUIREMENTS["min_evolution_deploys"],
+    )
+    title = buddy.unlock_legendary()
+    assert title == "Forge Sovereign"
+    assert buddy.is_legendary is True
+    assert buddy.legendary_unlocked_at
+
+
 def test_species_meta_accessible():
     for species in Species:
         buddy = BuddyState(name="Test", species=species.value)
@@ -131,6 +163,11 @@ def test_save_and_load_buddy(tmp_path, monkeypatch):
         battles_won=3,
         catch_phrase="Words are ammo.",
         created_at="2026-04-01T00:00:00Z",
+        is_shiny=True,
+        legendary_title="Storm Scribe",
+        legendary_unlocked_at="2026-04-01T01:00:00Z",
+        current_battle_streak=2,
+        best_battle_streak=4,
     )
     save_buddy(buddy)
 
@@ -142,6 +179,11 @@ def test_save_and_load_buddy(tmp_path, monkeypatch):
     assert loaded.xp == 1500
     assert loaded.battles_won == 3
     assert loaded.catch_phrase == "Words are ammo."
+    assert loaded.is_shiny is True
+    assert loaded.legendary_title == "Storm Scribe"
+    assert loaded.legendary_unlocked_at == "2026-04-01T01:00:00Z"
+    assert loaded.current_battle_streak == 2
+    assert loaded.best_battle_streak == 4
 
 
 def test_load_buddy_returns_none_when_missing(tmp_path, monkeypatch):
@@ -179,6 +221,20 @@ def test_render_full_contains_all_sections():
     assert "80" in output
 
 
+def test_render_full_shows_rarity_and_legendary():
+    buddy = BuddyState(
+        name="Ember",
+        species="blaze",
+        stage=3,
+        xp=xp_for_level(45),
+        is_shiny=True,
+        legendary_title="Forge Sovereign",
+    )
+    output = render_full(buddy)
+    assert "Legendary Shiny" in output
+    assert "Forge Sovereign" in output
+
+
 def test_render_starter_selection_lists_all_species():
     output = render_starter_selection()
     assert "Blaze" in output
@@ -190,10 +246,24 @@ def test_render_starter_selection_lists_all_species():
 
 def test_render_evolution_announcement():
     buddy = BuddyState(name="Ember", species="blaze", stage=1)
-    output = render_evolution(buddy, Stage.TRAINED)
+    buddy.evolve(Stage.TRAINED)
+    output = render_evolution(buddy, Stage.STARTER, Stage.TRAINED)
     assert "EVOLVING" in output
     assert "Ember" in output
+    assert "Starter  -->  Trained" in output
     assert "Trained" in output
+
+
+def test_render_legendary_unlock():
+    buddy = BuddyState(
+        name="Ember",
+        species="blaze",
+        stage=3,
+        legendary_title="Forge Sovereign",
+    )
+    output = render_legendary_unlock(buddy)
+    assert "legendary form" in output.lower()
+    assert "Forge Sovereign" in output
 
 
 def test_render_battle_result_shows_outcome():
@@ -237,8 +307,29 @@ def test_battle_record_updates_buddy():
     )
     buddy.record_battle(record)
     assert buddy.battles_won == 1
+    assert buddy.current_battle_streak == 1
+    assert buddy.best_battle_streak == 1
     assert buddy.xp == 50
     assert len(buddy.battle_log) == 1
+
+
+def test_battle_loss_resets_streak():
+    from able.core.buddy.model import BattleRecord
+    from datetime import datetime, timezone
+
+    buddy = BuddyState(name="Ember", species="blaze", current_battle_streak=2, best_battle_streak=2)
+    record = BattleRecord(
+        domain="security",
+        score_pct=20.0,
+        passed=1,
+        total=5,
+        result="loss",
+        xp_earned=5,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+    )
+    buddy.record_battle(record)
+    assert buddy.current_battle_streak == 0
+    assert buddy.best_battle_streak == 2
 
 
 # ── XP engine tests ─────────────────────────────────────────────────────
