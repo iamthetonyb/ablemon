@@ -3,8 +3,13 @@
 Pipeline: corpus check -> train -> merge -> quantize -> validate -> deploy.
 
 Runtime policy:
-- 27B training is H100-only.
-- 9B training defaults to the T4 / 16 GB Colab lane with checkpoint/resume enabled.
+- 27B prefers H100, falls back to A100 (40GB+) or L4 (24GB, tight).
+- 9B defaults to the free T4 Colab lane (12-24h/day) with checkpoint/resume.
+- GPU fallback: if the preferred class is budget-exhausted, try the next in
+  the chain defined in model_configs.GPU_FALLBACK_CHAINS.
+
+All harvesting, scrubbing, corpus building, and federation sync run on CPU.
+GPU is only consumed during this training step.
 """
 
 from __future__ import annotations
@@ -17,16 +22,27 @@ from typing import Any
 from able.core.distillation.training.axolotl_generator import AxolotlConfigGenerator
 from able.core.distillation.training.gpu_budget import GPUBudget
 from able.core.distillation.training.model_configs import (
+    GPU_FALLBACK_CHAINS,
     resolve_models,
     resolve_runtime_profile,
 )
 
 logger = logging.getLogger(__name__)
 
+# Hours per 1000 examples (with Unsloth 2x speed).  Rates reflect actual
+# GPU throughput; the free T4 lane runs at half the speed of H100 but costs $0.
 _TRAINING_RATES = {
     "h100_session": {
         "able-student-27b": 0.9,
         "able-nano-9b": 0.3,
+    },
+    "a100_session": {
+        "able-student-27b": 1.2,
+        "able-nano-9b": 0.4,
+    },
+    "l4_session": {
+        "able-student-27b": 2.0,
+        "able-nano-9b": 0.8,
     },
     "t4_colab": {
         "able-nano-9b": 1.4,
@@ -38,6 +54,8 @@ _TRAINING_RATES = {
 
 _OVERHEAD_HOURS = {
     "h100_session": 0.5,
+    "a100_session": 0.4,
+    "l4_session": 0.35,
     "t4_colab": 0.35,
     "local": 0.2,
 }
@@ -116,7 +134,10 @@ class TrainingOrchestrator:
         profiles: dict[str, dict[str, Any]] = {}
         budget_plan: dict[str, float] = {}
         for model in models:
-            model_gpu = requested_gpu or model.default_gpu_class
+            # Resolve GPU class with fallback chain when no explicit class given
+            model_gpu = requested_gpu or self._resolve_gpu_with_fallback(
+                model, corpus_size,
+            )
             try:
                 profiles[model.name] = resolve_runtime_profile(
                     model,
@@ -301,6 +322,34 @@ class TrainingOrchestrator:
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
+
+    def _resolve_gpu_with_fallback(
+        self,
+        model: Any,
+        corpus_size: int,
+    ) -> str:
+        """Walk the GPU fallback chain and return the first class with budget.
+
+        Fallback order is defined in GPU_FALLBACK_CHAINS (e.g. H100 → A100 → L4
+        for 27B).  If nothing has budget, return the model's default so the
+        caller gets a clean budget-exceeded error.
+        """
+        chain = GPU_FALLBACK_CHAINS.get(model.name, [model.default_gpu_class])
+        for gpu_class in chain:
+            rates = _TRAINING_RATES.get(gpu_class, {})
+            rate = rates.get(model.name)
+            if rate is None:
+                continue  # model has no rate on this GPU class
+            estimated = (corpus_size / 1000.0) * rate + _OVERHEAD_HOURS.get(gpu_class, 0.5)
+            if self.gpu_budget.can_train(estimated, pool=gpu_class):
+                if gpu_class != chain[0]:
+                    logger.info(
+                        "GPU fallback for %s: %s → %s (%.1fh needed, %.1fh available)",
+                        model.name, chain[0], gpu_class, estimated,
+                        self.gpu_budget.remaining(pool=gpu_class),
+                    )
+                return gpu_class
+        return model.default_gpu_class
 
     def _resolve_corpus(self, tenant_id: str, build: bool = True) -> Path | None:
         """Find or build the latest versioned corpus for a tenant."""

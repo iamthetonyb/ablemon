@@ -189,8 +189,8 @@ Reference files:
 
 Training lanes:
 
-- `27B`: H100-only
-- `9B`: default T4 / 16 GB lane, `sequence_len=2048`, `micro_batch_size=1`, checkpointing enabled
+- `27B`: H100 preferred → A100 (40GB+) → L4 (24GB, tight). Does NOT fit T4 (16GB).
+- `9B`: free T4 / 16 GB Colab lane (daily), `sequence_len=2048`, `micro_batch_size=1`, checkpointing enabled
 
 Useful commands:
 
@@ -242,7 +242,7 @@ The entire distillation pipeline is designed to run on CPU, reserving GPU only f
 | **Federation sync** — contribute/fetch/ingest via GitHub Releases | CPU | Nightly (3:30am cron) |
 | **Corpus build** — domain balancing, ChatML format, train/val split | CPU | On demand |
 | **Promptfoo eval** — gold output generation, regression testing | CPU | On demand / battle |
-| **Fine-tuning** — Unsloth SFTTrainer + GGUF export | **GPU (free T4)** | When corpus reaches threshold |
+| **Fine-tuning** — Unsloth SFTTrainer + GGUF export | **GPU** (free T4 for 9B, A100/L4/H100 for 27B) | When corpus reaches threshold |
 
 The promptfoo eval configs (`able/evals/`) serve double duty: they validate model quality AND generate gold T4 outputs that feed back into the distillation corpus via `corpus_eligible` flagging in the interaction log. The evolution daemon (M2.7, 6h cycles) tunes routing weights based on these eval results, closing the self-improvement loop.
 

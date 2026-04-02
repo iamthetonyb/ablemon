@@ -48,11 +48,11 @@ ABLE_STUDENT_27B = StudentModelConfig(
     quantization_targets=["UD-Q4_K_XL", "Q5_K_M", "Q8_0"],
     description=(
         "Primary server model. UD-Q4_K_XL (17.6GB) is the default deployment target. "
-        "Training remains H100-only."
+        "Training: H100 preferred, falls back to A100 (40GB+) or L4 (24GB, tight)."
     ),
     default_gpu_class="h100_session",
     default_runtime="cloud",
-    supported_gpu_classes=["h100_session"],
+    supported_gpu_classes=["h100_session", "a100_session", "l4_session"],
     checkpointing=True,
     resume_first=True,
     runtime_profiles={
@@ -66,6 +66,28 @@ ABLE_STUDENT_27B = StudentModelConfig(
             "fp16": False,
             "save_strategy": "epoch",
             "save_steps": 250,
+        },
+        "a100_session": {
+            "runtime": "colab",
+            "sequence_len": 4096,
+            "micro_batch_size": 1,
+            "gradient_accumulation": 8,
+            "gradient_checkpointing": True,
+            "bf16": True,
+            "fp16": False,
+            "save_strategy": "steps",
+            "save_steps": 100,
+        },
+        "l4_session": {
+            "runtime": "colab",
+            "sequence_len": 2048,
+            "micro_batch_size": 1,
+            "gradient_accumulation": 16,
+            "gradient_checkpointing": True,
+            "bf16": True,
+            "fp16": False,
+            "save_strategy": "steps",
+            "save_steps": 50,
         },
     },
 )
@@ -88,7 +110,7 @@ ABLE_NANO_9B = StudentModelConfig(
     ),
     default_gpu_class="t4_colab",
     default_runtime="colab",
-    supported_gpu_classes=["t4_colab", "h100_session", "local"],
+    supported_gpu_classes=["t4_colab", "a100_session", "l4_session", "h100_session", "local"],
     checkpointing=True,
     resume_first=True,
     runtime_profiles={
@@ -100,6 +122,28 @@ ABLE_NANO_9B = StudentModelConfig(
             "gradient_checkpointing": True,
             "bf16": False,
             "fp16": True,
+            "save_strategy": "steps",
+            "save_steps": 100,
+        },
+        "a100_session": {
+            "runtime": "colab",
+            "sequence_len": 4096,
+            "micro_batch_size": 2,
+            "gradient_accumulation": 4,
+            "gradient_checkpointing": True,
+            "bf16": True,
+            "fp16": False,
+            "save_strategy": "steps",
+            "save_steps": 100,
+        },
+        "l4_session": {
+            "runtime": "colab",
+            "sequence_len": 2048,
+            "micro_batch_size": 1,
+            "gradient_accumulation": 8,
+            "gradient_checkpointing": True,
+            "bf16": True,
+            "fp16": False,
             "save_strategy": "steps",
             "save_steps": 100,
         },
@@ -131,6 +175,14 @@ ABLE_NANO_9B = StudentModelConfig(
 MODEL_REGISTRY: dict[str, StudentModelConfig] = {
     "able-student-27b": ABLE_STUDENT_27B,
     "able-nano-9b": ABLE_NANO_9B,
+}
+
+# GPU fallback chains — when the preferred GPU class is unavailable or
+# budget-exhausted, try the next one in order.  Each chain only includes
+# GPU classes the model actually supports.
+GPU_FALLBACK_CHAINS: dict[str, list[str]] = {
+    "able-student-27b": ["h100_session", "a100_session", "l4_session"],
+    "able-nano-9b": ["t4_colab", "l4_session", "a100_session", "h100_session", "local"],
 }
 
 

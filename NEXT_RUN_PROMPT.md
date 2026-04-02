@@ -150,10 +150,13 @@ All four learning feedback loops are closed and tested:
 - `install.sh` seeds federation identity during workspace init
 - Research integration: llm-d prefix-cache routing → domain affinity, vLLM Ascend → pluggable backend pattern, Ollama 0.19 MLX → 2x T5 decode speed validates distillation flywheel
 
-**Unsloth training pipeline** (`able/core/distillation/training/unsloth_exporter.py`):
+**Unsloth training pipeline** (`able/core/distillation/training/`):
 - `UnslothExporter` generates Colab-ready notebooks and VS Code training scripts
 - Federation corpus → Unsloth fine-tuning (2x speed, 70% less VRAM) → GGUF export (Dynamic 2.0) → Ollama T5
-- 9B model: Colab free T4 runtime (12-24 hours available), 27B: H100 session
+- 9B: free T4 Colab daily (12-24h/day available), L4/A100/H100 also supported
+- 27B: H100 preferred → A100 (40GB+) → L4 (24GB, seq=2048, batch=1). Does NOT fit T4 (16GB)
+- GPU fallback chain: `GPU_FALLBACK_CHAINS` in model_configs — auto-resolves next GPU when budget exhausted
+- CPU-first: all harvesting, scrubbing, federation sync, corpus build run on CPU. GPU only for training step
 - Notebooks auto-install Unsloth, load ChatML corpus, train with SFTTrainer, export GGUF, generate Modelfile
 - Training stats JSON for federation metrics tracking
 

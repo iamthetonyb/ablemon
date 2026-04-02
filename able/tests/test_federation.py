@@ -540,3 +540,105 @@ class TestUnslothExporter:
         assert "save_pretrained_gguf" in content
         assert "iq2_m" in content
         assert "q4_k_m" in content
+
+    def test_export_notebook_l4_runtime(self, tmp_path):
+        from able.core.distillation.training.unsloth_exporter import UnslothExporter
+
+        exporter = UnslothExporter(output_dir=tmp_path)
+        path = exporter.export_notebook(
+            "able-student-27b", "train.jsonl", runtime="l4_session",
+        )
+        nb = json.loads(path.read_text())
+        assert nb["metadata"]["colab"]["gpuType"] == "L4"
+
+    def test_export_notebook_a100_runtime(self, tmp_path):
+        from able.core.distillation.training.unsloth_exporter import UnslothExporter
+
+        exporter = UnslothExporter(output_dir=tmp_path)
+        path = exporter.export_notebook(
+            "able-nano-9b", "train.jsonl", runtime="a100_session",
+        )
+        nb = json.loads(path.read_text())
+        assert nb["metadata"]["colab"]["gpuType"] == "A100"
+
+
+# ── GPU fallback chain tests ─────────────────────────────────────
+
+
+class TestGPUFallback:
+    """Tests for the GPU fallback chain and multi-GPU-class support."""
+
+    def test_27b_supports_a100_and_l4(self):
+        from able.core.distillation.training.model_configs import MODEL_REGISTRY
+
+        config = MODEL_REGISTRY["able-student-27b"]
+        assert "a100_session" in config.supported_gpu_classes
+        assert "l4_session" in config.supported_gpu_classes
+        assert "h100_session" in config.supported_gpu_classes
+
+    def test_9b_supports_all_gpu_classes(self):
+        from able.core.distillation.training.model_configs import MODEL_REGISTRY
+
+        config = MODEL_REGISTRY["able-nano-9b"]
+        for gpu in ["t4_colab", "a100_session", "l4_session", "h100_session", "local"]:
+            assert gpu in config.supported_gpu_classes
+
+    def test_fallback_chain_order_27b(self):
+        from able.core.distillation.training.model_configs import GPU_FALLBACK_CHAINS
+
+        chain = GPU_FALLBACK_CHAINS["able-student-27b"]
+        assert chain == ["h100_session", "a100_session", "l4_session"]
+
+    def test_fallback_chain_order_9b(self):
+        from able.core.distillation.training.model_configs import GPU_FALLBACK_CHAINS
+
+        chain = GPU_FALLBACK_CHAINS["able-nano-9b"]
+        assert chain[0] == "t4_colab"  # free T4 always preferred for 9B
+
+    def test_l4_profile_has_tight_settings_for_27b(self):
+        from able.core.distillation.training.model_configs import (
+            MODEL_REGISTRY,
+            resolve_runtime_profile,
+        )
+
+        config = MODEL_REGISTRY["able-student-27b"]
+        profile = resolve_runtime_profile(config, gpu_class="l4_session")
+        # L4 (24GB) is tight for 27B: seq=2048, batch=1, high grad_accum
+        assert profile["sequence_len"] == 2048
+        assert profile["micro_batch_size"] == 1
+        assert profile["gradient_accumulation"] >= 16
+        assert profile["gradient_checkpointing"] is True
+
+    def test_a100_profile_more_generous_than_l4(self):
+        from able.core.distillation.training.model_configs import (
+            MODEL_REGISTRY,
+            resolve_runtime_profile,
+        )
+
+        config = MODEL_REGISTRY["able-student-27b"]
+        a100 = resolve_runtime_profile(config, gpu_class="a100_session")
+        l4 = resolve_runtime_profile(config, gpu_class="l4_session")
+        assert a100["sequence_len"] >= l4["sequence_len"]
+
+    def test_gpu_budget_has_new_pools(self):
+        from able.core.distillation.training.gpu_budget import DEFAULT_POOLS
+
+        assert "l4_session" in DEFAULT_POOLS
+        assert "a100_session" in DEFAULT_POOLS
+        assert DEFAULT_POOLS["t4_colab"]["monthly_hours"] == 72.0
+
+    def test_orchestrator_fallback_resolves(self):
+        """Fallback picks A100 when H100 budget is exhausted."""
+        from able.core.distillation.training.gpu_budget import GPUBudget
+        from able.core.distillation.training.training_orchestrator import (
+            TrainingOrchestrator,
+        )
+        from able.core.distillation.training.model_configs import MODEL_REGISTRY
+
+        budget = GPUBudget(budget_path="/dev/null", monthly_hours=0.0, buffer_hours=0.0)
+        orch = TrainingOrchestrator(gpu_budget=budget)
+        model = MODEL_REGISTRY["able-student-27b"]
+
+        resolved = orch._resolve_gpu_with_fallback(model, corpus_size=100)
+        # H100 has 0 budget → should fall to A100 or L4
+        assert resolved in ("a100_session", "l4_session", "h100_session")

@@ -1,6 +1,7 @@
 """Pre-flight checks before a training session.
 
-Goal: spend CPU time proving the run is valid before claiming T4/H100 runtime.
+Goal: spend CPU time proving the run is valid before claiming GPU runtime.
+Supports T4 (free, 9B), L4 (24GB), A100 (40-80GB), H100 (80GB), and local.
 """
 
 from __future__ import annotations

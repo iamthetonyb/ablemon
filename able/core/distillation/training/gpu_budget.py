@@ -22,12 +22,22 @@ DEFAULT_POOLS = {
     "t4_colab": {
         "monthly_hours": 72.0,
         "buffer_hours": 8.0,
-        "description": "Default T4 / 16 GB Colab lane for 9B training and resume cycles.",
+        "description": "Free T4 / 16 GB Colab lane — 9B daily training (12-24h/day available).",
+    },
+    "l4_session": {
+        "monthly_hours": 40.0,
+        "buffer_hours": 4.0,
+        "description": "L4 / 24 GB Colab lane — 9B fast or 27B tight (seq=2048, batch=1).",
+    },
+    "a100_session": {
+        "monthly_hours": 20.0,
+        "buffer_hours": 2.0,
+        "description": "A100 / 40-80 GB lane — 27B comfortable, 9B fast with larger batches.",
     },
     "h100_session": {
         "monthly_hours": 20.0,
         "buffer_hours": 2.5,
-        "description": "Premium H100 lane for 27B training and heavy validation.",
+        "description": "Premium H100 / 80 GB lane — 27B max settings, heavy validation.",
     },
     "local": {
         "monthly_hours": 999.0,

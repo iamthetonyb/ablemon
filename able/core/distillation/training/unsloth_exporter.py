@@ -91,7 +91,8 @@ class UnslothExporter:
             corpus_path: Path to training JSONL (ChatML format).
             hf_repo: HuggingFace repo to push GGUF exports to.
             epochs: Training epochs.
-            runtime: GPU runtime ("t4_colab", "h100_session", "local").
+            runtime: GPU runtime ("t4_colab", "a100_session", "l4_session",
+                     "h100_session", "local").
 
         Returns:
             Path to the generated .ipynb file.
@@ -290,13 +291,20 @@ class UnslothExporter:
         ))
 
         # Build notebook
+        _gpu_type_map = {
+            "t4_colab": "T4",
+            "l4_session": "L4",
+            "a100_session": "A100",
+            "h100_session": "A100",  # Colab shows A100 for 80GB too
+            "local": "T4",
+        }
         notebook = {
             "nbformat": 4,
             "nbformat_minor": 0,
             "metadata": {
                 "colab": {
                     "provenance": [],
-                    "gpuType": "T4" if runtime == "t4_colab" else "A100",
+                    "gpuType": _gpu_type_map.get(runtime, "T4"),
                 },
                 "kernelspec": {
                     "name": "python3",

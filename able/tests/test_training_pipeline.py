@@ -352,8 +352,9 @@ class TestTrainingOrchestrator:
                 corpus_dir=os.path.join(td, "corpus"),
                 output_dir=os.path.join(td, "output"),
             )
+            # Pin to h100 so fallback chain doesn't rescue with another pool
             # 0h training + 0.5h overhead exceeds 0.4h budget
-            result = asyncio.run(o.run(mode="all"))
+            result = asyncio.run(o.run(mode="27b", gpu_class="h100_session"))
             assert result["status"] == "budget_exceeded"
             assert o.status == "failed"
 
