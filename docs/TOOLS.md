@@ -1,6 +1,6 @@
 # TOOLS.md — Available Capabilities
 
-> Tools available to ATLAS and their usage notes.
+> Tools available to ABLE and their usage notes.
 > Tool availability depends on trust tier.
 
 ---
@@ -31,11 +31,11 @@
 Read file contents.
 
 ```python
-read("/home/atlas/.atlas/memory/current_objectives.yaml")
+read("/home/able/.able/memory/current_objectives.yaml")
 # Returns: file contents as string
 ```
 
-**Allowed**: Any file in `~/.atlas/` workspace  
+**Allowed**: Any file in `~/.able/` workspace  
 **Blocked**: Files outside workspace, `.secrets/` contents in logs
 
 ---
@@ -46,7 +46,7 @@ Write content to file. Creates file if doesn't exist.
 
 ```python
 write(
-    path="/home/atlas/.atlas/memory/daily/2026-02-03.md",
+    path="/home/able/.able/memory/daily/2026-02-03.md",
     content="# Daily Log\n\n## Sessions\n..."
 )
 # Returns: success boolean
@@ -63,7 +63,7 @@ Replace text in existing file.
 
 ```python
 edit(
-    path="/home/atlas/.atlas/memory/current_objectives.yaml",
+    path="/home/able/.able/memory/current_objectives.yaml",
     old_text="status: in_progress",
     new_text="status: completed"
 )
@@ -80,7 +80,7 @@ edit(
 List directory contents.
 
 ```python
-list("/home/atlas/.atlas/skills/")
+list("/home/able/.able/skills/")
 # Returns: ["web-research/", "code-review/", "SKILL_INDEX.yaml"]
 ```
 
@@ -135,7 +135,7 @@ web_fetch("https://example.com/article")
 Execute shell command. Subject to allowlist.
 
 ```python
-bash("ls -la ~/.atlas/memory/")
+bash("ls -la ~/.able/memory/")
 # Returns: {
 #   "stdout": "...",
 #   "stderr": "",
@@ -324,10 +324,10 @@ Skills are invoked by reading their SKILL.md and following instructions.
 
 ```python
 # 1. Check skill exists
-list("~/.atlas/skills/")
+list("~/.able/skills/")
 
 # 2. Read skill documentation
-skill_doc = read("~/.atlas/skills/web-research/SKILL.md")
+skill_doc = read("~/.able/skills/web-research/SKILL.md")
 
 # 3. Follow skill's implementation section
 # (Skills define their own execution flow)

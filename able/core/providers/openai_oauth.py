@@ -13,7 +13,7 @@ import asyncio
 from typing import Optional, Dict, List, AsyncIterator, Union, Any
 from dataclasses import dataclass
 
-from core.providers.base import (
+from able.core.providers.base import (
     LLMProvider,
     ProviderConfig,
     ProviderError,

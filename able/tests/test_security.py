@@ -8,8 +8,8 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.security.trust_gate import TrustGate, ThreatLevel
-from core.security.command_guard import CommandGuard, CommandVerdict
+from able.core.security.trust_gate import TrustGate, ThreatLevel
+from able.core.security.command_guard import CommandGuard, CommandVerdict
 
 
 def test_injection_detection():

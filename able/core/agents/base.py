@@ -12,8 +12,8 @@ from pathlib import Path
 import json
 import uuid
 
-from core.security.trust_gate import TrustGate, TrustTier, SecurityVerdict
-from core.security.command_guard import CommandGuard, CommandVerdict
+from able.core.security.trust_gate import TrustGate, TrustTier, SecurityVerdict
+from able.core.security.command_guard import CommandGuard, CommandVerdict
 
 class AgentRole(Enum):
     SCANNER = "scanner"      # Read-only, processes inputs

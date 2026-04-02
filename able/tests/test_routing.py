@@ -15,7 +15,7 @@ from pathlib import Path
 # Ensure able package is importable
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.routing.provider_registry import ProviderRegistry, ProviderTierConfig
+from able.core.routing.provider_registry import ProviderRegistry, ProviderTierConfig
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -337,7 +337,7 @@ def run_phase1_tests():
 # PHASE 2: COMPLEXITY SCORER TESTS
 # ═══════════════════════════════════════════════════════════════
 
-from core.routing.complexity_scorer import ComplexityScorer, ScoringResult
+from able.core.routing.complexity_scorer import ComplexityScorer, ScoringResult
 
 
 def _make_scorer() -> ComplexityScorer:
@@ -492,8 +492,8 @@ def run_phase2_tests():
 # ═══════════════════════════════════════════════════════════════
 
 import json
-from core.routing.interaction_log import InteractionLogger, InteractionRecord
-from core.routing.log_queries import LogQueries
+from able.core.routing.interaction_log import InteractionLogger, InteractionRecord
+from able.core.routing.log_queries import LogQueries
 
 
 def _make_logger() -> InteractionLogger:
@@ -796,12 +796,12 @@ def run_phase3_tests():
 import asyncio
 import shutil
 import yaml
-from core.evolution.collector import MetricsCollector
-from core.evolution.analyzer import EvolutionAnalyzer, AnalysisResult
-from core.evolution.improver import WeightImprover, Improvement
-from core.evolution.validator import ChangeValidator, ValidationResult
-from core.evolution.deployer import ChangeDeployer, DeployResult
-from core.evolution.daemon import EvolutionDaemon, EvolutionConfig, CycleResult
+from able.core.evolution.collector import MetricsCollector
+from able.core.evolution.analyzer import EvolutionAnalyzer, AnalysisResult
+from able.core.evolution.improver import WeightImprover, Improvement
+from able.core.evolution.validator import ChangeValidator, ValidationResult
+from able.core.evolution.deployer import ChangeDeployer, DeployResult
+from able.core.evolution.daemon import EvolutionDaemon, EvolutionConfig, CycleResult
 
 
 def _sample_weights() -> dict:

@@ -203,7 +203,7 @@ if [ ! -f "$ABLE_HOME/IDENTITY.md" ]; then
 - **OS**: Ubuntu 24.04
 - **Shell**: bash
 - **Python**: 3.12
-- **Primary AI Provider**: Groq (free tier)
+- **Primary AI Provider**: OpenAI OAuth (ChatGPT subscription)
 
 ---
 
@@ -235,8 +235,8 @@ billing:
     output_per_million: 31.25
 
 ai_providers:
-  primary: groq
-  fallback: nvidia
+  primary: openai_oauth
+  fallback: nvidia_nim
 YAML
     echo "✓ identity.yaml created"
 fi
@@ -402,20 +402,14 @@ echo ""
 echo "1. Edit IDENTITY.md with your preferences:"
 echo "   nano $ABLE_HOME/IDENTITY.md"
 echo ""
-echo "2. Add your API keys:"
-echo "   echo 'your-groq-key' > $ABLE_HOME/.secrets/GROQ_API_KEY"
-echo "   echo 'your-telegram-token' > $ABLE_HOME/.secrets/TELEGRAM_BOT_TOKEN"
-echo "   chmod 600 $ABLE_HOME/.secrets/*"
+echo "2. Set up Python environment and install dependencies:"
+echo "   python3 -m venv .venv && source .venv/bin/activate"
+echo "   pip install -r able/requirements.txt && pip install -e ."
 echo ""
-echo "3. Add your Telegram user ID to telegram_users.yaml:"
-echo "   nano $ABLE_HOME/telegram_users.yaml"
+echo "3. Authenticate with OpenAI (for T1/T2 routing):"
+echo "   python scripts/able-auth.py"
 echo ""
-echo "4. Set up Python environment:"
-echo "   python3 -m venv $ABLE_HOME/venv"
-echo "   source $ABLE_HOME/venv/bin/activate"
-echo "   pip install python-telegram-bot openai pyyaml httpx"
-echo ""
-echo "5. Start the gateway:"
-echo "   python $ABLE_HOME/able_gateway.py"
+echo "4. Start the local operator chat:"
+echo "   able chat"
 echo ""
 echo "═══════════════════════════════════════════════════════════════════════════════"

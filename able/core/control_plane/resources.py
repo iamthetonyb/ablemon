@@ -198,6 +198,7 @@ class ResourcePlane:
         action: str,
         *,
         approved_by: Optional[str] = None,
+        service_token_verified: bool = False,
     ) -> Dict[str, Any]:
         if not approved_by:
             return {
@@ -205,6 +206,23 @@ class ResourcePlane:
                 "resource_id": resource_id,
                 "action": action,
                 "message": "Lifecycle actions require explicit approval metadata.",
+            }
+
+        # Guard: only accept approval from service-token-authenticated callers.
+        # The gateway handler sets service_token_verified=True after checking
+        # the x-able-service-token header.  Without this, any HTTP client
+        # could claim approval by sending a fake approved_by string.
+        if not service_token_verified:
+            logger.warning(
+                "Resource action %s on %s rejected: caller did not pass service-token gate",
+                action,
+                resource_id,
+            )
+            return {
+                "status": "unauthorized",
+                "resource_id": resource_id,
+                "action": action,
+                "message": "Resource actions require service-token-authenticated callers.",
             }
 
         commands = self._action_command(resource_id, action)

@@ -35,7 +35,7 @@
 
 - **OS**: Ubuntu 24.04 (Digital Ocean)
 - **Shell**: bash
-- **Python**: 3.12 (venv at ~/.atlas/venv)
+- **Python**: 3.12 (venv at ~/.able/venv)
 - **Primary AI Provider**: Groq (free tier)
 - **Backup AI Provider**: NVIDIA NIM
 

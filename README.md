@@ -168,7 +168,5 @@ Both the GitHub Action and `deploy-to-server.sh` now install the packaged runtim
 
 ## Notes
 
-- This repo is the canonical `able` rewrite. Do not merge the old atlas PR stack directly into it.
-- Test from the published branch/worktree state before merging. The local working tree may still contain unrelated scratch or rename work that is not part of the integration PR.
 - Generated frontend artifacts such as `able-studio/.next/`, `able-studio/node_modules/`, and local `.env` files are not part of source control.
-- The README is intentionally narrow: it documents the current runtime, not aspirational roadmap language.
+- The README documents the current runtime, not aspirational roadmap language.

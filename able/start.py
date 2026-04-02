@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-ABLE v3 Startup Script
-Secure Multi-Tenant AI Agent System — Modular Gateway Architecture
+ABLE — Gateway startup script.
+Modular Gateway Architecture for the Autonomous Business & Learning Engine.
 """
 
 import asyncio
@@ -10,8 +10,10 @@ import os
 import sys
 from pathlib import Path
 
+_PACKAGE_DIR = Path(__file__).resolve().parent
+
 if __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    sys.path.insert(0, str(_PACKAGE_DIR.parent))
 
 # Configure logging FIRST — without this, all logger.info/error calls are lost
 logging.basicConfig(
@@ -26,21 +28,24 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 logging.getLogger("telegram").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 
-# Ensure runtime paths are rooted in the package directory.
-os.chdir(Path(__file__).parent)
-
 # Load .env for local runs (Docker/CI set env vars directly)
 try:
     from dotenv import load_dotenv
-    load_dotenv(Path(__file__).parent / ".env")
+    load_dotenv(_PACKAGE_DIR / ".env")
 except ImportError:
     pass
 
 from able.core.gateway.gateway import ABLEGateway
 
 async def main():
+    # Root the service working directory in the package directory so
+    # relative config paths resolve correctly.  This is intentionally
+    # deferred to main() so that importing this module (e.g. from
+    # ``able chat``) does NOT change the caller's working directory.
+    os.chdir(_PACKAGE_DIR)
+
     print("=" * 60)
-    print("ABLE v2 - Secure Multi-Tenant AI Agent System")
+    print("ABLE - Autonomous Business & Learning Engine")
     print("=" * 60)
 
     # Check required files
@@ -50,14 +55,14 @@ async def main():
 
     for f in required_files:
         if not Path(f).exists():
-            print(f"❌ Missing required file: {f}")
+            print(f"Missing required file: {f}")
             sys.exit(1)
 
     # Check secrets
     secrets_dir = Path(".secrets")
     if not secrets_dir.exists():
         secrets_dir.mkdir(mode=0o700)
-        print("⚠️ Created .secrets directory - add your API keys there")
+        print("Created .secrets directory - add your API keys there")
 
     # Ensure audit logs directory exists
     audit_dir = Path("audit/logs")
