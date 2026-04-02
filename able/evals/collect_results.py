@@ -261,7 +261,35 @@ def export_distillation_data(all_parsed: List[Dict], output_dir: str = "../data"
                 quality_gaps += 1
 
     print(f"  Distillation: {len(all_pairs)} pairs, {quality_gaps} quality gaps → {path}")
+    corpus_progress = summarize_corpus_progress(out_dir)
+    if corpus_progress["ready"]:
+        print(
+            "  CORPUS READY: "
+            f"{corpus_progress['total_pairs']} pairs collected across "
+            f"{corpus_progress['files']} distillation exports"
+        )
     return path
+
+
+def summarize_corpus_progress(
+    output_dir: str | Path = "../data",
+    threshold: int = 100,
+) -> Dict[str, int | bool]:
+    """Count exported distillation pairs across all jsonl shards."""
+    out_dir = Path(output_dir)
+    total_pairs = 0
+    file_count = 0
+    for path in sorted(out_dir.glob("distillation_*.jsonl")):
+        file_count += 1
+        with open(path, "r", encoding="utf-8") as handle:
+            total_pairs += sum(1 for line in handle if line.strip())
+
+    return {
+        "ready": total_pairs >= threshold,
+        "total_pairs": total_pairs,
+        "files": file_count,
+        "threshold": threshold,
+    }
 
 
 def print_summary(all_parsed: List[Dict]):

@@ -2,7 +2,7 @@
 
 Date: 2026-04-01
 Branch: `codex/able-rewrite-integration`
-Head: `88395b8`
+Git state: always verify with `git log --oneline -10` before starting work.
 
 ## Source Of Truth
 
@@ -67,7 +67,8 @@ ABLE/
 ├── .github/workflows/deploy.yml   # CI/CD: push to main → production
 ├── pyproject.toml                 # Package config — entry points: `able`, `able-chat`
 ├── CODE_HANDOFF.md                # This file — canonical cross-agent handoff
-├── CLAUDE.md                      # Claude Code session context
+├── CODEX_PROMPT.md                # Reusable next-run prompt for any coding agent
+├── CLAUDE.md                      # Optional Claude Code session context
 ├── SOUL.md                        # Personality directives
 ├── ABLE.md                        # Full system documentation (~700 lines)
 └── README.md                      # Operator-facing runtime docs
@@ -118,6 +119,7 @@ Token verification uses `hmac.compare_digest` (timing-safe). Health endpoint exe
 - **Telegram**: Inline keyboard buttons with HMAC-signed callbacks, timeout/escalation
 - **CLI** (`able chat`): Terminal prompt (y/n/a), "always" mode for session auto-approve
 - **Control plane API**: Service-token-gated, `approved_by` metadata + `service_token_verified` guard
+- **Auto-improve skill updates**: When the gateway starts the evolution daemon, eval-driven SKILL.md updates now reuse the same approval workflow before applying `## Auto-Improve Guidance` changes.
 
 ### Tool System
 
@@ -137,7 +139,7 @@ Every request logs a 25-field record to `data/interaction_log.db` (SQLite WAL): 
 100+ test cases across 6 configs (security, copywriting, code-refactoring, enricher-3way, model-shootout). `collect_results.py` parses promptfoo SQLite → captures T4 outputs as distillation targets → identifies routing mismatches → feeds auto_improve.
 
 ### 4. Auto-Improver (`able/core/evolution/auto_improve.py`)
-Classifies eval failures into 7 categories: thinking_bleed, skill_gap, format_violation, under_routing, content_quality, over_routing, model_regression. Maps each to corrective actions that feed back into the evolution daemon.
+Classifies eval failures into 7 categories: thinking_bleed, skill_gap, format_violation, under_routing, content_quality, over_routing, model_regression. Routing actions stay in the evolution daemon; skill/content-quality actions now submit approval-gated SKILL.md section updates through `SelfImprovementEngine`.
 
 ### 5. Distillation Pipeline (`able/core/distillation/`)
 Harvests successful T4 (gold) completions from interaction log → exports JSONL training pairs → fine-tunes Qwen 3.5 via Axolotl + Unsloth on H100 (27B) or T4 Colab (9B) → re-quantizes to UD targets → deploys to Ollama T5 lane. Currently ~20 pairs collected, needs 100+ for first H100 run.
@@ -173,57 +175,60 @@ Training lanes:
 - **27B**: H100-only, seq_len=8192, micro_batch=1, bf16
 - **9B**: T4-first default, seq_len=2048, micro_batch=1, fp16, checkpoint every 100 steps
 
-## What Was Just Completed (This Session)
+## What Was Just Completed
 
-1. Merged main into branch — picked up 88-file atlas→able rename
-2. Migrated remaining 87 bare imports to `from able.*` across 25 files
-3. Removed all 5 root-level shim packages (core/, tools/, memory/, scheduler/, clients/)
-4. Simplified `pyproject.toml` packages.find to `["able*"]`
-5. Fixed `deploy.yml` pip install to use `-e` flag (matches deploy-to-server.sh)
-6. Fixed `datetime.utcnow()` deprecation in approval/workflow.py
-7. Synced ABLE.md budget caps to match routing_config.yaml ($25/$150 Opus API)
-8. Documented control plane endpoints in this handoff
+1. Closed the eval → self-improvement bridge:
+   - `able/core/evolution/auto_improve.py` now maps skill/content failures into approval-gated SKILL.md updates instead of only writing learnings.
+   - `able/core/agi/self_improvement.py` now correctly handles `ApprovalResult.status`, renders `SECTION` updates deterministically, and supports targeted patch-style replacements through metadata.
+2. Closed the proactive → evolution collector bridge:
+   - `able/core/evolution/collector.py` now accepts `submit_insight()` events and includes them in the next collection payload.
+   - `able/core/agi/proactive.py` now submits recurring failure insights to the collector when a collector is wired in.
+3. Added the missing resource lifecycle tool path:
+   - `resource_action` now exists in `able/core/gateway/tool_defs/resource_tools.py`.
+   - Tool dispatch now preserves approval metadata for handlers.
+   - Resource actions execute with `approved_by` + `service_token_verified=True` on the backend-managed path.
+4. Fixed the control-plane HTTP seam:
+   - `/control/resources/{id}/action` now forwards optional parameters, passes the service-token verification flag, and returns the correct HTTP status code.
+   - Control-plane timestamps use timezone-aware UTC values.
+5. Added corpus readiness feedback:
+   - `able/evals/collect_results.py` now counts all `data/distillation_*.jsonl` shards and emits a clear `CORPUS READY` message at 100+ pairs.
+6. Added dedicated tests for the new surfaces:
+   - `able/tests/test_control_plane.py`
+   - `able/tests/test_resource_tools.py`
+   - `able/tests/test_learning_loops.py`
+   - `able/tests/test_collect_results.py`
+   - `able/tests/test_evolution_cycle.py`
 
 ## Next-Run Objectives
 
-### Priority 1: Close the learning feedback loops
+### Priority 1: Close the last major learning bridge
 
-The five learning subsystems (interaction logger, evolution daemon, eval system, auto-improver, distillation) are individually mature but operate semi-independently. The next high-value work closes these loops:
+**Memory → Evolution**
+`able/memory/hybrid_memory.py` still stores learnings and patterns largely outside the evolution collector. Add a memory recall step so the next evolution cycle can weigh durable operator preferences and repeated domain signals, not just recent interaction metrics and proactive insights.
 
-**A. Evolution → Self-Improvement bridge**
-`auto_improve.py` classifies failures but doesn't yet trigger `able/core/agi/self_improvement.py` to update skill prompts or routing behavior. Wire the auto-improver's improvement actions into the self-improvement engine so classified failures automatically generate document patches (with operator approval for sensitive files).
+### Priority 2: Increase usable distillation throughput
 
-**B. Proactive → Evolution bridge**
-`able/core/agi/proactive.py` runs LearningInsights checks but doesn't feed findings back to the evolution daemon. Connect proactive pattern detection to the collector so insights influence the next weight-tuning cycle.
+- Review routing/domain distribution from `data/interaction_log.db`.
+- Add 2-3 new eval configs for the highest-traffic or highest-value domains.
+- Keep pushing the corpus toward the first 100+ pair threshold for H100 promotion while maintaining the T4-first 9B lane.
 
-**C. Memory → Evolution bridge**
-`able/memory/hybrid_memory.py` stores learnings and patterns but the evolution daemon doesn't query memory to inform weight adjustments. Add a memory recall step to the evolution collector so accumulated operator preferences and domain patterns shape scoring.
+### Priority 3: Improve live operator experience
 
-**D. Distillation corpus acceleration**
-Currently ~20 training pairs, need 100+. The eval pipeline (`collect_results.py`) already captures T4 outputs as gold targets. Increase eval coverage and add a threshold trigger that alerts when corpus hits 100 pairs (ready for H100 run).
+- `able chat` streaming output instead of full-response blocking
+- Expand the local slash-command surface (`/eval`, `/evolve`, `/distill`, resource status/actions)
+- Improve CLI approval rendering so write actions are easier to review during demos and offline runs
 
-### Priority 2: Test coverage for new surfaces
+### Priority 4: Keep docs and runtime in lockstep
 
-- Control plane endpoints (all 7 routes) — unit tests with mocked gateway
-- Resource tools (`resource_list`, `resource_status`) — functional tests
-- Distillation runtime profiles (T4 vs H100 lane selection) — validation tests
-- Evolution daemon cycle — integration test for collect→analyze→improve→validate→deploy
-
-### Priority 3: Resource action tool
-
-The LLM can list/inspect resources via `resource_list` and `resource_status` tools but cannot trigger lifecycle actions through tool calls. Add a `resource_action` tool in `able/core/gateway/tool_defs/` with approval gating through `ApprovalWorkflow.request_approval()`. This closes the resource management loop.
-
-### Priority 4: Operator experience
-
-- `able chat` streaming output (currently blocks until full response)
-- Slash-command palette (`/status`, `/tools`, `/help` exist; add `/eval`, `/evolve`, `/distill`)
-- Inline approval cards (rich terminal rendering for approval prompts)
+- Refresh `README.md` only when code changes make its current commands or runtime description stale.
+- Keep `CODE_HANDOFF.md` and `CODEX_PROMPT.md` updated at the end of each implementation pass.
 
 ## Validation Commands
 
 ```bash
 python3 -m able chat --help
 python3 -m pytest able/tests/test_cli_chat.py -x
+python3 -m pytest able/tests/test_control_plane.py able/tests/test_resource_tools.py able/tests/test_learning_loops.py able/tests/test_collect_results.py able/tests/test_evolution_cycle.py -x
 python3 -m pytest able/tests/test_training_pipeline.py -x
 python3 -m pytest able/tests/test_distillation_store.py -x
 bash -n deploy-to-server.sh
@@ -235,8 +240,9 @@ python3 -m py_compile scripts/able-auth.py
 **Before starting work:**
 1. Read this file first
 2. Check `git log --oneline -10` for recent changes
-3. Read `CLAUDE.md` for session-level context
-4. Run `able chat --help` to verify the runtime is intact
+3. Read `CODEX_PROMPT.md` for the current reusable next-run prompt
+4. Read `CLAUDE.md` only if session-specific Claude context is needed
+5. Run `able chat --help` to verify the runtime is intact
 
 **When making changes:**
 - Commit to a feature branch, not main directly
@@ -249,6 +255,7 @@ python3 -m py_compile scripts/able-auth.py
 - List what changed and what was NOT finished
 - Include exact validation commands
 - Flag any files modified but not tested
+- Update `CODE_HANDOFF.md` and `CODEX_PROMPT.md` so the next run starts from the actual current state
 
 **Conventions:**
 - No marketing copy — factual and operator-facing only

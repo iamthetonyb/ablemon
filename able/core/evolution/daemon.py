@@ -98,12 +98,14 @@ class EvolutionDaemon:
         config: Optional[EvolutionConfig] = None,
         m27_provider=None,
         split_policy: Optional[EvolutionSplitTestPolicy] = None,
+        approval_workflow=None,
     ):
         self.config = config or EvolutionConfig()
         self._collector = MetricsCollector(db_path=self.config.interaction_db)
         self._analyzer = EvolutionAnalyzer(provider=m27_provider)
         self._deployer = ChangeDeployer(weights_path=self.config.weights_path)
         self.split_policy = split_policy
+        self.approval_workflow = approval_workflow
         self._running = False
         self._cycles_completed = 0
         self._daily_spend = 0.0
@@ -249,7 +251,9 @@ class EvolutionDaemon:
             # ── Step 6: Eval-driven auto-improvement ────────
             try:
                 auto_report = await run_from_evals(
-                    last_n=5, auto_apply=self.config.auto_deploy
+                    last_n=5,
+                    auto_apply=self.config.auto_deploy,
+                    approval_workflow=self.approval_workflow,
                 )
                 if auto_report.actions_proposed > 0:
                     logger.info(
@@ -352,6 +356,11 @@ class EvolutionDaemon:
                 "max_changes_per_cycle": self.config.max_changes_per_cycle,
             },
         }
+
+    @property
+    def collector(self) -> MetricsCollector:
+        """Expose collector for proactive insight submission wiring."""
+        return self._collector
 
 
 # ── CLI Entry Point ───────────────────────────────────────────

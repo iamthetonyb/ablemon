@@ -243,10 +243,11 @@ class LearningInsightCheck(ProactiveCheck):
     name = "learning_insights"
     interval_seconds = 3600 * 6  # Every 6 hours
 
-    def __init__(self, memory=None, min_pattern_count: int = 3):
+    def __init__(self, memory=None, min_pattern_count: int = 3, collector=None):
         super().__init__()
         self.memory = memory
         self.min_pattern_count = min_pattern_count
+        self.collector = collector
 
     async def run(self) -> List[ProactiveAction]:
         if not self.memory:
@@ -263,18 +264,27 @@ class LearningInsightCheck(ProactiveCheck):
             )
 
             if len(failure_memories) >= self.min_pattern_count:
+                description = (
+                    f"Found {len(failure_memories)} similar failure events. "
+                    "Consider creating a skill to handle this pattern, or reviewing system config."
+                )
                 # Group by similarity (simplified)
                 actions.append(ProactiveAction(
                     action_type=ProactiveActionType.SUGGESTION,
                     title="💡 Recurring Failure Pattern Detected",
-                    description=(
-                        f"Found {len(failure_memories)} similar failure events. "
-                        "Consider creating a skill to handle this pattern, or reviewing system config."
-                    ),
+                    description=description,
                     urgency=4,
                     requires_human=True,
                     data={"failure_count": len(failure_memories)}
                 ))
+                if self.collector:
+                    self.collector.submit_insight(
+                        title="Recurring Failure Pattern Detected",
+                        description=description,
+                        source="proactive.learning_insights",
+                        category="learning_pattern",
+                        data={"failure_count": len(failure_memories)},
+                    )
         except Exception as e:
             logger.warning(f"Learning insight check failed: {e}")
 
@@ -450,6 +460,7 @@ def create_default_engine(
     billing=None,
     gateway=None,
     dispatcher=None,
+    collector=None,
     work_hours: tuple = (10, 19),
 ) -> ProactiveEngine:
     """
@@ -466,7 +477,7 @@ def create_default_engine(
 
     engine.add_check(MemoryConsolidationCheck(memory=memory))
     engine.add_check(AnomalyDetectionCheck(rate_limiter=rate_limiter, billing_tracker=billing))
-    engine.add_check(LearningInsightCheck(memory=memory))
+    engine.add_check(LearningInsightCheck(memory=memory, collector=collector))
     engine.add_check(SystemHealthCheck(gateway=gateway, rate_limiter=rate_limiter))
 
     return engine

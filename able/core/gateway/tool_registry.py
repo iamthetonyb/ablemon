@@ -220,6 +220,8 @@ class ToolRegistry:
             return f"❓ Unknown tool: {name}"
 
         try:
+            context.metadata.pop("approval_result", None)
+
             # Handle approval for write tools
             if tool.requires_approval and context.approval_workflow:
                 approval = await context.approval_workflow.request_approval(
@@ -231,6 +233,7 @@ class ToolRegistry:
                 )
                 if approval.status.value != "approved":
                     return f"❌ Denied ({approval.status.value})"
+                context.metadata["approval_result"] = approval
 
             # Execute the handler
             handler = tool.handler

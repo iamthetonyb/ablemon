@@ -23,7 +23,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -31,6 +31,40 @@ logger = logging.getLogger(__name__)
 
 # Project root — two levels up from this file
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+_SKILL_TARGETS = {
+    "copywriting": "able/skills/library/copywriting/SKILL.md",
+    "security": "able/skills/library/security-audit/SKILL.md",
+    "refactor": "able/skills/library/code-refactoring/SKILL.md",
+    "research": "able/skills/library/web-research/SKILL.md",
+    "self_improvement": "able/skills/library/self-improvement/SKILL.md",
+}
+
+
+def _resolve_skill_target(eval_name: str) -> tuple[str, str]:
+    """Map an eval name to the closest concrete SKILL.md path."""
+    lower = eval_name.lower()
+    if any(word in lower for word in ["copy", "landing", "email", "sales", "brand"]):
+        return "copywriting", _SKILL_TARGETS["copywriting"]
+    if any(word in lower for word in ["security", "audit", "threat", "pentest"]):
+        return "security", _SKILL_TARGETS["security"]
+    if any(word in lower for word in ["refactor", "code", "debug", "coding"]):
+        return "refactor", _SKILL_TARGETS["refactor"]
+    if any(word in lower for word in ["research", "web", "sources", "citation"]):
+        return "research", _SKILL_TARGETS["research"]
+    return "self_improvement", _SKILL_TARGETS["self_improvement"]
+
+
+def _build_skill_patch(action: "ImprovementAction") -> str:
+    """Build a concise SKILL.md reinforcement section from eval evidence."""
+    return (
+        "### Latest Eval Reinforcement\n"
+        f"- Source eval: `{action.source_eval or 'unknown'}`\n"
+        f"- Failure pattern: {action.failure_pattern}\n"
+        f"- Correction: {action.description}\n"
+        f"- Required adjustment: {action.proposed_change}\n"
+        "- Guardrail: keep instructions concrete, measurable, and output-focused.\n"
+    )
 
 
 @dataclass
@@ -254,16 +288,12 @@ def _generate_skill_improvements(
 
         if len(t2_failures) >= 2:
             # T2 GPT 5.4 also struggling — might be a skill quality issue
-            skill_name = "unknown"
-            for keyword in ["copywriting", "security", "refactor", "research"]:
-                if keyword in eval_name.lower():
-                    skill_name = keyword
-                    break
+            skill_name, target_path = _resolve_skill_target(eval_name)
 
             actions.append(ImprovementAction(
                 id=f"skill-quality-{skill_name}",
                 category="skill",
-                target_file=f"able/skills/library/{skill_name}/SKILL.md",
+                target_file=target_path,
                 description=f"Skill quality issue in {skill_name} — T2 failing ({len(t2_failures)} cases)",
                 proposed_change="Review SKILL.md for missing quality criteria or overly vague instructions",
                 confidence=0.6,
@@ -400,11 +430,15 @@ class AutoImprover:
         llm_call: Optional[Callable] = None,
         auto_apply: bool = False,
         log_dir: str = "data/auto_improve",
+        approval_workflow: Any = None,
+        self_improvement_engine: Any = None,
     ):
         self.llm_call = llm_call
         self.auto_apply = auto_apply
         self.log_dir = Path(_PROJECT_ROOT) / log_dir
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.approval_workflow = approval_workflow
+        self._self_improvement_engine = self_improvement_engine
 
     async def run(self, parsed_evals: List[Dict]) -> ImprovementReport:
         """
@@ -420,7 +454,7 @@ class AutoImprover:
         """
         start = time.perf_counter()
         report = ImprovementReport(
-            timestamp=datetime.utcnow().isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
             evals_analyzed=len(parsed_evals),
             failures_analyzed=0,
             actions_proposed=0,
@@ -523,8 +557,12 @@ class AutoImprover:
         applied = 0
 
         try:
-            from able.core.agi.self_improvement import SelfImprovementEngine
-            engine = SelfImprovementEngine()
+            from able.core.agi.self_improvement import SelfImprovementEngine, UpdateType
+
+            engine = self._self_improvement_engine or SelfImprovementEngine(
+                v2_path=_PROJECT_ROOT,
+                approval_workflow=self.approval_workflow,
+            )
         except ImportError:
             logger.warning("[AUTO_IMPROVE] SelfImprovementEngine not importable — skipping apply")
             return 0
@@ -538,6 +576,28 @@ class AutoImprover:
                 continue
 
             try:
+                target_path = Path(action.target_file)
+                if not target_path.is_absolute():
+                    target_path = _PROJECT_ROOT / target_path
+
+                if action.category == "skill" and target_path.name == "SKILL.md":
+                    update = await engine.propose_update(
+                        document_path=target_path,
+                        content=_build_skill_patch(action),
+                        update_type=UpdateType.SECTION,
+                        reason=action.description,
+                        source=f"auto_improve:{action.source_eval or action.id}",
+                        metadata={
+                            "section_heading": "## Auto-Improve Guidance",
+                            "action_id": action.id,
+                            "failure_pattern": action.failure_pattern,
+                        },
+                    )
+                    action.applied = update.applied
+                    if update.applied:
+                        applied += 1
+                    continue
+
                 await engine.add_learning(
                     f"Auto-improvement [{action.category}]: {action.description}\n"
                     f"Target: {action.target_file}\n"
@@ -553,7 +613,7 @@ class AutoImprover:
 
     def _log_report(self, report: ImprovementReport):
         """Log improvement report to disk."""
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         path = self.log_dir / f"cycle_{timestamp}.json"
 
         data = {
@@ -589,7 +649,11 @@ class AutoImprover:
 
 # ── CLI + integration entry points ───────────────────────────────
 
-async def run_from_evals(last_n: int = 5, auto_apply: bool = False) -> ImprovementReport:
+async def run_from_evals(
+    last_n: int = 5,
+    auto_apply: bool = False,
+    approval_workflow: Any = None,
+) -> ImprovementReport:
     """
     Run auto-improvement from the most recent promptfoo evals.
 
@@ -598,16 +662,12 @@ async def run_from_evals(last_n: int = 5, auto_apply: bool = False) -> Improveme
     - evolution daemon (as part of its cycle)
     - CLI: python -m able.core.evolution.auto_improve
     """
-    import sys
-    import os
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-
-    from evals.collect_results import get_able_evals, parse_eval, DB_PATH
+    from able.evals.collect_results import DB_PATH, get_able_evals, parse_eval
 
     if not DB_PATH.exists():
         logger.error(f"promptfoo DB not found at {DB_PATH}")
         return ImprovementReport(
-            timestamp=datetime.utcnow().isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
             evals_analyzed=0, failures_analyzed=0,
             actions_proposed=0, actions_validated=0, actions_applied=0,
             insights=["No promptfoo DB found — run evals first"],
@@ -616,7 +676,7 @@ async def run_from_evals(last_n: int = 5, auto_apply: bool = False) -> Improveme
     evals = get_able_evals(last_n=last_n)
     if not evals:
         return ImprovementReport(
-            timestamp=datetime.utcnow().isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
             evals_analyzed=0, failures_analyzed=0,
             actions_proposed=0, actions_validated=0, actions_applied=0,
             insights=["No ABLE evals found in DB"],
@@ -624,7 +684,10 @@ async def run_from_evals(last_n: int = 5, auto_apply: bool = False) -> Improveme
 
     parsed = [parse_eval(e) for e in evals]
 
-    improver = AutoImprover(auto_apply=auto_apply)
+    improver = AutoImprover(
+        auto_apply=auto_apply,
+        approval_workflow=approval_workflow,
+    )
     return await improver.run(parsed)
 
 

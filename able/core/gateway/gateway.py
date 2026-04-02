@@ -9,7 +9,7 @@ import logging
 import os
 import base64
 import hmac
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Union
 from pathlib import Path
 from urllib.parse import unquote
@@ -1636,7 +1636,7 @@ class ABLEGateway:
                 "organization_id": org_id or "global",
                 "catalog": catalog,
                 "definitions": self.tool_registry.get_definitions(effective),
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         )
 
@@ -1646,7 +1646,7 @@ class ABLEGateway:
         return web.json_response(
             {
                 "resources": self.resource_plane.list_resources(),
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         )
 
@@ -1665,12 +1665,14 @@ class ABLEGateway:
         resource_id = unquote(request.match_info["resource_id"])
         body = await request.json()
         action = body.get("action")
+        parameters = body.get("parameters")
         approved_by = body.get("approved_by") or request.headers.get("x-able-approved-by")
         if not action:
             return web.json_response({"error": "action_required"}, status=400)
         result = self.resource_plane.perform_action(
             resource_id,
             action,
+            parameters=parameters,
             approved_by=approved_by,
             service_token_verified=True,
         )
@@ -1678,7 +1680,7 @@ class ABLEGateway:
             "approval_required": 202,
             "unauthorized": 403,
         }.get(result.get("status", ""), 200)
-        return web.json_response(result, status=status)
+        return web.json_response(result, status=status_code)
 
     async def _control_collections_handler(self, request: web.Request) -> web.Response:
         if not self._verify_service_token(request):
@@ -1686,7 +1688,7 @@ class ABLEGateway:
         return web.json_response(
             {
                 "collections": self.resource_plane.list_collections(),
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         )
 
@@ -1911,7 +1913,10 @@ class ABLEGateway:
                 logger.warning(f"Split test policy unavailable: {e}")
 
             self.evolution_daemon = EvolutionDaemon(
-                config=evo_config, m27_provider=m27_provider, split_policy=split_policy,
+                config=evo_config,
+                m27_provider=m27_provider,
+                split_policy=split_policy,
+                approval_workflow=self.approval_workflow,
             )
             asyncio.create_task(self.evolution_daemon.run_continuous())
             print(f"🧬 Evolution Daemon started (6h cycle, M2.7 {'connected' if m27_provider else 'rule-based fallback'}, split_test={'on' if split_policy else 'off'})")

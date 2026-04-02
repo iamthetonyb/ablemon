@@ -7,7 +7,7 @@ for M2.7 analysis. No LLM calls here — pure data aggregation.
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 try:
     from able.core.routing.log_queries import LogQueries
@@ -28,6 +28,7 @@ class MetricsCollector:
     def __init__(self, db_path: str = "data/interaction_log.db"):
         self._queries = LogQueries(db_path=db_path)
         self._last_collection: Optional[str] = None
+        self._submitted_insights: List[Dict[str, Any]] = []
 
     def collect(
         self, hours: int = 24, since: Optional[str] = None
@@ -48,6 +49,8 @@ class MetricsCollector:
             ).isoformat()
 
         summary = self._queries.get_evolution_summary(since=since)
+        proactive_insights = list(self._submitted_insights)
+        self._submitted_insights.clear()
 
         # Enrich with collection metadata
         summary["collection_metadata"] = {
@@ -56,6 +59,7 @@ class MetricsCollector:
             "period_start": since,
             "previous_collection": self._last_collection,
         }
+        summary["proactive_insights"] = proactive_insights
 
         # Add computed health indicators
         summary["health_indicators"] = self._compute_health(summary)
@@ -111,3 +115,25 @@ class MetricsCollector:
     def queries(self) -> LogQueries:
         """Direct access to log queries for ad-hoc analysis."""
         return self._queries
+
+    def submit_insight(
+        self,
+        title: str,
+        description: str,
+        *,
+        source: str = "proactive",
+        category: str = "learning_pattern",
+        data: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Queue a proactive insight for the next evolution cycle."""
+        insight = {
+            "source": source,
+            "category": category,
+            "title": title,
+            "description": description,
+            "data": data or {},
+            "submitted_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self._submitted_insights.append(insight)
+        logger.info("Queued proactive insight for evolution: %s", title)
+        return insight

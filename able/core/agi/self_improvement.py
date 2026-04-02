@@ -34,6 +34,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Awaitable, Tuple
 
+from able.core.approval.workflow import ApprovalStatus
+
 logger = logging.getLogger(__name__)
 
 
@@ -217,6 +219,78 @@ class SelfImprovementEngine:
         """Generate unique update ID"""
         return f"upd_{int(time.time())}_{hashlib.md5(str(time.time()).encode()).hexdigest()[:6]}"
 
+    def _render_section_update(
+        self,
+        original_content: str,
+        content: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Replace or append a markdown section by heading."""
+        metadata = metadata or {}
+        heading = metadata.get("section_heading", "## Auto-Improve Guidance").strip()
+        if not heading.startswith("#"):
+            heading = f"## {heading}"
+
+        section_body = content.strip()
+        rendered_section = f"{heading}\n\n{section_body}\n"
+        pattern = rf"(?ms)^{re.escape(heading)}\s*\n.*?(?=^#{{1,6}}\s+|\Z)"
+        match = re.search(pattern, original_content)
+        if match:
+            prefix = original_content[: match.start()].rstrip()
+            suffix = original_content[match.end() :].lstrip()
+            parts = [part for part in (prefix, rendered_section.strip(), suffix) if part]
+            return "\n\n".join(parts) + "\n"
+
+        base = original_content.rstrip()
+        if not base:
+            return rendered_section
+        return f"{base}\n\n{rendered_section}"
+
+    def _render_updated_content(
+        self,
+        original_content: str,
+        content: str,
+        update_type: UpdateType,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Render the full file contents after an update is applied."""
+        metadata = metadata or {}
+
+        if update_type == UpdateType.APPEND:
+            base = original_content.rstrip()
+            addition = content.strip()
+            if not base:
+                return addition + ("\n" if addition else "")
+            if not addition:
+                return base + "\n"
+            return f"{base}\n\n{addition}\n"
+
+        if update_type == UpdateType.PREPEND:
+            prefix = content.strip()
+            remainder = original_content.lstrip()
+            if not remainder:
+                return prefix + ("\n" if prefix else "")
+            if not prefix:
+                return remainder
+            return f"{prefix}\n\n{remainder}"
+
+        if update_type == UpdateType.REPLACE:
+            return content
+
+        if update_type == UpdateType.SECTION:
+            return self._render_section_update(original_content, content, metadata)
+
+        if update_type == UpdateType.PATCH:
+            search = metadata.get("search")
+            replacement = metadata.get("replace", content)
+            if not search:
+                raise ValueError("PATCH updates require metadata['search']")
+            if search not in original_content:
+                raise ValueError("PATCH anchor not found in document")
+            return original_content.replace(search, replacement, 1)
+
+        raise ValueError(f"Unsupported update type: {update_type}")
+
     async def propose_update(
         self,
         document_path: Path,
@@ -224,6 +298,7 @@ class SelfImprovementEngine:
         update_type: UpdateType,
         reason: str,
         source: str = "self_improvement",
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> DocumentUpdate:
         """
         Propose an update to a document.
@@ -269,15 +344,12 @@ class SelfImprovementEngine:
         if path.exists():
             original_content = path.read_text()
 
-        # Generate new content based on update type
-        if update_type == UpdateType.APPEND:
-            new_content = original_content + "\n" + content
-        elif update_type == UpdateType.PREPEND:
-            new_content = content + "\n" + original_content
-        elif update_type == UpdateType.REPLACE:
-            new_content = content
-        else:
-            new_content = content  # PATCH/SECTION handled separately
+        new_content = self._render_updated_content(
+            original_content,
+            content,
+            update_type,
+            metadata=metadata,
+        )
 
         # Generate diff
         diff = self._generate_diff(original_content, new_content)
@@ -293,6 +365,7 @@ class SelfImprovementEngine:
             source=source,
             diff=diff,
             original_content=original_content,
+            metadata=dict(metadata or {}),
         )
 
         # Route through approval if needed
@@ -314,12 +387,26 @@ class SelfImprovementEngine:
                 timeout_seconds=3600,  # 1 hour timeout
             )
 
-            update.approved = approval_result.approved
-            update.approved_at = time.time()
-            update.approved_by = getattr(approval_result, 'approved_by', 'operator')
+            approved = approval_result.status == ApprovalStatus.APPROVED
+            update.approved = approved
+            update.approved_at = (
+                approval_result.approved_at.timestamp()
+                if approval_result.approved_at
+                else time.time()
+            )
+            update.approved_by = (
+                str(approval_result.approved_by)
+                if approval_result.approved_by is not None
+                else None
+            )
 
-            if approval_result.approved:
+            if approved:
                 await self._apply_update(update)
+            else:
+                self._pending_updates.pop(update.id, None)
+                update.metadata["approval_status"] = approval_result.status.value
+                if approval_result.reason:
+                    update.metadata["approval_reason"] = approval_result.reason
 
         elif not needs_approval:
             # Auto-apply for safe updates
@@ -345,15 +432,13 @@ class SelfImprovementEngine:
                 backup_path = path.with_suffix(path.suffix + ".bak")
                 backup_path.write_text(update.original_content or "")
 
-            # Apply update
-            if update.update_type == UpdateType.APPEND:
-                with open(path, 'a') as f:
-                    f.write("\n" + update.content)
-            elif update.update_type == UpdateType.PREPEND:
-                original = path.read_text() if path.exists() else ""
-                path.write_text(update.content + "\n" + original)
-            elif update.update_type == UpdateType.REPLACE:
-                path.write_text(update.content)
+            new_content = self._render_updated_content(
+                update.original_content or "",
+                update.content,
+                update.update_type,
+                metadata=update.metadata,
+            )
+            path.write_text(new_content)
 
             update.applied = True
             self._applied_updates.append(update)
@@ -442,6 +527,7 @@ class SelfImprovementEngine:
             update_type=UpdateType.SECTION,
             reason=reason,
             source="prompt_optimization",
+            metadata={"section_heading": f"## {target_section}"},
         )
 
     async def record_win(

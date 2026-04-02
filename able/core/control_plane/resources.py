@@ -197,6 +197,7 @@ class ResourcePlane:
         resource_id: str,
         action: str,
         *,
+        parameters: Optional[Dict[str, Any]] = None,
         approved_by: Optional[str] = None,
         service_token_verified: bool = False,
     ) -> Dict[str, Any]:
@@ -243,6 +244,7 @@ class ResourcePlane:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "resource_id": resource_id,
             "action": action,
+            "parameters": parameters or {},
             "approved_by": approved_by,
             "command": commands,
             "exit_code": result.returncode,
@@ -256,6 +258,7 @@ class ResourcePlane:
             "status": "completed" if result.returncode == 0 else "failed",
             "resource_id": resource_id,
             "action": action,
+            "parameters": parameters or {},
             "exit_code": result.returncode,
             "stdout": result.stdout[:4000],
             "stderr": result.stderr[:4000],
