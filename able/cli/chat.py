@@ -165,13 +165,58 @@ async def run_chat(args: argparse.Namespace) -> int:
         )
         return 1
 
+    # ── Buddy system ──────────────────────────────────────────────
+    from able.core.buddy.model import load_buddy, save_buddy, BuddyState, Species, SPECIES_META
+    from able.core.buddy.renderer import (
+        render_banner, render_full, render_starter_selection,
+        render_battle_result, render_evolution,
+    )
+
+    buddy = load_buddy()
+    if buddy is None:
+        print(render_starter_selection())
+        species_list = list(Species)
+        while True:
+            try:
+                choice = await asyncio.to_thread(input, "Pick a starter (1-5): ")
+                idx = int(choice.strip()) - 1
+                if 0 <= idx < len(species_list):
+                    chosen = species_list[idx]
+                    break
+                print(f"Enter 1-{len(species_list)}")
+            except (ValueError, EOFError):
+                print(f"Enter 1-{len(species_list)}")
+        name = ""
+        while not name:
+            name = (await asyncio.to_thread(input, "Name your buddy: ")).strip()
+        phrase = (await asyncio.to_thread(input, "Catch phrase (or enter to skip): ")).strip()
+        buddy = BuddyState(
+            name=name,
+            species=chosen.value,
+            stage=1,
+            xp=0,
+            catch_phrase=phrase or SPECIES_META[chosen]["desc"],
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        save_buddy(buddy)
+        print(f"\n  {SPECIES_META[chosen]['emoji']} {name} the {SPECIES_META[chosen]['label']} joins you!")
+        print(f"  \"{buddy.catch_phrase}\"\n")
+
+    # Apply needs decay since last session
+    mood = buddy.apply_needs_decay()
+    save_buddy(buddy)
+    if mood in ("hungry", "neglected"):
+        needs = buddy.get_needs()
+        print(f"\n  {buddy.meta['emoji']} {buddy.name}: \"{needs.mood_message}\"")
+
     print("ABLE local chat")
+    print(render_banner(buddy))
     print(f"session:  {args.session}")
     print(f"client:   {args.client}")
     print(f"providers:{' ' if providers else ''}{', '.join(providers)}")
     if args.control_port:
         print(f"control:  http://127.0.0.1:{args.control_port}/health")
-    print("commands: /help /status /tools /resources /eval /evolve /exit")
+    print("commands: /help /status /tools /resources /eval /evolve /buddy /battle /exit")
 
     while True:
         try:
@@ -187,7 +232,7 @@ async def run_chat(args: argparse.Namespace) -> int:
             print("bye")
             return 0
         if message == "/help":
-            print("commands: /help /status /tools /resources /eval /evolve /exit")
+            print("commands: /help /status /tools /resources /eval /evolve /buddy /battle /exit")
             print("all other input goes through the full gateway pipeline.")
             continue
         if message == "/tools":
@@ -246,10 +291,67 @@ async def run_chat(args: argparse.Namespace) -> int:
                     print(f"  deployed: {result.improvements_deployed}")
                     if result.error:
                         print(f"  error: {result.error}")
+                    # Evolution cycle waters the buddy
+                    buddy = load_buddy()
+                    if buddy:
+                        restored = buddy.water("evolve")
+                        if restored > 0:
+                            print(f"  {buddy.meta['emoji']} watered! Thirst +{restored:.0f}")
+                        save_buddy(buddy)
                 except Exception as e:
                     print(f"  cycle error: {e}")
             else:
                 print("  evolution daemon not running")
+            continue
+        if message == "/buddy":
+            buddy = load_buddy()
+            if buddy:
+                print(render_full(buddy))
+            else:
+                print("  no buddy yet — restart `able chat` to pick a starter")
+            continue
+        if message.startswith("/battle"):
+            from able.core.buddy.battle import run_battle, list_available_battles
+
+            buddy = load_buddy()
+            if not buddy:
+                print("  no buddy yet — restart `able chat` to pick a starter")
+                continue
+
+            parts = message.split(None, 1)
+            if len(parts) < 2:
+                available = list_available_battles()
+                if available:
+                    print(f"  available battles: {', '.join(available)}")
+                    print("  usage: /battle <domain>  (or /battle <domain> --dry-run)")
+                else:
+                    print("  no eval configs found in able/evals/")
+                continue
+
+            args_str = parts[1].strip()
+            dry_run = "--dry-run" in args_str
+            domain = args_str.replace("--dry-run", "").strip()
+
+            print(f"  {buddy.meta['emoji']} {buddy.name} enters battle: {domain}...")
+            record = run_battle(buddy, domain, dry_run=dry_run)
+            if record is None:
+                print(f"  no eval config for domain '{domain}'")
+                continue
+
+            buddy.record_battle(record)
+            # Battle feeds the buddy (evals = food)
+            restored = buddy.feed("battle")
+            if restored > 0:
+                print(f"  {buddy.meta['emoji']} fed! Hunger +{restored:.0f}")
+            # Check for evolution after battle
+            new_stage = buddy.check_evolution()
+            if new_stage:
+                buddy.evolve(new_stage)
+                print(render_evolution(buddy, new_stage))
+            save_buddy(buddy)
+
+            print(render_battle_result(buddy, record.domain, record.passed, record.total, record.result, record.xp_earned))
+            print(render_banner(buddy))
             continue
 
         gateway.transcript_manager.log_message(
@@ -279,6 +381,20 @@ async def run_chat(args: argparse.Namespace) -> int:
             },
         )
         print(f"\nable> {response}")
+
+        # ── Check for buddy level-up (XP awarded in gateway) ──
+        try:
+            new_buddy = load_buddy()
+            if new_buddy and buddy and new_buddy.level > buddy.level:
+                print(f"  {new_buddy.meta['emoji']} {new_buddy.name} leveled up to {new_buddy.level}!")
+                new_stage = new_buddy.check_evolution()
+                if new_stage:
+                    new_buddy.evolve(new_stage)
+                    save_buddy(new_buddy)
+                    print(render_evolution(new_buddy, new_stage))
+            buddy = new_buddy or buddy
+        except Exception:
+            pass  # Buddy system is optional — never block chat
 
 
 def main(argv: Optional[list[str]] = None) -> int:

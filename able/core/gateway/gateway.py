@@ -829,6 +829,7 @@ class ABLEGateway:
             _enriched_tag = f" [enriched: {enrichment_result.enrichment_level}]" if enrichment_result and enrichment_result.enrichment_level != "none" else ""
             logger.info(f"[PIPELINE] Step 6 — AI call: {_history_count} history msgs, {len(authorized_tools)} tools{_enriched_tag}")
 
+            _used_tools = False
             for loop_iteration in range(15):
                 _iter_start = _time.monotonic()
                 # ── Trace span for provider call ──
@@ -903,6 +904,7 @@ class ABLEGateway:
 
                 # Step 4: Tool dispatch if AI called a tool
                 if result.tool_calls:
+                    _used_tools = True
                     # Log the assistant's action into the memory array
                     msgs.append(Message(
                         role=Role.ASSISTANT,
@@ -1054,6 +1056,19 @@ class ABLEGateway:
                 _tier_label = f"T{scoring_result.selected_tier}" if scoring_result else ""
                 _model_tag = f"\n\n`⚡ {_short} [{_tier_label}]`" if _short else ""
                 final_text += _model_tag
+
+                # ── Buddy XP + needs (system-wide, all channels) ──
+                try:
+                    from able.core.buddy.xp import award_interaction_xp
+                    _complexity = scoring_result.score if scoring_result else 0.5
+                    _domain = scoring_result.domain if scoring_result else "default"
+                    award_interaction_xp(
+                        complexity_score=_complexity,
+                        used_tools=_used_tools,
+                        domain=_domain,
+                    )
+                except Exception:
+                    pass  # Buddy is optional — never block the pipeline
 
                 return final_text
 
@@ -1474,6 +1489,15 @@ class ABLEGateway:
                 })
 
                 await self._send_telegram_chunked(update, response)
+
+                # Buddy nudge — notify if needs are low
+                try:
+                    from able.core.buddy.nudge import get_status_line
+                    _nudge = get_status_line()
+                    if _nudge:
+                        await update.message.reply_text(_nudge)
+                except Exception:
+                    pass
             except Exception as e:
                 logger.error(f"Pipeline error: {e}", exc_info=True)
                 try:

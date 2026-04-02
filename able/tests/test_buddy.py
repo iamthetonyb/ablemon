@@ -1,0 +1,416 @@
+"""Tests for the buddy gamification system."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import yaml
+
+from able.core.buddy.model import (
+    BuddyState,
+    BuddyStats,
+    BuddyNeeds,
+    Species,
+    Stage,
+    EVOLUTION_REQUIREMENTS,
+    load_buddy,
+    save_buddy,
+    level_from_xp,
+    xp_for_level,
+)
+from able.core.buddy.renderer import (
+    render_banner,
+    render_full,
+    render_evolution,
+    render_battle_result,
+    render_starter_selection,
+)
+from able.core.buddy.battle import run_battle, list_available_battles
+from able.core.buddy.xp import award_interaction_xp
+
+
+# ── Model tests ──────────────────────────────────────────────────────────
+
+def test_level_from_xp_starts_at_1():
+    assert level_from_xp(0) == 1
+    assert level_from_xp(49) == 1
+
+
+def test_level_progression_is_monotonic():
+    prev = 1
+    for xp in range(0, 10000, 100):
+        lvl = level_from_xp(xp)
+        assert lvl >= prev
+        prev = lvl
+
+
+def test_xp_for_level_is_increasing():
+    for level in range(1, 50):
+        assert xp_for_level(level + 1) > xp_for_level(level)
+
+
+def test_buddy_state_level_and_progress():
+    buddy = BuddyState(name="Ember", species="blaze", xp=500)
+    assert buddy.level >= 1
+    assert 0 <= buddy.xp_progress_pct <= 100
+    assert buddy.xp_to_next > 0
+
+
+def test_buddy_award_xp():
+    buddy = BuddyState(name="Ember", species="blaze", xp=0)
+    old_level = buddy.level
+    buddy.award_xp(1000)
+    assert buddy.xp == 1000
+    assert buddy.level >= old_level
+
+
+def test_evolution_check_starter_to_trained():
+    buddy = BuddyState(
+        name="Ember",
+        species="blaze",
+        stage=1,
+        xp=xp_for_level(10),
+        total_interactions=50,
+        eval_passes=5,
+    )
+    result = buddy.check_evolution()
+    assert result == Stage.TRAINED
+
+
+def test_evolution_check_not_ready():
+    buddy = BuddyState(
+        name="Ember",
+        species="blaze",
+        stage=1,
+        xp=0,
+        total_interactions=5,
+        eval_passes=0,
+    )
+    assert buddy.check_evolution() is None
+
+
+def test_evolution_trained_to_evolved():
+    buddy = BuddyState(
+        name="Ember",
+        species="blaze",
+        stage=2,
+        xp=xp_for_level(25),
+        distillation_pairs=100,
+        evolution_deploys=3,
+    )
+    result = buddy.check_evolution()
+    assert result == Stage.EVOLVED
+
+
+def test_max_stage_returns_none():
+    buddy = BuddyState(name="Ember", species="blaze", stage=3)
+    assert buddy.check_evolution() is None
+
+
+def test_species_meta_accessible():
+    for species in Species:
+        buddy = BuddyState(name="Test", species=species.value)
+        meta = buddy.meta
+        assert "emoji" in meta
+        assert "label" in meta
+        assert "art_stage1" in meta
+        assert "bonus_domains" in meta
+
+
+# ── Persistence tests ────────────────────────────────────────────────────
+
+def test_save_and_load_buddy(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "able.core.buddy.model.BUDDY_PATH", tmp_path / "buddy.yaml"
+    )
+    buddy = BuddyState(
+        name="Volt",
+        species="spark",
+        stage=2,
+        xp=1500,
+        battles_won=3,
+        catch_phrase="Words are ammo.",
+        created_at="2026-04-01T00:00:00Z",
+    )
+    save_buddy(buddy)
+
+    loaded = load_buddy()
+    assert loaded is not None
+    assert loaded.name == "Volt"
+    assert loaded.species == "spark"
+    assert loaded.stage == 2
+    assert loaded.xp == 1500
+    assert loaded.battles_won == 3
+    assert loaded.catch_phrase == "Words are ammo."
+
+
+def test_load_buddy_returns_none_when_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "able.core.buddy.model.BUDDY_PATH", tmp_path / "nope.yaml"
+    )
+    assert load_buddy() is None
+
+
+# ── Renderer tests ───────────────────────────────────────────────────────
+
+def test_render_banner_contains_name_and_level():
+    buddy = BuddyState(name="Ember", species="blaze", xp=500, battles_won=2)
+    banner = render_banner(buddy)
+    assert "Ember" in banner
+    assert "Lv." in banner
+    assert "W:2" in banner
+
+
+def test_render_full_contains_all_sections():
+    buddy = BuddyState(
+        name="Shade",
+        species="phantom",
+        stage=2,
+        xp=2000,
+        catch_phrase="Sealing cracks.",
+        total_interactions=80,
+        eval_passes=10,
+    )
+    output = render_full(buddy)
+    assert "Shade" in output
+    assert "Phantom" in output
+    assert "Sealing cracks." in output
+    assert "Trained" in output
+    assert "80" in output
+
+
+def test_render_starter_selection_lists_all_species():
+    output = render_starter_selection()
+    assert "Blaze" in output
+    assert "Wave" in output
+    assert "Root" in output
+    assert "Spark" in output
+    assert "Phantom" in output
+
+
+def test_render_evolution_announcement():
+    buddy = BuddyState(name="Ember", species="blaze", stage=1)
+    output = render_evolution(buddy, Stage.TRAINED)
+    assert "EVOLVING" in output
+    assert "Ember" in output
+    assert "Trained" in output
+
+
+def test_render_battle_result_shows_outcome():
+    buddy = BuddyState(name="Ember", species="blaze")
+    output = render_battle_result(buddy, "security", 6, 7, "win", 50)
+    assert "VICTORY" in output
+    assert "security" in output.lower()
+    assert "+50 XP" in output
+
+
+# ── Battle tests ─────────────────────────────────────────────────────────
+
+def test_battle_dry_run_returns_record():
+    buddy = BuddyState(name="Ember", species="blaze")
+    record = run_battle(buddy, "security", dry_run=True)
+    assert record is not None
+    assert record.domain == "security"
+    assert record.result in ("win", "draw", "loss")
+    assert record.xp_earned > 0
+    assert record.total == 7
+
+
+def test_battle_unknown_domain_returns_none():
+    buddy = BuddyState(name="Ember", species="blaze")
+    assert run_battle(buddy, "nonexistent_domain") is None
+
+
+def test_battle_record_updates_buddy():
+    from able.core.buddy.model import BattleRecord
+    from datetime import datetime, timezone
+
+    buddy = BuddyState(name="Ember", species="blaze")
+    record = BattleRecord(
+        domain="code",
+        score_pct=85.0,
+        passed=6,
+        total=7,
+        result="win",
+        xp_earned=50,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+    )
+    buddy.record_battle(record)
+    assert buddy.battles_won == 1
+    assert buddy.xp == 50
+    assert len(buddy.battle_log) == 1
+
+
+# ── XP engine tests ─────────────────────────────────────────────────────
+
+def test_award_interaction_xp_returns_none_without_buddy(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "able.core.buddy.xp.load_buddy", lambda: None
+    )
+    assert award_interaction_xp(complexity_score=0.5) is None
+
+
+def test_award_interaction_xp_with_buddy(tmp_path, monkeypatch):
+    buddy = BuddyState(name="Ember", species="blaze", xp=0, created_at="2026-01-01")
+    saved = [False]
+
+    def fake_load():
+        return buddy
+
+    def fake_save(b):
+        saved[0] = True
+
+    monkeypatch.setattr("able.core.buddy.xp.load_buddy", fake_load)
+    monkeypatch.setattr("able.core.buddy.xp.save_buddy", fake_save)
+
+    xp = award_interaction_xp(
+        complexity_score=0.7,
+        used_tools=True,
+        domain="coding",  # Blaze bonus domain
+    )
+    assert xp is not None
+    assert xp > 10  # Base + complexity + tool + domain bonus
+    assert saved[0] is True
+
+
+# ── Needs / Tamagotchi tests ──────────────────────────────────────────────
+
+def test_buddy_needs_defaults():
+    needs = BuddyNeeds()
+    assert needs.hunger == 80.0
+    assert needs.thirst == 80.0
+    assert needs.energy == 80.0
+    assert needs.mood == "thriving"
+
+
+def test_needs_decay():
+    needs = BuddyNeeds(hunger=80, thirst=80, energy=80)
+    needs.decay(10)  # 10 hours
+    assert needs.hunger == 60.0   # 80 - 2.0*10
+    assert needs.thirst == 65.0   # 80 - 1.5*10
+    assert needs.energy == 70.0   # 80 - 1.0*10
+
+
+def test_needs_decay_floors_at_zero():
+    needs = BuddyNeeds(hunger=5, thirst=5, energy=5)
+    needs.decay(100)
+    assert needs.hunger == 0
+    assert needs.thirst == 0
+    assert needs.energy == 0
+
+
+def test_needs_feed_restores_hunger():
+    needs = BuddyNeeds(hunger=40)
+    restored = needs.feed("battle")
+    assert restored == 30  # NEED_RESTORE["hunger"]["battle"]
+    assert needs.hunger == 70
+
+
+def test_needs_feed_caps_at_100():
+    needs = BuddyNeeds(hunger=90)
+    needs.feed("battle")
+    assert needs.hunger == 100
+
+
+def test_needs_water_restores_thirst():
+    needs = BuddyNeeds(thirst=30)
+    restored = needs.water("evolve")
+    assert restored == 40  # NEED_RESTORE["thirst"]["evolve"]
+    assert needs.thirst == 70
+
+
+def test_needs_walk_restores_energy():
+    needs = BuddyNeeds(energy=50)
+    restored = needs.walk("new_domain")
+    assert restored == 25  # NEED_RESTORE["energy"]["new_domain"]
+    assert needs.energy == 75
+
+
+def test_mood_thriving():
+    needs = BuddyNeeds(hunger=80, thirst=80, energy=80)
+    assert needs.mood == "thriving"
+
+
+def test_mood_content():
+    needs = BuddyNeeds(hunger=60, thirst=60, energy=60)
+    assert needs.mood == "content"
+
+
+def test_mood_hungry():
+    needs = BuddyNeeds(hunger=20, thirst=80, energy=80)
+    assert needs.mood == "hungry"
+
+
+def test_mood_neglected():
+    needs = BuddyNeeds(hunger=5, thirst=80, energy=80)
+    assert needs.mood == "neglected"
+
+
+def test_buddy_state_get_needs():
+    buddy = BuddyState(name="Ember", species="blaze", needs_hunger=60, needs_thirst=50, needs_energy=40)
+    needs = buddy.get_needs()
+    assert needs.hunger == 60
+    assert needs.thirst == 50
+    assert needs.energy == 40
+
+
+def test_buddy_state_feed():
+    buddy = BuddyState(name="Ember", species="blaze", needs_hunger=50)
+    restored = buddy.feed("battle")
+    assert restored == 30
+    assert buddy.needs_hunger == 80
+
+
+def test_buddy_state_water():
+    buddy = BuddyState(name="Ember", species="blaze", needs_thirst=40)
+    restored = buddy.water("evolve")
+    assert restored == 40
+    assert buddy.needs_thirst == 80
+
+
+def test_buddy_state_walk_new_domain():
+    buddy = BuddyState(name="Ember", species="blaze", needs_energy=50)
+    restored = buddy.walk("new_domain", domain="security")
+    assert restored == 25
+    assert buddy.needs_energy == 75
+    assert "security" in buddy.domains_used_today
+
+
+def test_buddy_state_walk_variety_bonus():
+    buddy = BuddyState(name="Ember", species="blaze", needs_energy=20)
+    buddy.walk("new_domain", domain="code")
+    buddy.walk("new_domain", domain="research")
+    buddy.walk("new_domain", domain="security")  # 3rd domain triggers variety bonus
+    assert len(buddy.domains_used_today) == 3
+    # Energy should have gotten new_domain + variety on the 3rd walk
+    assert buddy.needs_energy > 20 + 25 + 25  # base + 2 new_domains, then 3rd gets bonus
+
+
+def test_buddy_apply_needs_decay():
+    from datetime import datetime, timezone, timedelta
+    past = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
+    buddy = BuddyState(name="Ember", species="blaze", needs_hunger=80, needs_last_decay=past)
+    mood = buddy.apply_needs_decay()
+    assert buddy.needs_hunger < 80  # Should have decayed
+    assert mood in ("thriving", "content", "hungry", "neglected")
+    assert buddy.needs_last_decay != past  # Updated
+
+
+def test_needs_persist_through_save_load(tmp_path, monkeypatch):
+    monkeypatch.setattr("able.core.buddy.model.BUDDY_PATH", tmp_path / "buddy.yaml")
+    buddy = BuddyState(
+        name="Ember", species="blaze",
+        needs_hunger=42.5, needs_thirst=65.0, needs_energy=88.0,
+        needs_last_decay="2026-04-01T00:00:00+00:00",
+        domains_used_today=["code", "security"],
+        domains_today_date="2026-04-01",
+    )
+    save_buddy(buddy)
+    loaded = load_buddy()
+    assert loaded is not None
+    assert loaded.needs_hunger == 42.5
+    assert loaded.needs_thirst == 65.0
+    assert loaded.needs_energy == 88.0
+    assert loaded.needs_last_decay == "2026-04-01T00:00:00+00:00"
+    assert loaded.domains_used_today == ["code", "security"]
+    assert loaded.domains_today_date == "2026-04-01"

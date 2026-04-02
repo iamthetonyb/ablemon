@@ -340,6 +340,32 @@ class SystemHealthCheck(ProactiveCheck):
         return actions
 
 
+class BuddyNeedsCheck(ProactiveCheck):
+    """
+    Check buddy needs every 2 hours and surface nudges to the operator.
+    Maps to Tamagotchi-style care reminders.
+    """
+
+    name = "buddy_needs"
+    interval_seconds = 7200  # Every 2 hours
+
+    async def run(self) -> List[ProactiveAction]:
+        actions = []
+        try:
+            from able.core.buddy.nudge import check_nudge
+            nudge = check_nudge()
+            if nudge:
+                actions.append(ProactiveAction(
+                    action_type=ProactiveActionType.NOTIFY,
+                    message=nudge,
+                    urgency=3,
+                    requires_human=False,
+                ))
+        except Exception as e:
+            logger.debug(f"Buddy needs check skipped: {e}")
+        return actions
+
+
 class ProactiveEngine:
     """
     Runs all proactive checks and dispatches actions.
@@ -479,5 +505,6 @@ def create_default_engine(
     engine.add_check(AnomalyDetectionCheck(rate_limiter=rate_limiter, billing_tracker=billing))
     engine.add_check(LearningInsightCheck(memory=memory, collector=collector))
     engine.add_check(SystemHealthCheck(gateway=gateway, rate_limiter=rate_limiter))
+    engine.add_check(BuddyNeedsCheck())
 
     return engine

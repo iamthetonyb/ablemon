@@ -1,4 +1,4 @@
-# Codex Prompt — ABLE Reusable Next Run
+# ABLE — Reusable Next-Run Prompt
 
 > Copy everything below the line and use it as the next-run prompt for any coding agent.
 > Always attach or reference `CODE_HANDOFF.md` with it.
@@ -39,7 +39,17 @@ All four learning feedback loops are closed and tested:
 - **Memory → Evolution**: collector queries HybridMemory for durable learnings before each cycle
 - **Interaction → Distillation**: gold T4 outputs harvested, CORPUS READY threshold at 100 pairs
 
-Plus: resource action tool, control-plane endpoint tests (26 tests / 6 files), legacy shim removal, CLI slash commands (/resources, /eval, /evolve).
+**Buddy gamification system** (system-wide, all channels):
+- 5 starter species, 3 evolution stages, XP from real interactions
+- **Needs/Tamagotchi layer**: hunger (evals), thirst (evolution), energy (domain exploration) — decay over time, restored by real actions
+- Mood system with context-aware messages and cross-channel nudges
+- Battles tied to real promptfoo evals, domain bonuses per species
+- XP awards in the gateway (fires on Telegram, CLI, API — not channel-specific)
+- Proactive engine `BuddyNeedsCheck` runs every 2h for auto-nudges
+- Telegram nudges appended to responses when needs are low
+- 40 tests covering model, persistence, rendering, battles, XP, needs, and mood
+
+Plus: resource action tool, control-plane endpoint tests, legacy shim removal, CLI slash commands (/resources, /eval, /evolve, /buddy, /battle).
 
 ## Core Mission
 
@@ -80,6 +90,7 @@ python3 -m pytest able/tests/test_cli_chat.py -x
 
 Then run the most relevant focused tests for the surfaces you touched:
 ```bash
+python3 -m pytest able/tests/test_buddy.py -x
 python3 -m pytest able/tests/test_control_plane.py able/tests/test_resource_tools.py able/tests/test_learning_loops.py able/tests/test_collect_results.py able/tests/test_evolution_cycle.py -x
 python3 -m pytest able/tests/test_training_pipeline.py -x
 python3 -m pytest able/tests/test_distillation_store.py -x
@@ -96,7 +107,7 @@ bash -n deploy-to-server.sh
    - refresh "What Was Just Completed"
    - refresh "Next-Run Objectives"
    - refresh validation commands if needed
-2. Update this `CODEX_PROMPT.md` if the best next-run prompt has changed.
+2. Update this `NEXT_RUN_PROMPT.md` if the best next-run prompt has changed.
 3. Report:
    - branch name
    - HEAD commit
