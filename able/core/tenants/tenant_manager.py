@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -57,7 +57,7 @@ class TenantConfig:
         }
     )
     status: str = "active"  # active | paused | archived
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     # ------------------------------------------------------------------
     # Serialization

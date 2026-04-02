@@ -14,7 +14,7 @@ import json
 import logging
 import os
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -85,7 +85,7 @@ class TenantBilling:
 
         record = TenantUsageRecord(
             tenant_id=tenant_id,
-            timestamp=datetime.utcnow().isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
             provider=provider,
             model=model,
             input_tokens=input_tokens,
@@ -116,7 +116,7 @@ class TenantBilling:
             markup_percentage: Markup to apply on raw costs
         """
         if month is None:
-            month = datetime.utcnow().strftime("%Y-%m")
+            month = datetime.now(timezone.utc).strftime("%Y-%m")
 
         records = self._load_records(tenant_id, month_filter=month)
 
@@ -159,7 +159,7 @@ class TenantBilling:
         on Tier 1 (GPT 5.4 Mini).
         """
         if month is None:
-            month = datetime.utcnow().strftime("%Y-%m")
+            month = datetime.now(timezone.utc).strftime("%Y-%m")
 
         records = self._load_records(tenant_id, month_filter=month)
 
@@ -204,7 +204,7 @@ class TenantBilling:
         return {
             "tenant_id": tenant_id,
             "invoice_month": month,
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "summary": summary,
             "roi": roi,
             "line_items": self._build_line_items(summary),

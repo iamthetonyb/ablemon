@@ -5,7 +5,7 @@ Tenant Dashboard — Per-tenant dashboard data for /tenant/{id}/dashboard endpoi
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict
 
 from able.core.tenants.tenant_billing import TenantBilling
@@ -46,7 +46,7 @@ class TenantDashboard:
         if config is None:
             raise ValueError(f"Tenant not found: {tenant_id}")
 
-        month = datetime.utcnow().strftime("%Y-%m")
+        month = datetime.now(timezone.utc).strftime("%Y-%m")
         summary = self.billing.get_monthly_summary(
             tenant_id,
             month=month,
@@ -73,7 +73,7 @@ class TenantDashboard:
             "name": config.name,
             "domain": config.domain,
             "status": config.status,
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "adapter": {
                 "has_adapter": has_adapter,
                 "tier_0_enabled": config.routing.get("tier_0_enabled", False),

@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -67,7 +67,7 @@ class GpuBudget:
     client_allocation_hours: float = 12.0
     used_core_hours: float = 0.0
     used_client_hours: float = 0.0
-    month: str = field(default_factory=lambda: datetime.utcnow().strftime("%Y-%m"))
+    month: str = field(default_factory=lambda: datetime.now(timezone.utc).strftime("%Y-%m"))
 
     @property
     def remaining_core_hours(self) -> float:
@@ -149,7 +149,7 @@ class TenantTrainingScheduler:
             priority_label=_PRIORITY_LABELS.get(priority_int, priority),
             estimated_hours=estimated_hours,
             status="scheduled",
-            scheduled_at=datetime.utcnow().isoformat(),
+            scheduled_at=datetime.now(timezone.utc).isoformat(),
             reason=reason or f"{priority} training for {tenant_id}",
         )
 
@@ -180,14 +180,14 @@ class TenantTrainingScheduler:
             for j in self._queue
             if j.status in ("pending", "scheduled", "running")
         )
-        return datetime.utcnow() + timedelta(hours=busy_hours)
+        return datetime.now(timezone.utc) + timedelta(hours=busy_hours)
 
     def complete_training(self, tenant_id: str, hours_used: float) -> None:
         """Mark a training job as completed and deduct from budget."""
         for job in self._queue:
             if job.tenant_id == tenant_id and job.status in ("scheduled", "running"):
                 job.status = "completed"
-                job.completed_at = datetime.utcnow().isoformat()
+                job.completed_at = datetime.now(timezone.utc).isoformat()
                 break
 
         is_core = (tenant_id == "able-core")
@@ -232,11 +232,11 @@ class TenantTrainingScheduler:
                 client_allocation_hours=data.get("client_allocation_hours", 12.0),
                 used_core_hours=data.get("used_core_hours", 0.0),
                 used_client_hours=data.get("used_client_hours", 0.0),
-                month=data.get("month", datetime.utcnow().strftime("%Y-%m")),
+                month=data.get("month", datetime.now(timezone.utc).strftime("%Y-%m")),
             )
 
             # Reset if new month
-            current_month = datetime.utcnow().strftime("%Y-%m")
+            current_month = datetime.now(timezone.utc).strftime("%Y-%m")
             if budget.month != current_month:
                 budget.used_core_hours = 0.0
                 budget.used_client_hours = 0.0

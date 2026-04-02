@@ -330,8 +330,8 @@ class TestTenantBilling:
             cost_usd=0.003,
             tier=1,
         )
-        from datetime import datetime
-        month = datetime.utcnow().strftime("%Y-%m")
+        from datetime import datetime, timezone
+        month = datetime.now(timezone.utc).strftime("%Y-%m")
         invoice = billing.get_invoice_data("acme-legal", month=month)
         assert invoice["tenant_id"] == "acme-legal"
         assert "summary" in invoice
@@ -384,8 +384,8 @@ class TestTrainingScheduler:
         assert budget["used_client_hours"] == 3.0
 
     def test_estimate_next_available(self, scheduler: TenantTrainingScheduler):
-        from datetime import datetime
-        before = datetime.utcnow()
+        from datetime import datetime, timezone
+        before = datetime.now(timezone.utc)
         scheduler.schedule_training("t1", priority="new_tenant", is_first_train=True)
         scheduler.schedule_training("t2", priority="scheduled")
 

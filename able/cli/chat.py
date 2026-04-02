@@ -414,13 +414,47 @@ def _print_collection_updates(before_collection, after_collection) -> None:
         print("  ✨ collection milestone unlocked")
 
 
-# ── Slash command handler ─────────────────────────────────────────────────
+# ── Slash context + handler ──────────────────────────────────────────────
 
-async def _handle_slash(message, gateway, args, buddy, load_buddy, save_buddy,
-                        load_buddy_collection, switch_active_buddy, update_collection_profile, record_collection_progress,
-                        STARTER_SPECIES, create_starter_buddy, render_full, render_banner, render_backpack,
-                        render_starter_selection, render_battle_result, render_evolution, render_legendary_unlock):
+class SlashCtx:
+    """Bundle of runtime + buddy dependencies for slash command handling."""
+
+    __slots__ = (
+        "gateway", "args",
+        "load_buddy", "save_buddy", "load_buddy_collection",
+        "switch_active_buddy", "update_collection_profile", "record_collection_progress",
+        "STARTER_SPECIES", "create_starter_buddy",
+        "render_full", "render_banner", "render_backpack",
+        "render_starter_selection", "render_battle_result",
+        "render_evolution", "render_legendary_unlock",
+    )
+
+    def __init__(self, **kw):
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+async def _handle_slash(message, ctx, buddy):
     """Handle slash commands. Returns (handled: bool, updated_buddy)."""
+    # Unpack context — keeps call site clean while body stays readable
+    gateway = ctx.gateway
+    args = ctx.args
+    load_buddy = ctx.load_buddy
+    save_buddy = ctx.save_buddy
+    load_buddy_collection = ctx.load_buddy_collection
+    switch_active_buddy = ctx.switch_active_buddy
+    update_collection_profile = ctx.update_collection_profile
+    record_collection_progress = ctx.record_collection_progress
+    STARTER_SPECIES = ctx.STARTER_SPECIES
+    create_starter_buddy = ctx.create_starter_buddy
+    render_full = ctx.render_full
+    render_banner = ctx.render_banner
+    render_backpack = ctx.render_backpack
+    render_starter_selection = ctx.render_starter_selection
+    render_battle_result = ctx.render_battle_result
+    render_evolution = ctx.render_evolution
+    render_legendary_unlock = ctx.render_legendary_unlock
+
     if message in {"/exit", "/quit", "/q"}:
         print(_c(DIM, "  bye"))
         raise SystemExit(0)
@@ -738,6 +772,24 @@ async def run_chat(args: argparse.Namespace) -> int:
         print(f"\n    {_c(BOLD, 'ABLE')} | {len(providers)} providers")
     print(f"    {_c(DIM, '/help for commands')}\n")
 
+    # ── Slash command context ────────────────────────────────────
+    slash_ctx = SlashCtx(
+        gateway=gateway, args=args,
+        load_buddy=load_buddy, save_buddy=save_buddy,
+        load_buddy_collection=load_buddy_collection,
+        switch_active_buddy=switch_active_buddy,
+        update_collection_profile=update_collection_profile,
+        record_collection_progress=record_collection_progress,
+        STARTER_SPECIES=STARTER_SPECIES,
+        create_starter_buddy=create_starter_buddy,
+        render_full=render_full, render_banner=render_banner,
+        render_backpack=render_backpack,
+        render_starter_selection=render_starter_selection,
+        render_battle_result=render_battle_result,
+        render_evolution=render_evolution,
+        render_legendary_unlock=render_legendary_unlock,
+    )
+
     # ── Chat loop ─────────────────────────────────────────────────
     spinner = _Spinner()
     try:
@@ -754,12 +806,7 @@ async def run_chat(args: argparse.Namespace) -> int:
 
             # Slash commands
             if message.startswith("/"):
-                handled, buddy = await _handle_slash(
-                    message, gateway, args, buddy, load_buddy, save_buddy,
-                    load_buddy_collection, switch_active_buddy, update_collection_profile, record_collection_progress,
-                    STARTER_SPECIES, create_starter_buddy, render_full, render_banner, render_backpack,
-                    render_starter_selection, render_battle_result, render_evolution, render_legendary_unlock,
-                )
+                handled, buddy = await _handle_slash(message, slash_ctx, buddy)
                 if handled:
                     continue
 
