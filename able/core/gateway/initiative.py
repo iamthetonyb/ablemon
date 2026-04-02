@@ -298,6 +298,22 @@ class InitiativeEngine:
             cron_lines.append(f"  {icon} {job['name']}{trend}")
         cron_status = "\n".join(cron_lines) if cron_lines else "  No cron jobs registered"
 
+        # Buddy status for briefing
+        buddy_status = ""
+        try:
+            from able.core.buddy.model import load_buddy
+            buddy = load_buddy()
+            if buddy:
+                needs = buddy.get_needs()
+                buddy_status = (
+                    f"\n## Buddy\n"
+                    f"- {buddy.display_emoji} {buddy.name} Lv.{buddy.level} ({buddy.meta['label']})\n"
+                    f"- Mood: {needs.mood} | Hunger: {needs.hunger:.0f} | Thirst: {needs.thirst:.0f} | Energy: {needs.energy:.0f}\n"
+                    f"- W:{buddy.battles_won} D:{buddy.battles_drawn} L:{buddy.battles_lost} | Eval passes: {buddy.eval_passes}\n"
+                )
+        except Exception:
+            pass
+
         prompt = f"""Draft the morning briefing based on this REAL system data.
 
 ## System Status
@@ -315,12 +331,13 @@ class InitiativeEngine:
 
 ## Goals
 {goals_context}
-
+{buddy_status}
 Structure:
 1. System health summary (2-3 lines, based on data above — flag any failed crons or missing providers)
 2. Goal progress update (based on actual numbers from goals data)
-3. 2-3 recommended focus areas for today
-4. Any issues that need immediate attention
+3. Buddy status (if data present — mention mood, suggest actions if needs are low)
+4. 2-3 recommended focus areas for today
+5. Any issues that need immediate attention
 
 Rules: Be direct. No fluff. Every claim must reference the data above. If something is at zero, say so."""
 
@@ -337,6 +354,21 @@ Rules: Be direct. No fluff. Every claim must reference the data above. If someth
         cron_history = self._collect_cron_history()
         usage = stats["usage"].get("total", {})
 
+        # Buddy status for evening check-in
+        buddy_evening = ""
+        try:
+            from able.core.buddy.model import load_buddy
+            buddy = load_buddy()
+            if buddy:
+                needs = buddy.get_needs()
+                buddy_evening = (
+                    f"\n## Buddy\n"
+                    f"- {buddy.display_emoji} {buddy.name} Lv.{buddy.level} — {needs.mood}\n"
+                    f"- Hunger: {needs.hunger:.0f} | Thirst: {needs.thirst:.0f} | Energy: {needs.energy:.0f}\n"
+                )
+        except Exception:
+            pass
+
         prompt = f"""Draft my evening check-in based on today's real data.
 
 ## Today's Activity
@@ -349,11 +381,12 @@ Rules: Be direct. No fluff. Every claim must reference the data above. If someth
 
 ## Goals
 {goals_context}
-
+{buddy_evening}
 Structure:
 1. Quick summary of today's system activity (reference real numbers)
-2. Ask: "Was today a $100k/m day? Reply with what you accomplished and I'll log it."
-3. One specific suggestion for tomorrow based on current goal progress
+2. Buddy check-in (mention mood and any actions needed if data present)
+3. Ask: "Was today a $100k/m day? Reply with what you accomplished and I'll log it."
+4. One specific suggestion for tomorrow based on current goal progress
 
 Keep it under 500 words."""
 

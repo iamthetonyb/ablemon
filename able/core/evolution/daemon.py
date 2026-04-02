@@ -263,6 +263,17 @@ class EvolutionDaemon:
                         f"[EVOLUTION] Auto-improve: {auto_report.actions_proposed} proposed, "
                         f"{auto_report.actions_applied} applied from eval data"
                     )
+                    # Buddy: eval-driven improvements count as eval passes
+                    if auto_report.actions_applied > 0:
+                        try:
+                            from able.core.buddy.model import load_buddy, save_buddy
+                            buddy = load_buddy()
+                            if buddy:
+                                buddy.eval_passes += auto_report.actions_applied
+                                buddy.feed("eval_pass")
+                                save_buddy(buddy)
+                        except Exception:
+                            pass
             except Exception as e:
                 logger.debug(f"[EVOLUTION] Eval-driven auto-improve skipped: {e}")
 
