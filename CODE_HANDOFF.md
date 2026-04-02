@@ -190,7 +190,7 @@ Training lanes:
    - Buddy suite: 58 tests passing
    - CLI chat: 9 tests passing
    - Focused new-surface suite: 23 tests across control plane, resource tools, learning loops, collect_results, and evolution cycle passing
-   - Full suite: 602 tests, 0 deprecation warnings
+   - Full suite: 602 tests, 0 deprecation warnings (+ 45 routing tests separate)
 6. **Legacy cleanup**: all 87 bare imports migrated, 5 root-level shims removed, pyproject.toml simplified.
 7. **Buddy system (system-wide)**: Pokemon + Tamagotchi gamified agent companion in `able/core/buddy/`:
    - 5 starter species (Blaze/Wave/Root/Spark/Phantom) with domain bonuses
@@ -300,6 +300,8 @@ Training lanes:
     - `buddy-walk` (every 2h): 5 passive XP + 8 energy + decay + evolution checks
 20. **`datetime.utcnow()` eliminated**: all 14 occurrences across tenant modules replaced with `datetime.now(timezone.utc)` — 0 deprecation warnings in test suite.
 21. **PhasedCoordinatorProtocol merged**: 4-phase agent execution for swarm (from `wu-g` branch).
+22. **AuthManager singleton** — PBKDF2 was re-computed 14 times during gateway init (~880ms). Cached as singleton, cutting gateway init from ~1.6s to ~0.8s.
+23. **BuddyNeedsCheck proactive bug fixed** — used nonexistent `NOTIFY` enum and `message=` field. Corrected to `ALERT` + `title`/`description`. Class is unused in production (buddy-walk cron covers the same role) but is now correct if ProactiveEngine is ever started.
 
 ## Next-Run Objectives
 
@@ -307,10 +309,12 @@ Training lanes:
 
 The buddy system works across all channels (CLI, Telegram, API, cron) but the Studio web dashboard doesn't display buddy state yet. Wire buddy status, operator profile, roster/backpack progress, badges, and battle history into the Studio API so operators can see their buddy progression from the web.
 
-### Priority 2: Cut live startup + first-response latency further
+### Priority 2: Further startup latency cuts
 
-The local CLI path is clean and operator-usable, but latency is still dominated by gateway initialization and provider round-trips. Next:
-- Profile `ABLEGateway.__init__()` — lazy-load providers not needed before first prompt
+AuthManager singleton already cut init from ~1.6s to ~0.8s. Remaining opportunities:
+- Lazy-import `anthropic` SDK (~328ms) — only import inside `AnthropicProvider.__init__()`, remove top-level import in gateway.py
+- Lazy-import `telegram` (~98ms) behind `require_telegram` flag
+- Lazy-import `aiohttp` (~203ms) inside `_init_providers()` instead of module-level
 - Add provider/tier latency breakdown in CLI verbose mode
 
 ### Priority 3: Streaming for tool-dispatch iterations
