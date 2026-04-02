@@ -1,6 +1,6 @@
 # ABLE — AI Handoff Document
 
-Last updated: 2026-04-01 by claude 
+Last updated: 2026-04-01 by -claude 
 Branch: `main`
 
 This document is the cross-agent handoff for any AI assistant (Claude Code, Codex, Gemini, etc.) picking up work on the ABLE repo. Read it before touching anything.
