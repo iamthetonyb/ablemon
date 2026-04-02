@@ -333,7 +333,24 @@ Training lanes:
     - **ExternalToolHarvester** added: reads `~/.able/external_sessions/*.jsonl` — any third-party AI tool (Cursor, Windsurf, Copilot, Grok, custom agents) can drop session files there and ABLE learns from them autonomously.
     - Optional `_source.txt` tag file and per-record `"source"` field let users attribute sessions to specific tools.
     - 15 new harvester tests: CLI session writing, end-to-end _SessionWriter → CLISessionHarvester pickup, ExternalToolHarvester with source tagging/override/domain detection/thinking extraction.
-28. **677 tests passing** (up from 662): full suite including new distillation pipeline tests.
+28. **Distillation scaffolding stripping** (commit `be96bbf`):
+    - `BaseHarvester._strip_scaffolding()` removes 13+ XML tag types, base64 data URIs, and internal analytics names
+    - `ClaudeCodeHarvester` filters 25+ metadata entry types and system subtypes
+    - `scrub_corpus()` retroactively applies filters to all existing distillation pairs on each nightly run
+    - 66 harvester tests
+29. **Universal scaffolding + CommandGuard hardening** (commit `6336939`):
+    - **All 8 harvesters** now call `_clean_messages()`: Claude Code, CLI, OpenCLI/Codex, external tool, inbox, antigravity, 0wav — every source gets scaffolding stripped
+    - New patterns stripped: `<claude-code-hint>` (zero-token side channel), `<example>` tags, base64 data URIs → `[image]`, `tengu_*` analytics event names
+    - 5 new Claude Code JSONL entry types filtered: bash-progress, code-indexing, plugin-hint, comment-label, claude-code-hint
+    - **CommandGuard security hardening** ported from Claude Code BashTool (12K LOC analysis):
+      - Binary hijack env var detection (`LD_`, `DYLD_`, `PATH=`)
+      - Dangerous removal path checking (`rm -rf /`, `/usr`, `/etc`, etc.)
+      - cd+git compound detection (bare repo fsmonitor RCE vector)
+      - Safe env var stripping (`NODE_ENV`, `RUST_LOG` → skip to real command)
+      - Subcommand cap (>50 → force approval, DoS protection)
+      - Pipe to zsh blocked alongside sh/bash
+    - SecureShell strips all `DYLD_*` and `LD_*` from execution environment
+    - 702 tests passing (70 harvester, 11 security)
 
 ## Next-Run Objectives
 

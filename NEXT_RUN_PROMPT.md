@@ -119,15 +119,28 @@ All four learning feedback loops are closed and tested:
 - Pluggable ASR: `VoiceTranscriber` supports ExternalASR (HTTP endpoint for Voxtral/Qwen3), OpenAI Whisper (legacy), LocalWhisper. Selected via `ABLE_ASR_PROVIDER` / `ABLE_ASR_ENDPOINT`.
 - Default ASR endpoint not yet configured — operator provides their preferred model endpoint.
 
-**Distillation pipeline fully closed**:
+**Distillation pipeline fully closed + hardened**:
 - CLI sessions now write per-turn JSONL to `~/.able/sessions/` — CLISessionHarvester picks them up during nightly harvest
 - ExternalToolHarvester reads `~/.able/external_sessions/*.jsonl` for third-party AI tool learning (Cursor, Windsurf, Copilot, etc.)
 - All learning loops are autonomous: interaction → evolution (3am), all sources → distillation (2am), buddy XP awarded on harvest/deploy
+- **Universal scaffolding stripping**: all 8 harvesters (Claude Code, CLI, OpenCLI/Codex, external tool, inbox, antigravity, 0wav) now call `_clean_messages()` — strips 13+ XML tag types, base64 data URIs, analytics names, and `<claude-code-hint>` zero-token side channel
+- `scrub_corpus()` retroactively applies the same stripping to all existing pairs on every nightly run — old data gets cleaned too
+- 25+ metadata entry types filtered from Claude Code JSONL (file-history-snapshot, queue-operation, marble-origami-*, stream_event, bash-progress, etc.)
+
+**CommandGuard security hardening** (ported from Claude Code BashTool 12K LOC):
+- Binary hijack env var detection (LD_, DYLD_, PATH=)
+- Dangerous removal path checking (rm -rf /, /usr, /etc, etc.)
+- cd+git compound detection (bare repo fsmonitor RCE vector)
+- Safe env var stripping (NODE_ENV, RUST_LOG → skip to real command for matching)
+- Subcommand cap (>50 → force approval, DoS protection)
+- Pipe to zsh blocked alongside sh/bash
+- SecureShell strips all DYLD_*/LD_* from execution environment
 
 **Test suite**:
-- Full-suite pass: 677 tests, 0 deprecation warnings
+- Full-suite pass: 702 tests, 0 deprecation warnings
+- 70 harvester tests (scaffolding, entry types, harvesters, session writers, corpus scrubber)
+- 11 security tests (injection, command guard, binary hijack, cd+git, dangerous paths, subcommand cap)
 - datetime.utcnow() replaced with datetime.now(timezone.utc) across all tenant modules
-- New tests: stream circuit breaker, input validation, rate limiting, provider chain fallback, CLI session harvesting, external tool harvesting
 
 Plus: resource action tool, control-plane endpoint tests, legacy shim removal, CLI slash commands (/resources, /eval, /evolve, /buddy, /battle).
 
