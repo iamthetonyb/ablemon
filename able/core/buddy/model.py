@@ -201,7 +201,7 @@ SPECIES_META = {
         "emoji": "\U0001f409",
         "label": "Aether",
         "desc": "The hidden sixth signal. Orchestrates the whole field.",
-        "element": "Dragon/Psychic",
+        "element": "Psychic",
         "role": "Orchestrator",
         "best_for": "cross-domain orchestration, synthesis, and mastery across the full ABLE stack",
         "abilities": ["team orchestration", "cross-domain mastery", "signal fusion"],
@@ -309,7 +309,7 @@ BADGE_DEFS = {
         "description": "Catch all 5 starter species.",
     },
     "sixth-signal": {
-        "title": "Sixth Signal",
+        "title": "Sixth Sense",
         "description": "Unlock the hidden orchestrator buddy.",
     },
     "evolution-league": {
@@ -325,7 +325,7 @@ BADGE_DEFS = {
         "description": "Reach level 40 with the full roster.",
     },
     "signal-crown": {
-        "title": "Signal Crown",
+        "title": "Champion Crown",
         "description": "Fully evolve and level the hidden sixth signal to its final form.",
     },
 }
