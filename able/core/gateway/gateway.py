@@ -306,7 +306,12 @@ class ABLEGateway:
     Master instance that oversees all client bots.
     """
 
-    def __init__(self, config_path: str = "config/gateway.json"):
+    def __init__(
+        self,
+        config_path: str = "config/gateway.json",
+        *,
+        require_telegram: bool = True,
+    ):
         # Load config file (non-secret settings only)
         config_file = Path(config_path)
         if config_file.exists():
@@ -322,11 +327,13 @@ class ABLEGateway:
             self.config.get("owner_telegram_id", "")
         )
 
-        if not self.bot_token:
+        if not self.bot_token and require_telegram:
             raise ValueError(
                 "TELEGRAM_BOT_TOKEN environment variable is not set. "
                 "Set it in your .env file or Docker environment."
             )
+        if not self.bot_token and not require_telegram:
+            logger.info("TELEGRAM_BOT_TOKEN not set; starting in local-only mode")
 
         # Initialize audit directory
         self.audit_dir = Path("audit/logs")
@@ -635,6 +642,7 @@ class ABLEGateway:
         if isinstance(message, list):
             text_content = next((item.get("text", "") for item in message if item.get("type") == "text"), "")
 
+        _channel = self._resolve_channel(update, metadata)
         _msg_preview = (text_content[:80] + "...") if isinstance(text_content, str) and len(text_content) > 80 else text_content
         logger.info(f"[PIPELINE] ── START ── user={user_id} client={client_id} msg={_msg_preview!r}")
 
@@ -761,7 +769,7 @@ class ABLEGateway:
                     features=_json.dumps(scoring_result.features),
                     scorer_version=scoring_result.scorer_version,
                     budget_gated=scoring_result.budget_gated,
-                    channel="telegram" if update else "api",
+                    channel=_channel,
                     session_id=user_id,
                 )
                 interaction_id = self.interaction_logger.log(record)
@@ -1035,7 +1043,7 @@ class ABLEGateway:
                             input_tokens=_usage.input_tokens if _usage else 0,
                             output_tokens=_usage.output_tokens if _usage else 0,
                             cost_usd=result.cost if hasattr(result, 'cost') and result.cost else 0.0,
-                            metadata_patch={"channel": "telegram" if update else "api", "client_id": client_id} if loop_iteration == 0 else None,
+                            metadata_patch={"channel": _channel, "client_id": client_id} if loop_iteration == 0 else None,
                         )
                     except Exception as sess_e:
                         logger.warning(f"Session update failed: {sess_e}")
@@ -1077,6 +1085,18 @@ class ABLEGateway:
                 except Exception as dump_e:
                     pass
             return f"⚠️ AI error ({type(e).__name__}): {e}"
+
+    @staticmethod
+    def _resolve_channel(update: Optional[Update], metadata: Optional[Dict]) -> str:
+        """Normalize channel labels for telemetry across Telegram, API, and local CLI."""
+        if metadata:
+            explicit = metadata.get("channel")
+            if explicit:
+                return str(explicit)
+            source = str(metadata.get("source", "")).lower()
+            if source.startswith("cli"):
+                return "cli"
+        return "telegram" if update else "api"
 
     async def _handle_tool_call(self, tool_call, update: Optional[Update], user_id: str, msgs: List["Message"] = None) -> str:
         """Dispatch a tool call from the AI to the correct client, with approval for writes."""

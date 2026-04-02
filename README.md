@@ -31,12 +31,44 @@ pip install -r able/requirements.txt
 pip install -e .
 
 python scripts/able-auth.py
-able
+able chat
 ```
 
-`able` is the canonical entrypoint. The gateway exposes `http://127.0.0.1:8080/health` and the control-plane endpoints under `/control/*`.
+`able chat` is the local operator interface. It runs the same gateway pipeline used by the service, keeps a persistent session id, prompts in-terminal for write approvals, and tries to expose the local control API on `http://127.0.0.1:8080` unless you pass `--control-port 0`.
+
+Useful local commands:
+
+```bash
+able chat
+able chat --session showcase --client master
+able chat --control-port 0
+able serve
+```
+
+Inside `able chat`, these local commands are handled without going through the model:
+
+- `/help`
+- `/status`
+- `/tools`
+- `/exit`
+
+`able` with no subcommand still starts the packaged service path. `able serve` is the explicit version of that same behavior.
 
 Environment is read from your shell or `/home/able/.able/.env` in the systemd deployment. `ABLE_SERVICE_TOKEN` is used to protect the control-plane API when set.
+
+If you want a pure local/offline lane, bring up Ollama first and create the pinned models from `config/ollama/`.
+
+```bash
+ollama serve
+huggingface-cli download unsloth/Qwen3.5-27B-GGUF Qwen3.5-27B-UD-Q4_K_XL.gguf --local-dir ./models
+huggingface-cli download unsloth/Qwen3.5-9B-GGUF Qwen3.5-9B-UD-IQ2_M.gguf --local-dir ./models
+huggingface-cli download unsloth/Qwen3.5-9B-GGUF Qwen3.5-9B-UD-Q4_K_XL.gguf --local-dir ./models
+ollama create qwen3.5-27b-ud -f config/ollama/Modelfile.27b
+ollama create qwen3.5-9b-edge -f config/ollama/Modelfile.9b-edge
+ollama create qwen3.5-9b-balanced -f config/ollama/Modelfile.9b-balanced
+export OLLAMA_BASE_URL=http://127.0.0.1:11434
+able chat
+```
 
 ## ABLE Studio
 
@@ -108,11 +140,22 @@ Useful commands:
 
 ```bash
 python -m able.core.distillation.training --check --model 9b --gpu-class t4_colab
-python -m able.core.distillation.training --train 9b --gpu-class t4_colab --resume
+python -m able.core.distillation.training --train 9b --gpu-class t4_colab --runtime colab --checkpoint-dir ~/able-checkpoints/9b --resume
 python -m able.core.distillation.training --status
 ```
 
 If `--gpu-class` is omitted, the orchestrator uses each model's default lane.
+
+Recommended prep for VS Code + Unsloth + Colab:
+
+```bash
+python -m able.core.distillation status
+python -m able.core.distillation corpus --status
+python -m able.core.distillation.training --check --model 9b --gpu-class t4_colab --runtime colab --checkpoint-dir ~/able-checkpoints/9b
+python -m able.core.distillation.training --train 9b --gpu-class t4_colab --runtime colab --checkpoint-dir ~/able-checkpoints/9b --resume
+```
+
+Use the 9B lane for regular T4 runs. Keep the 27B lane for H100 sessions only.
 
 ## Deployment
 
@@ -126,5 +169,6 @@ Both the GitHub Action and `deploy-to-server.sh` now install the packaged runtim
 ## Notes
 
 - This repo is the canonical `able` rewrite. Do not merge the old atlas PR stack directly into it.
+- Test from the published branch/worktree state before merging. The local working tree may still contain unrelated scratch or rename work that is not part of the integration PR.
 - Generated frontend artifacts such as `able-studio/.next/`, `able-studio/node_modules/`, and local `.env` files are not part of source control.
 - The README is intentionally narrow: it documents the current runtime, not aspirational roadmap language.

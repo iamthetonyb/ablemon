@@ -1,1 +1,1 @@
-"""ABLE CLI utilities — session replay and related tools."""
+"""ABLE CLI utilities — local chat, session replay, and related tools."""

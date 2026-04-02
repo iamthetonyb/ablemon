@@ -5,6 +5,9 @@ Branch: `codex/able-rewrite-integration`
 
 ## What Changed
 
+- Added a real local operator CLI in `able/cli/chat.py` and wired it into `able chat` / `able-chat`.
+- Updated `able/__main__.py` so `able` still serves the packaged gateway by default while `able chat` starts a terminal session that reuses the same pipeline, tools, routing, memory, and transcript logging.
+- Relaxed the gateway constructor so local CLI mode can run without `TELEGRAM_BOT_TOKEN`; telemetry/session logs now record `cli` as a first-class channel.
 - Replaced the gateway's hardcoded tool list with the shared registry in `able/core/gateway/tool_registry.py`.
 - Added control-plane endpoints in `able/core/gateway/gateway.py`:
   - `/control/tools/catalog`
@@ -64,6 +67,8 @@ Source of truth:
 
 ## What To Verify Next
 
+- Smoke test the new local path with `able chat`, including one read-only tool call and one approval-gated write tool call.
+- Decide whether `able chat` should stay terminal-first or grow into a richer TUI. The current path is functional and operator-friendly, but it is still plain terminal I/O rather than a full-screen shell UI.
 - Run targeted Python and studio validation. The control plane and new distillation runtime need fresh test coverage.
 - Review the resource action path. It currently requires explicit `approved_by` metadata and audit logging, but it is not yet wired into the full Telegram-style approval workflow.
 - Decide whether manual `workflow_dispatch ref=...` deploys should reuse the production service or get a separate preview service/path.
@@ -73,14 +78,17 @@ Source of truth:
 ## Suggested Checks
 
 ```bash
+python -m pytest able/tests/test_cli_chat.py
 pytest able/tests/test_training_pipeline.py
 pytest able/tests/test_distillation_store.py
+python -m able chat --help
 python -m able.core.distillation.training --check --model 9b --gpu-class t4_colab
 cd able-studio && pnpm build
 ```
 
 ## Current Gaps
 
+- `able chat` is now the missing operator entrypoint, but it is still a text REPL. If the target is “better than OpenCode” on UX, the next step is a richer TUI with streaming output, slash-command palettes, artifact panes, and inline approval cards.
 - Resource lifecycle actions are operator-gated but not yet approval-workflow-native.
 - The studio artifact viewer currently handles JSON/text/HTML artifacts; broader tool-output artifact rendering can extend from there.
 - The resource plane is focused on discovery plus controlled actions. Rollback/install orchestration for optional bundles is still thin.

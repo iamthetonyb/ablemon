@@ -12,6 +12,7 @@ dependencies = []
 
 [project.scripts]
 able = "able.__main__:main"
+able-chat = "able.cli.chat:main"
 
 [tool.setuptools]
 include-package-data = true
