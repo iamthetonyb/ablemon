@@ -1,25 +1,35 @@
-name: Deploy ATLAS to Digital Ocean
+name: Deploy ABLE to Digital Ocean
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to deploy (main, branch, tag, or commit SHA)"
+        required: false
+        default: "main"
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      TARGET_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || 'main' }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TARGET_REF }}
 
       - name: Deploy to Digital Ocean
         uses: appleboy/ssh-action@v1.2.2
         env:
+          TARGET_REF: ${{ env.TARGET_REF }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          ATLAS_OWNER_TELEGRAM_ID: ${{ secrets.ATLAS_OWNER_TELEGRAM_ID }}
-          ATLAS_OWNER_USERNAME: ${{ secrets.ATLAS_OWNER_USERNAME }}
+          ABLE_OWNER_TELEGRAM_ID: ${{ secrets.ABLE_OWNER_TELEGRAM_ID }}
+          ABLE_OWNER_USERNAME: ${{ secrets.ABLE_OWNER_USERNAME }}
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -27,11 +37,11 @@ jobs:
           OLLAMA_BASE_URL: ${{ secrets.OLLAMA_BASE_URL || 'http://localhost:11434' }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_OAUTH_AUTH_JSON: ${{ secrets.OPENAI_OAUTH_AUTH_JSON }}
-          ATLAS_TIMEZONE: ${{ secrets.ATLAS_TIMEZONE || 'America/Los_Angeles' }}
+          ABLE_TIMEZONE: ${{ secrets.ABLE_TIMEZONE || 'America/Los_Angeles' }}
           GITHUB_WEBHOOK_SECRET: ${{ secrets.GITHUB_WEBHOOK_SECRET }}
           NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
-          GITHUB_TOKEN: ${{ secrets.ATLAS_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.ABLE_GITHUB_TOKEN }}
           DO_API_TOKEN: ${{ secrets.DO_API_TOKEN }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
@@ -39,37 +49,41 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_API_KEY }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          ABLE_SERVICE_TOKEN: ${{ secrets.ABLE_SERVICE_TOKEN }}
         with:
           host: 146.190.142.68
           username: root
           key: ${{ secrets.DO_SSH_KEY }}
-          envs: TELEGRAM_BOT_TOKEN,ATLAS_OWNER_TELEGRAM_ID,ATLAS_OWNER_USERNAME,NVIDIA_API_KEY,OPENROUTER_API_KEY,ANTHROPIC_API_KEY,OLLAMA_API_KEY,OLLAMA_BASE_URL,OPENAI_API_KEY,OPENAI_OAUTH_AUTH_JSON,ATLAS_TIMEZONE,GITHUB_WEBHOOK_SECRET,NOTION_API_KEY,NOTION_DATABASE_ID,GITHUB_TOKEN,DO_API_TOKEN,VERCEL_TOKEN,BRAVE_SEARCH_API_KEY,PERPLEXITY_API_KEY,GEMINI_API_KEY,STRIPE_SECRET_KEY,STRIPE_WEBHOOK_SECRET
+          envs: TARGET_REF,TELEGRAM_BOT_TOKEN,ABLE_OWNER_TELEGRAM_ID,ABLE_OWNER_USERNAME,NVIDIA_API_KEY,OPENROUTER_API_KEY,ANTHROPIC_API_KEY,OLLAMA_API_KEY,OLLAMA_BASE_URL,OPENAI_API_KEY,OPENAI_OAUTH_AUTH_JSON,ABLE_TIMEZONE,GITHUB_WEBHOOK_SECRET,NOTION_API_KEY,NOTION_DATABASE_ID,GITHUB_TOKEN,DO_API_TOKEN,VERCEL_TOKEN,BRAVE_SEARCH_API_KEY,PERPLEXITY_API_KEY,GEMINI_API_KEY,STRIPE_SECRET_KEY,STRIPE_WEBHOOK_SECRET,ABLE_SERVICE_TOKEN
 
           script: |
-            set -e
+            set -euo pipefail
 
-            echo "=== Pulling latest code ==="
-            if [ ! -d /opt/atlas/ABLE/.git ]; then
-              git clone https://github.com/iamthetonyb/ABLE.git /opt/atlas/ABLE
+            echo "=== Pulling target ref ==="
+            if [ ! -d /opt/able/ABLE/.git ]; then
+              git clone https://github.com/iamthetonyb/ABLE.git /opt/able/ABLE
             fi
-            cd /opt/atlas/ABLE
-            git fetch origin
-            git reset --hard origin/main
-            echo "✓ Code updated to $(git rev-parse --short HEAD)"
+            cd /opt/able/ABLE
+            git fetch --tags origin "${TARGET_REF}"
+            git checkout -B deployed FETCH_HEAD
+            chown -R able:able /opt/able/ABLE
+            mkdir -p /opt/able/ABLE/data
+            chown -R able:able /opt/able/ABLE/data
+            echo "✓ Code updated to $(git rev-parse --short HEAD) from ${TARGET_REF}"
 
             echo "=== Updating .env file ==="
-            mkdir -p /home/atlas/.atlas
-            cat <<EOF > /home/atlas/.atlas/.env
+            mkdir -p /home/able/.able
+            cat <<EOF > /home/able/.able/.env
             TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
-            ATLAS_OWNER_TELEGRAM_ID=$ATLAS_OWNER_TELEGRAM_ID
-            ATLAS_OWNER_USERNAME=$ATLAS_OWNER_USERNAME
+            ABLE_OWNER_TELEGRAM_ID=$ABLE_OWNER_TELEGRAM_ID
+            ABLE_OWNER_USERNAME=$ABLE_OWNER_USERNAME
             NVIDIA_API_KEY=$NVIDIA_API_KEY
             OPENROUTER_API_KEY=$OPENROUTER_API_KEY
             ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
             OLLAMA_API_KEY=$OLLAMA_API_KEY
             OLLAMA_BASE_URL=$OLLAMA_BASE_URL
             OPENAI_API_KEY=$OPENAI_API_KEY
-            ATLAS_TIMEZONE=$ATLAS_TIMEZONE
+            ABLE_TIMEZONE=$ABLE_TIMEZONE
             GITHUB_WEBHOOK_SECRET=$GITHUB_WEBHOOK_SECRET
             NOTION_API_KEY=$NOTION_API_KEY
             NOTION_DATABASE_ID=$NOTION_DATABASE_ID
@@ -83,19 +97,20 @@ jobs:
             STRIPE_SECRET_KEY=$STRIPE_SECRET_KEY
             STRIPE_WEBHOOK_SECRET=$STRIPE_WEBHOOK_SECRET
             STRIPE_CREDITS_PER_USD=100
+            ABLE_SERVICE_TOKEN=$ABLE_SERVICE_TOKEN
             WEBHOOK_PORT=8080
             EOF
-            chown atlas:atlas /home/atlas/.atlas/.env
-            chmod 600 /home/atlas/.atlas/.env
+            chown able:able /home/able/.able/.env
+            chmod 600 /home/able/.able/.env
             echo "✓ .env file updated securely"
 
             echo "=== Deploying OpenAI OAuth token ==="
             if [ -n "$OPENAI_OAUTH_AUTH_JSON" ]; then
-              echo "$OPENAI_OAUTH_AUTH_JSON" > /home/atlas/.atlas/auth.json
-              chown atlas:atlas /home/atlas/.atlas/auth.json
-              chmod 600 /home/atlas/.atlas/auth.json
-              echo "✓ OAuth file written ($(wc -c < /home/atlas/.atlas/auth.json) bytes)"
-              echo "  First 80 chars: $(head -c 80 /home/atlas/.atlas/auth.json)"
+              echo "$OPENAI_OAUTH_AUTH_JSON" > /home/able/.able/auth.json
+              chown able:able /home/able/.able/auth.json
+              chmod 600 /home/able/.able/auth.json
+              echo "✓ OAuth file written ($(wc -c < /home/able/.able/auth.json) bytes)"
+              echo "  First 80 chars: $(head -c 80 /home/able/.able/auth.json)"
             else
               echo "⚠ OPENAI_OAUTH_AUTH_JSON not set — T1/T2 will fall back to Nemotron/MiMo"
             fi
@@ -104,40 +119,33 @@ jobs:
             apt-get update -qq && apt-get install -y -qq python3-venv python3-pip > /dev/null
 
             echo "=== Setting up Python virtual environment ==="
-            if [ ! -d /home/atlas/.atlas/venv ]; then
-              python3 -m venv /home/atlas/.atlas/venv
-              chown -R atlas:atlas /home/atlas/.atlas/venv
+            if [ ! -d /home/able/.able/venv ]; then
+              python3 -m venv /home/able/.able/venv
+              chown -R able:able /home/able/.able/venv
             fi
-            /home/atlas/.atlas/venv/bin/pip install -r /opt/atlas/ABLE/atlas/requirements.txt --quiet --upgrade
-
-            echo "=== Updating ATLAS files ==="
-            rsync -av --delete \
-              --exclude='data/' \
-              --exclude='.secrets/' \
-              --exclude='audit/logs/' \
-              --exclude='clients/transcripts/' \
-              --exclude='__pycache__/' \
-              /opt/atlas/ABLE/atlas/ /home/atlas/.atlas/atlas/
-            rsync -av /opt/atlas/ABLE/config/ /home/atlas/.atlas/config/
-            cp /opt/atlas/ABLE/ATLAS.md /home/atlas/.atlas/ATLAS.md
-            cp /opt/atlas/ABLE/SOUL.md /home/atlas/.atlas/SOUL.md
-            chown -R atlas:atlas /home/atlas/.atlas/
+            /home/able/.able/venv/bin/pip install -r /opt/able/ABLE/able/requirements.txt --quiet --upgrade
+            /home/able/.able/venv/bin/pip install /opt/able/ABLE --quiet --upgrade
+            chown -R able:able /home/able/.able/
 
             echo "=== Updating systemd service ==="
-            cp /opt/atlas/ABLE/atlas/atlas.service /etc/systemd/system/atlas.service
+            cp /opt/able/ABLE/able/able.service /etc/systemd/system/able.service
             systemctl daemon-reload
 
-            echo "=== Restarting ATLAS ==="
-            systemctl restart atlas
+            echo "=== Restarting ABLE ==="
+            systemctl restart able
             sleep 5
 
             echo "=== Verifying ==="
-            systemctl is-active --quiet atlas \
-              && echo "✅ ATLAS is running" \
-              || { echo "❌ ATLAS failed to start"; journalctl -u atlas -n 40 --no-pager; exit 1; }
+            systemctl is-active --quiet able \
+              && echo "✅ ABLE is running" \
+              || { echo "❌ ABLE failed to start"; journalctl -u able -n 40 --no-pager; exit 1; }
+
+            curl -fsS http://127.0.0.1:8080/health >/dev/null \
+              && echo "✅ Health endpoint responding" \
+              || { echo "❌ Health endpoint failed"; journalctl -u able -n 40 --no-pager; exit 1; }
 
             echo "=== Startup logs (last 80 lines) ==="
-            journalctl -u atlas -n 80 --no-pager
+            journalctl -u able -n 80 --no-pager
 
             echo "=== OAuth provider diagnostic ==="
-            sudo -u atlas /home/atlas/.atlas/venv/bin/python3 /opt/atlas/ABLE/scripts/oauth-diagnostic.py 2>&1 || echo "⚠ OAuth diagnostic failed (see output above)"
+            sudo -u able /home/able/.able/venv/bin/python3 /opt/able/ABLE/scripts/oauth-diagnostic.py 2>&1 || echo "⚠ OAuth diagnostic failed (see output above)"

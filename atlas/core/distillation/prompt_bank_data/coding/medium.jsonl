@@ -1,7 +1,0 @@
-{"prompt": "Implement a rate limiter using the token bucket algorithm in Python with async support.", "domain": "coding", "difficulty": "medium", "tags": ["python", "async", "algorithms"]}
-{"prompt": "Write a SQLite migration system that tracks applied migrations and supports rollback.", "domain": "coding", "difficulty": "medium", "tags": ["python", "sqlite", "database"]}
-{"prompt": "Build a CLI tool using argparse that reads a YAML config, validates it against a schema, and outputs JSON.", "domain": "coding", "difficulty": "medium", "tags": ["python", "cli", "yaml"]}
-{"prompt": "Implement an LRU cache from scratch in Python without using functools.lru_cache.", "domain": "coding", "difficulty": "medium", "tags": ["python", "data-structures", "caching"]}
-{"prompt": "Write a Python module that watches a directory for file changes and triggers callbacks on create, modify, and delete events.", "domain": "coding", "difficulty": "medium", "tags": ["python", "filesystem", "events"]}
-{"prompt": "Create an async HTTP client wrapper that handles retries with exponential backoff, timeout, and circuit breaking.", "domain": "coding", "difficulty": "medium", "tags": ["python", "async", "http"]}
-{"prompt": "Implement a simple pub/sub message broker in Python using asyncio queues.", "domain": "coding", "difficulty": "medium", "tags": ["python", "async", "messaging"]}

@@ -35,6 +35,6 @@ billing:
   charge_enabled: false  # Demo mode: track costs but don't bill
 
 data:
-  cross_tenant_training: false  # Isolated from ATLAS core corpus
+  cross_tenant_training: false  # Isolated from ABLE core corpus
 
 status: "active"

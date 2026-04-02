@@ -1,0 +1,254 @@
+"""Local operator chat CLI for ABLE."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import os
+from datetime import datetime, timezone
+from typing import Optional
+
+from able.core.approval.workflow import ApprovalResult, ApprovalStatus, ApprovalWorkflow
+from able.core.gateway.gateway import ABLEGateway
+
+
+class TerminalApprovalWorkflow(ApprovalWorkflow):
+    """Approval workflow that resolves write actions directly in the terminal."""
+
+    def __init__(self, *, auto_approve: bool = False, default_timeout: int = 300):
+        super().__init__(owner_id=0, bot=None, default_timeout=default_timeout)
+        self._auto_approve = auto_approve
+        self._prompt_lock = asyncio.Lock()
+
+    async def request_approval(
+        self,
+        operation: str,
+        details: dict,
+        requester_id: str = "system",
+        client_id: Optional[str] = None,
+        timeout_seconds: Optional[int] = None,
+        risk_level: str = "medium",
+        context: Optional[str] = None,
+    ) -> ApprovalResult:
+        if self._auto_approve:
+            self._record_outcome(operation, ApprovalStatus.APPROVED, "cli-auto-approve")
+            return ApprovalResult(
+                request_id="cli-auto",
+                status=ApprovalStatus.APPROVED,
+                approved_by=0,
+                approved_at=datetime.now(timezone.utc),
+                reason="Approved automatically for this CLI session",
+            )
+
+        async with self._prompt_lock:
+            print("\n[approval]")
+            print(f"operation: {operation}")
+            print(f"risk:      {risk_level}")
+            print(f"requester: {requester_id}")
+            if client_id:
+                print(f"client:    {client_id}")
+            if context:
+                print(f"context:   {context}")
+            print("details:")
+            print(json.dumps(details, indent=2, default=str)[:4000])
+
+            while True:
+                try:
+                    answer = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            input,
+                            "approve? [y]es / [n]o / [a]lways for this session: ",
+                        ),
+                        timeout=timeout_seconds or self.default_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    self._record_outcome(operation, ApprovalStatus.TIMEOUT, "cli-timeout")
+                    return ApprovalResult(
+                        request_id="cli-timeout",
+                        status=ApprovalStatus.TIMEOUT,
+                        reason=f"No response within {timeout_seconds or self.default_timeout}s",
+                    )
+                except (EOFError, KeyboardInterrupt):
+                    self._record_outcome(operation, ApprovalStatus.DENIED, "cli-interrupt")
+                    return ApprovalResult(
+                        request_id="cli-interrupt",
+                        status=ApprovalStatus.DENIED,
+                        approved_by=0,
+                        approved_at=datetime.now(timezone.utc),
+                        reason="Terminal input interrupted",
+                    )
+
+                normalized = answer.strip().lower()
+                if normalized in {"y", "yes"}:
+                    self._record_outcome(operation, ApprovalStatus.APPROVED, "cli-approved")
+                    return ApprovalResult(
+                        request_id="cli-approved",
+                        status=ApprovalStatus.APPROVED,
+                        approved_by=0,
+                        approved_at=datetime.now(timezone.utc),
+                        reason="Approved in local CLI",
+                    )
+                if normalized in {"n", "no"}:
+                    self._record_outcome(operation, ApprovalStatus.DENIED, "cli-denied")
+                    return ApprovalResult(
+                        request_id="cli-denied",
+                        status=ApprovalStatus.DENIED,
+                        approved_by=0,
+                        approved_at=datetime.now(timezone.utc),
+                        reason="Denied in local CLI",
+                    )
+                if normalized in {"a", "all", "always"}:
+                    self._auto_approve = True
+                    self._record_outcome(operation, ApprovalStatus.APPROVED, "cli-always-approved")
+                    return ApprovalResult(
+                        request_id="cli-always",
+                        status=ApprovalStatus.APPROVED,
+                        approved_by=0,
+                        approved_at=datetime.now(timezone.utc),
+                        reason="Approved and auto-approve enabled for the rest of the session",
+                    )
+                print("enter y, n, or a")
+
+
+def configure_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    parser.add_argument(
+        "--session",
+        default=os.environ.get("ABLE_CLI_SESSION", "local-cli"),
+        help="Conversation/session id used for memory, routing logs, and transcripts.",
+    )
+    parser.add_argument(
+        "--client",
+        default=os.environ.get("ABLE_CLI_CLIENT", "master"),
+        help="Client/tenant transcript bucket to use (default: master).",
+    )
+    parser.add_argument(
+        "--control-port",
+        type=int,
+        default=int(os.environ.get("ABLE_CLI_CONTROL_PORT", "8080")),
+        help="Start the local health/control API on this port. Use 0 to disable.",
+    )
+    parser.add_argument(
+        "--auto-approve",
+        action="store_true",
+        help="Approve all write actions for this CLI session.",
+    )
+    return parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="able chat",
+        description="Run a local terminal chat session against the ABLE gateway pipeline.",
+    )
+    return configure_parser(parser)
+
+
+async def run_chat(args: argparse.Namespace) -> int:
+    gateway = ABLEGateway(require_telegram=False)
+    gateway.approval_workflow = TerminalApprovalWorkflow(auto_approve=args.auto_approve)
+
+    if args.control_port:
+        try:
+            await gateway.start_health_server(port=args.control_port)
+        except OSError as exc:
+            print(
+                f"[warn] control plane did not start on :{args.control_port}: {exc}. "
+                "Chat will continue without binding that port."
+            )
+
+    providers = [provider.name for provider in gateway.provider_chain.providers]
+    if not providers:
+        print(
+            "No providers are configured. Set up OpenAI OAuth/API keys or a local Ollama lane "
+            "before using `able chat`."
+        )
+        return 1
+
+    print("ABLE local chat")
+    print(f"session:  {args.session}")
+    print(f"client:   {args.client}")
+    print(f"providers:{' ' if providers else ''}{', '.join(providers)}")
+    if args.control_port:
+        print(f"control:  http://127.0.0.1:{args.control_port}/health")
+    print("commands: /help /status /tools /exit")
+
+    while True:
+        try:
+            raw = await asyncio.to_thread(input, "\nyou> ")
+        except (EOFError, KeyboardInterrupt):
+            print("\nbye")
+            return 0
+
+        message = raw.strip()
+        if not message:
+            continue
+        if message in {"/exit", "/quit"}:
+            print("bye")
+            return 0
+        if message == "/help":
+            print("commands: /help /status /tools /exit")
+            print("all other input goes through the full gateway pipeline.")
+            continue
+        if message == "/tools":
+            for row in gateway.tool_registry.get_catalog():
+                print(
+                    f"- {row['name']} [{row['category']}] "
+                    f"approval={'yes' if row['requires_approval'] else 'no'} "
+                    f"surface={row['surface']}"
+                )
+            continue
+        if message == "/status":
+            session = gateway.session_mgr.get_or_create(args.session) if gateway.session_mgr else None
+            print(json.dumps(
+                {
+                    "session": args.session,
+                    "client": args.client,
+                    "messages": session.messages if session else 0,
+                    "avg_complexity": round(session.avg_complexity, 3) if session else 0.0,
+                    "total_tokens": session.total_tokens if session else 0,
+                    "cost_usd": round(session.cost_usd, 6) if session else 0.0,
+                    "providers": providers,
+                    "tool_count": gateway.tool_registry.tool_count,
+                },
+                indent=2,
+            ))
+            continue
+
+        gateway.transcript_manager.log_message(
+            args.client,
+            {
+                "user_id": args.session,
+                "message": message,
+                "direction": "inbound",
+                "channel": "cli",
+            },
+        )
+
+        response = await gateway.process_message(
+            message=message,
+            user_id=args.session,
+            client_id=args.client,
+            metadata={"source": "cli", "channel": "cli", "is_owner": True},
+        )
+
+        gateway.transcript_manager.log_message(
+            args.client,
+            {
+                "user_id": "able",
+                "message": response,
+                "direction": "outbound",
+                "channel": "cli",
+            },
+        )
+        print(f"\nable> {response}")
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    return asyncio.run(run_chat(args))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

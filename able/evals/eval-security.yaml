@@ -1,0 +1,42 @@
+# Security Skill Eval — 7 tests × 3 providers = 21 API calls
+# Run: cd able/evals && npx promptfoo@latest eval -c eval-security.yaml
+# Updated 2026-03-19: T1=Mini, T2=GPT 5.4, grader=Mini (post-shootout)
+
+description: "ABLE Security Skill — T1 vs T2 vs T4"
+
+providers:
+  - id: openai:chat:openai/gpt-5.4-mini
+    config:
+      apiBaseUrl: https://openrouter.ai/api/v1
+      apiKeyEnvar: OPENROUTER_API_KEY
+      temperature: 0.7
+    label: "T1 (GPT 5.4 Mini)"
+
+  - id: openai:chat:openai/gpt-5.4
+    config:
+      apiBaseUrl: https://openrouter.ai/api/v1
+      apiKeyEnvar: OPENROUTER_API_KEY
+      temperature: 0.7
+    label: "T2 (GPT 5.4)"
+
+  - id: openai:chat:anthropic/claude-sonnet-4.6
+    config:
+      apiBaseUrl: https://openrouter.ai/api/v1
+      apiKeyEnvar: OPENROUTER_API_KEY
+      temperature: 0.7
+    label: "T4 (Sonnet 4.6)"
+
+# Grading provider: Sonnet 4.6 (Mini degrades as grader — respondent ≠ grader quality)
+defaultTest:
+  options:
+    provider:
+      id: openai:chat:anthropic/claude-sonnet-4.6
+      config:
+        apiBaseUrl: https://openrouter.ai/api/v1
+        apiKeyEnvar: OPENROUTER_API_KEY
+
+prompts:
+  - file://prompts/security.txt
+
+tests:
+  - file://tests/security-tests.yaml
