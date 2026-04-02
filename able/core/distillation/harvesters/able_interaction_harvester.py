@@ -45,11 +45,19 @@ class ABLEInteractionHarvester(BaseHarvester):
         try:
             conn = sqlite3.connect(db)
             conn.row_factory = sqlite3.Row
+            columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(interaction_log)").fetchall()
+            }
 
             query = (
                 "SELECT * FROM interaction_log "
                 "WHERE success = 1 AND message_preview != '' "
             )
+            if "corpus_eligible" in columns:
+                query += "AND corpus_eligible = 1 "
+            if "raw_output" in columns:
+                query += "AND raw_output IS NOT NULL AND raw_output != '' "
             params: list = []
             if since:
                 query += "AND timestamp >= ? "
@@ -84,7 +92,8 @@ class ABLEInteractionHarvester(BaseHarvester):
         # Build a minimal user/assistant turn pair from what we have.
         # The interaction log stores a preview of the user message;
         # full raw_input/raw_output may or may not exist as columns.
-        messages: list[dict] = [{"role": "user", "content": preview}]
+        raw_input = row.get("raw_input", "") or preview
+        messages: list[dict] = [{"role": "user", "content": raw_input}]
 
         # If the table has raw columns (added by some deployments), use them.
         raw_output = row.get("raw_output", "")

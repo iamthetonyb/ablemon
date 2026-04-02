@@ -13,12 +13,17 @@ from __future__ import annotations
 
 import json
 import random
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 DOMAINS = ["coding", "security", "reasoning", "creative", "agentic", "tools"]
 DIFFICULTIES = ["easy", "medium", "hard"]
+_DOMAIN_ALIASES = {
+    "code": "coding",
+    "tool": "tools",
+}
 
 
 @dataclass
@@ -76,14 +81,33 @@ class PromptBank:
         for domain_dir in sorted(self.data_dir.iterdir()):
             if not domain_dir.is_dir():
                 continue
-            domain = domain_dir.name
+            jsonl_files = sorted(domain_dir.glob("*.jsonl"))
+            if not jsonl_files:
+                continue
+
+            domain = self._canonicalize_domain(domain_dir.name)
             self._prompts.setdefault(domain, {})
 
-            for jsonl_file in sorted(domain_dir.glob("*.jsonl")):
+            for jsonl_file in jsonl_files:
                 difficulty = jsonl_file.stem
                 entries = self._load_jsonl(jsonl_file)
-                if entries:
-                    self._prompts[domain][difficulty] = entries
+                if not entries:
+                    continue
+                bucket = self._prompts[domain].setdefault(difficulty, [])
+                seen = {self._entry_key(entry) for entry in bucket}
+                for entry in entries:
+                    normalized = PromptEntry(
+                        prompt=entry.prompt.strip(),
+                        domain=self._canonicalize_domain(entry.domain or domain),
+                        difficulty=entry.difficulty,
+                        expected_skills=entry.expected_skills,
+                        tags=entry.tags,
+                    )
+                    key = self._entry_key(normalized)
+                    if key in seen:
+                        continue
+                    bucket.append(normalized)
+                    seen.add(key)
 
     @staticmethod
     def _load_jsonl(path: Path) -> list[PromptEntry]:
@@ -126,16 +150,27 @@ class PromptBank:
 
     def add_prompt(self, prompt: PromptEntry) -> None:
         """Add a new prompt to the bank and persist to JSONL."""
-        self._prompts.setdefault(prompt.domain, {})
-        self._prompts[prompt.domain].setdefault(prompt.difficulty, [])
-        self._prompts[prompt.domain][prompt.difficulty].append(prompt)
+        normalized = PromptEntry(
+            prompt=prompt.prompt.strip(),
+            domain=self._canonicalize_domain(prompt.domain),
+            difficulty=prompt.difficulty,
+            expected_skills=prompt.expected_skills,
+            tags=prompt.tags,
+        )
+        self._prompts.setdefault(normalized.domain, {})
+        self._prompts[normalized.domain].setdefault(normalized.difficulty, [])
+        bucket = self._prompts[normalized.domain][normalized.difficulty]
+        key = self._entry_key(normalized)
+        if any(self._entry_key(existing) == key for existing in bucket):
+            return
+        bucket.append(normalized)
 
         # Persist to disk
-        domain_dir = self.data_dir / prompt.domain
+        domain_dir = self.data_dir / normalized.domain
         domain_dir.mkdir(parents=True, exist_ok=True)
-        jsonl_path = domain_dir / f"{prompt.difficulty}.jsonl"
+        jsonl_path = domain_dir / f"{normalized.difficulty}.jsonl"
         with open(jsonl_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(prompt.to_dict(), ensure_ascii=False) + "\n")
+            f.write(json.dumps(normalized.to_dict(), ensure_ascii=False) + "\n")
 
     def add_from_failures(self, failure_patterns: list[dict]) -> int:
         """Generate prompts from failure patterns. Returns count added.
@@ -174,7 +209,7 @@ class PromptBank:
     ) -> list[PromptEntry]:
         """Collect prompts matching optional filters."""
         results: list[PromptEntry] = []
-        domains = [domain] if domain else list(self._prompts.keys())
+        domains = [self._canonicalize_domain(domain)] if domain else list(self._prompts.keys())
         for d in domains:
             if d not in self._prompts:
                 continue
@@ -184,3 +219,17 @@ class PromptBank:
             for diff in difficulties:
                 results.extend(self._prompts[d].get(diff, []))
         return results
+
+    @staticmethod
+    def _canonicalize_domain(domain: str) -> str:
+        """Normalize domain names so duplicate folders do not fragment coverage."""
+        normalized = re.sub(r"\s+\d+$", "", (domain or "").strip().lower())
+        return _DOMAIN_ALIASES.get(normalized, normalized)
+
+    @staticmethod
+    def _entry_key(entry: PromptEntry) -> tuple[str, str, str]:
+        return (
+            entry.prompt.strip(),
+            entry.domain.strip().lower(),
+            entry.difficulty.strip().lower(),
+        )

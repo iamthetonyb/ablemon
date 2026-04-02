@@ -81,6 +81,31 @@ def test_loads_from_tmp_dir(tmp_bank: PromptBank):
     assert tmp_bank.count() == 4
 
 
+def test_ignores_empty_duplicate_domain_dirs(tmp_path: Path):
+    (tmp_path / "coding").mkdir()
+    (tmp_path / "coding" / "easy.jsonl").write_text(
+        '{"prompt": "Write hello world.", "domain": "coding", "difficulty": "easy"}\n'
+    )
+    (tmp_path / "coding 2").mkdir()
+
+    bank = PromptBank(data_dir=str(tmp_path))
+
+    assert bank.all_domains() == ["coding"]
+
+
+def test_dedupes_duplicate_prompts_on_load(tmp_path: Path):
+    coding_dir = tmp_path / "coding"
+    coding_dir.mkdir()
+    (coding_dir / "medium.jsonl").write_text(
+        '{"prompt": "Handle async errors.", "domain": "coding", "difficulty": "medium"}\n'
+        '{"prompt": "Handle async errors.", "domain": "coding", "difficulty": "medium"}\n'
+    )
+
+    bank = PromptBank(data_dir=str(tmp_path))
+
+    assert bank.count(domain="coding", difficulty="medium") == 1
+
+
 # ═══════════════════════════════════════════════════════════════
 # SAMPLE TESTS
 # ═══════════════════════════════════════════════════════════════
@@ -185,6 +210,18 @@ def test_add_prompt_appends(tmp_bank: PromptBank):
     )
     tmp_bank.add_prompt(entry)
     assert tmp_bank.count(domain="coding", difficulty="easy") == initial + 1
+
+
+def test_add_prompt_skips_duplicate(tmp_bank: PromptBank):
+    initial = tmp_bank.count(domain="coding", difficulty="easy")
+    entry = PromptEntry(
+        prompt="Write hello world.",
+        domain="coding",
+        difficulty="easy",
+        tags=["python"],
+    )
+    tmp_bank.add_prompt(entry)
+    assert tmp_bank.count(domain="coding", difficulty="easy") == initial
 
 
 # ═══════════════════════════════════════════════════════════════

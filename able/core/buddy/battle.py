@@ -31,6 +31,8 @@ BATTLE_DOMAINS = {
     "security": "able/evals/eval-security.yaml",
     "copywriting": "able/evals/eval-copywriting.yaml",
     "code": "able/evals/eval-code-refactoring.yaml",
+    "reasoning": "able/evals/eval-reasoning.yaml",
+    "tools": "able/evals/eval-tools.yaml",
     "enricher": "able/evals/eval-enricher-3way.yaml",
     "shootout": "able/evals/eval-model-shootout.yaml",
 }

@@ -321,6 +321,102 @@ class TestABLEInteractionHarvester:
         results = harvester.harvest()
         assert results == []
 
+    def test_prefers_corpus_eligible_rows_when_available(self, tmp_path):
+        db_path = str(tmp_path / "eligible_log.db")
+        conn = sqlite3.connect(db_path)
+        conn.executescript(
+            """
+            CREATE TABLE interaction_log (
+                id TEXT PRIMARY KEY,
+                timestamp TEXT NOT NULL,
+                message_preview TEXT,
+                complexity_score REAL,
+                selected_tier INTEGER,
+                selected_provider TEXT,
+                domain TEXT,
+                features TEXT,
+                scorer_version INTEGER,
+                budget_gated INTEGER DEFAULT 0,
+                actual_provider TEXT,
+                fallback_used INTEGER DEFAULT 0,
+                fallback_chain TEXT,
+                latency_ms REAL,
+                input_tokens INTEGER DEFAULT 0,
+                output_tokens INTEGER DEFAULT 0,
+                cost_usd REAL DEFAULT 0.0,
+                success INTEGER DEFAULT 1,
+                error_type TEXT,
+                user_correction INTEGER DEFAULT 0,
+                user_satisfaction INTEGER,
+                escalated INTEGER DEFAULT 0,
+                channel TEXT,
+                session_id TEXT,
+                conversation_turn INTEGER DEFAULT 0,
+                corpus_eligible INTEGER DEFAULT 0,
+                raw_input TEXT,
+                raw_output TEXT
+            );
+            """
+        )
+        now = datetime.now().isoformat()
+        rows = [
+            (
+                str(uuid.uuid4()),
+                now,
+                "Preview only user prompt",
+                0.5,
+                2,
+                "openai",
+                "coding",
+                1,
+                "openai",
+                0,
+                "Full raw input question about concurrency",
+                "Full raw output answer about concurrency",
+            ),
+            (
+                str(uuid.uuid4()),
+                now,
+                "Eligible row preview",
+                0.5,
+                2,
+                "openai",
+                "coding",
+                1,
+                "openai",
+                1,
+                "Write a Python function that parses CSV files and returns structured data",
+                "Here is a Python function that reads a CSV file and returns a list of dictionaries",
+            ),
+        ]
+        conn.executemany(
+            """INSERT INTO interaction_log (
+                id, timestamp, message_preview, complexity_score,
+                selected_tier, selected_provider, domain, success, actual_provider,
+                corpus_eligible, raw_input, raw_output
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            rows,
+        )
+        conn.commit()
+        conn.close()
+
+        harvester = ABLEInteractionHarvester(db_path=db_path)
+        results = harvester.harvest()
+
+        assert len(results) == 1
+        assert results[0].messages[0]["content"] == "Write a Python function that parses CSV files and returns structured data"
+        assert results[0].messages[1]["content"] == "Here is a Python function that reads a CSV file and returns a list of dictionaries"
+
+    def test_falls_back_when_corpus_columns_missing(self, tmp_path):
+        db_path = str(tmp_path / "legacy_log.db")
+        self._create_test_db(db_path)
+
+        harvester = ABLEInteractionHarvester(db_path=db_path)
+        results = harvester.harvest()
+
+        assert len(results) == 1
+        assert results[0].messages[0]["content"].startswith("Explain the difference")
+
 
 # ── InboxHarvester ─────────────────────────────────────────────────
 

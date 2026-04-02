@@ -1,0 +1,137 @@
+# Reasoning Domain Eval — 7 tests × 3 providers = 21 API calls
+# Run: cd able/evals && npx promptfoo@latest eval -c eval-reasoning.yaml
+# Purpose: capture T1/T2/T4 reasoning outputs for routing analysis + distillation.
+
+description: "ABLE Reasoning Domain — T1 vs T2 vs T4"
+
+providers:
+  - id: openai:chat:openai/gpt-5.4-mini
+    config:
+      apiBaseUrl: https://openrouter.ai/api/v1
+      apiKeyEnvar: OPENROUTER_API_KEY
+      temperature: 0.2
+    label: "T1 (GPT 5.4 Mini)"
+
+  - id: openai:chat:openai/gpt-5.4
+    config:
+      apiBaseUrl: https://openrouter.ai/api/v1
+      apiKeyEnvar: OPENROUTER_API_KEY
+      temperature: 0.2
+    label: "T2 (GPT 5.4)"
+
+  - id: openai:chat:anthropic/claude-sonnet-4.6
+    config:
+      apiBaseUrl: https://openrouter.ai/api/v1
+      apiKeyEnvar: OPENROUTER_API_KEY
+      temperature: 0.2
+    label: "T4 (Sonnet 4.6)"
+
+defaultTest:
+  options:
+    provider:
+      id: openai:chat:anthropic/claude-sonnet-4.6
+      config:
+        apiBaseUrl: https://openrouter.ai/api/v1
+        apiKeyEnvar: OPENROUTER_API_KEY
+
+prompts:
+  - "{{prompt}}"
+
+tests:
+  - description: "Reasoning: multi-step task decomposition"
+    vars:
+      prompt: "We need to migrate our monolith Rails app to microservices. We have 50k users, 3 developers, and 6 months. What's the plan?"
+    assert:
+      - type: llm-rubric
+        value: >
+          Response decomposes a complex migration into concrete phases with
+          realistic timelines for a 3-person team. Should identify which
+          services to extract first, discuss strangler-fig style migration,
+          address data migration, and flag risks. Generic advice fails.
+
+  - description: "Reasoning: logical deduction from constraints"
+    vars:
+      prompt: >
+        A server has 16GB RAM. Service A needs 4GB, Service B needs 6GB,
+        Service C needs 3GB, and Service D needs 5GB. We can only run 3
+        services at once. Service A requires Service C. Service D cannot
+        run with Service B. Which combination maximizes RAM utilization?
+    assert:
+      - type: llm-rubric
+        value: >
+          Response identifies valid combinations, explains the constraints,
+          and selects {A,C,B} at 13GB. Must show reasoning steps, not only
+          the final answer.
+
+  - description: "Reasoning: tradeoff analysis with competing priorities"
+    vars:
+      prompt: >
+        We can either: (A) ship the new feature this sprint to hit the sales
+        demo deadline, but skip tests, or (B) delay 2 weeks to add proper
+        test coverage. Our last 3 releases had critical bugs in production.
+        What should we do?
+    assert:
+      - type: llm-rubric
+        value: >
+          Response analyzes the tradeoff rather than defaulting to a slogan.
+          It should weigh the sales deadline against the repeated production
+          bug pattern, quantify risk, and either recommend a path with clear
+          reasoning or propose a realistic middle option.
+
+  - description: "Reasoning: root cause analysis from symptoms"
+    vars:
+      prompt: >
+        Our API responds in 50ms normally but spikes to 5 seconds every
+        15 minutes, exactly. Memory usage is stable. CPU spikes correlate
+        with the latency spikes. What's causing this?
+    assert:
+      - type: llm-rubric
+        value: >
+          Response identifies likely periodic causes such as a cron job,
+          scheduled cache rebuild, or other scheduled compute-heavy work.
+          It should use the exact interval and CPU evidence explicitly and
+          recommend diagnostic steps.
+
+  - description: "Reasoning: cost optimization under constraints"
+    vars:
+      prompt: >
+        Our cloud bill is $12,000/month. Breakdown: compute $5,000 (3x
+        c5.2xlarge running 24/7), storage $3,000 (10TB S3), data transfer
+        $2,500, database $1,500 (RDS r5.xlarge). Target: cut to $8,000
+        without degrading performance. Where do you cut?
+    assert:
+      - type: llm-rubric
+        value: >
+          Response provides specific, quantified recommendations by line item
+          and gets credibly close to the $8k target. Generic “use reserved
+          instances” alone is insufficient.
+
+  - description: "Reasoning: system design with failure modes"
+    vars:
+      prompt: "Design a notification system that sends 10 million push notifications per day. What are the failure modes and how do you handle them?"
+    assert:
+      - type: llm-rubric
+        value: >
+          Response covers both architecture and failure modes: provider rate
+          limits, token invalidation, duplicate sends, retry storms, partial
+          batch failures, and dead-letter handling. Must discuss mitigations.
+
+  - description: "Reasoning: dependency-aware task sequencing"
+    vars:
+      prompt: >
+        I need to: (1) update the database schema, (2) deploy the new API
+        version, (3) update the mobile app, (4) run data backfill, (5) update
+        the docs, (6) notify users. Dependencies: schema before API, API
+        before mobile app, backfill after schema but before mobile app.
+        Docs can happen anytime. What's the optimal execution order and
+        what can run in parallel?
+    assert:
+      - type: llm-rubric
+        value: >
+          Response correctly identifies the dependency graph, sequencing, and
+          parallelizable work. It should mark docs as parallelizable and show
+          a clear critical path rather than restating the prompt.
+
+_meta:
+  domain: reasoning
+  purpose: "routing+distillation"
