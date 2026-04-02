@@ -10,7 +10,7 @@ import os
 import base64
 import hmac
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Union
+from typing import AsyncIterator, Dict, List, Optional, Union
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -1100,6 +1100,175 @@ class ABLEGateway:
                 except Exception as dump_e:
                     pass
             return f"⚠️ AI error ({type(e).__name__}): {e}"
+
+    async def stream_message(
+        self,
+        message: str,
+        user_id: str,
+        client_id: Optional[str] = None,
+        metadata: Dict = None,
+    ) -> AsyncIterator[str]:
+        """
+        Streaming variant of process_message for CLI/interactive use.
+
+        Runs the full pipeline (scanner → auditor → enricher → scorer),
+        then streams the AI response token-by-token.  Does NOT support
+        multi-turn tool dispatch — use process_message for that.
+
+        Yields string chunks as they arrive from the provider.
+        """
+        import time as _time
+        _pipeline_start = _time.monotonic()
+
+        _channel = (metadata or {}).get("channel", "cli")
+
+        # Step 1: Scanner
+        scan_result = await self.scanner.process(message, metadata or {})
+        if not scan_result["security_verdict"]["passed"]:
+            yield f"⚠️ Security check failed: {scan_result['blocked_reason']}"
+            return
+
+        # Step 2: Auditor
+        audit_result = await self.auditor.process(scan_result)
+        if not audit_result["approved_for_executor"]:
+            yield f"⚠️ Audit failed: {'; '.join(audit_result['notes'])}"
+            return
+
+        # Step 2.5: Enrichment
+        enriched_text = message
+        enrichment_result = None
+        if self.prompt_enricher:
+            try:
+                _memory_ctx = None
+                if hasattr(self, 'memory') and self.memory and hasattr(self, '_enricher_memory_cache'):
+                    _memory_ctx = self._enricher_memory_cache
+                enrichment_result = self.prompt_enricher.enrich(message, memory_context=_memory_ctx)
+                if enrichment_result.enrichment_level != "none":
+                    enriched_text = enrichment_result.enriched
+            except Exception:
+                pass
+
+        # Step 3: Score & route
+        scoring_result = None
+        selected_chain = self.provider_chain
+        if self.complexity_scorer:
+            try:
+                scoring_result = self.complexity_scorer.score_and_route(enriched_text)
+                tier = scoring_result.selected_tier
+                if tier in self.tier_chains and self.tier_chains[tier].providers:
+                    selected_chain = self.tier_chains[tier]
+            except Exception:
+                pass
+
+        # Pre-log interaction
+        interaction_id = None
+        if self.interaction_logger and scoring_result:
+            import json as _json
+            try:
+                record = InteractionRecord(
+                    message_preview=message[:200],
+                    complexity_score=scoring_result.score,
+                    selected_tier=scoring_result.selected_tier,
+                    selected_provider=scoring_result.selected_provider or (
+                        selected_chain.providers[0].name if selected_chain.providers else ""
+                    ),
+                    domain=scoring_result.domain,
+                    features=_json.dumps(scoring_result.features),
+                    scorer_version=scoring_result.scorer_version,
+                    budget_gated=scoring_result.budget_gated,
+                    channel=_channel,
+                    session_id=user_id,
+                )
+                interaction_id = self.interaction_logger.log(record)
+            except Exception:
+                pass
+
+        # Build message array
+        active_system_prompt = ABLE_SYSTEM_PROMPT
+        if hasattr(self, 'memory') and self.memory:
+            try:
+                recalled_context = self.memory.get_context_for_agent(
+                    objective=message, client_id=client_id
+                )
+                if recalled_context:
+                    active_system_prompt += f"\n\n## Recalled Context from Hybrid Memory\n{recalled_context}"
+            except Exception:
+                pass
+
+        msgs = [Message(role=Role.SYSTEM, content=active_system_prompt)]
+
+        target_id = client_id or "master"
+        history = self.transcript_manager.get_recent_messages(target_id, limit=20)
+        history.reverse()
+        for log in history:
+            if log.get("direction") == "inbound" and log.get("message") == message:
+                continue
+            log_msg = log.get("message")
+            if isinstance(log_msg, str):
+                role = Role.USER if log.get("direction") == "inbound" else Role.ASSISTANT
+                msgs.append(Message(role=role, content=log_msg))
+
+        msgs.append(Message(role=Role.USER, content=enriched_text))
+
+        # Stream the AI response
+        accumulated = []
+        try:
+            async for chunk in selected_chain.stream(
+                msgs, max_tokens=16384, temperature=0.60
+            ):
+                accumulated.append(chunk)
+                yield chunk
+        except Exception as e:
+            logger.warning(f"Streaming failed, falling back to complete(): {e}")
+            try:
+                result = await selected_chain.complete(
+                    msgs, max_tokens=16384, temperature=0.60, top_p=0.95
+                )
+                yield result.content or "⚠️ No response generated."
+                accumulated = [result.content or ""]
+            except Exception as e2:
+                yield f"⚠️ AI error: {e2}"
+                return
+
+        full_response = "".join(accumulated)
+
+        # Post-processing: interaction log update
+        _total_ms = (_time.monotonic() - _pipeline_start) * 1000
+        if self.interaction_logger and interaction_id:
+            try:
+                self.interaction_logger.update_result(
+                    interaction_id,
+                    actual_provider=selected_chain.providers[0].name if selected_chain.providers else "",
+                    success=True,
+                    latency_ms=_total_ms,
+                )
+            except Exception:
+                pass
+
+        # Session tracking
+        if self.session_mgr:
+            try:
+                self.session_mgr.update(
+                    user_id,
+                    complexity=scoring_result.score if scoring_result else 0.5,
+                    tokens=len(full_response.split()) * 2,
+                    cost_usd=0.0,
+                )
+            except Exception:
+                pass
+
+        # Buddy XP (system-wide)
+        try:
+            from able.core.buddy.xp import award_interaction_xp
+            _complexity = scoring_result.score if scoring_result else 0.5
+            _domain = scoring_result.domain if scoring_result else "default"
+            award_interaction_xp(
+                complexity_score=_complexity,
+                used_tools=False,
+                domain=_domain,
+            )
+        except Exception:
+            pass
 
     @staticmethod
     def _resolve_channel(update: Optional[Update], metadata: Optional[Dict]) -> str:

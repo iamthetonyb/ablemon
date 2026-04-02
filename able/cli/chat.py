@@ -42,16 +42,34 @@ class TerminalApprovalWorkflow(ApprovalWorkflow):
             )
 
         async with self._prompt_lock:
-            print("\n[approval]")
-            print(f"operation: {operation}")
-            print(f"risk:      {risk_level}")
-            print(f"requester: {requester_id}")
+            risk_icon = {"low": "\u2714", "medium": "\u26a0", "high": "\u26d4", "critical": "\u2622"}.get(
+                risk_level, "\u2022"
+            )
+            risk_bar = {"low": "\u2591\u2591\u2591\u2591", "medium": "\u2593\u2593\u2591\u2591", "high": "\u2588\u2593\u2591\u2591", "critical": "\u2588\u2588\u2588\u2588"}.get(
+                risk_level, "\u2591\u2591\u2591\u2591"
+            )
+            print(f"\n{'=' * 48}")
+            print(f"  {risk_icon} APPROVAL REQUEST  [{risk_bar}] {risk_level.upper()}")
+            print(f"{'=' * 48}")
+            print(f"  Operation:  {operation}")
+            print(f"  Requester:  {requester_id}")
             if client_id:
-                print(f"client:    {client_id}")
+                print(f"  Client:     {client_id}")
             if context:
-                print(f"context:   {context}")
-            print("details:")
-            print(json.dumps(details, indent=2, default=str)[:4000])
+                print(f"  Context:    {context}")
+            # Show affected resources from details
+            affected = []
+            for key in ("resource", "target", "file", "path", "url", "repo"):
+                if key in details:
+                    affected.append(f"{key}={details[key]}")
+            if affected:
+                print(f"  Affects:    {', '.join(affected)}")
+            print(f"{'─' * 48}")
+            details_str = json.dumps(details, indent=2, default=str)
+            if len(details_str) > 2000:
+                details_str = details_str[:2000] + "\n  ... (truncated)"
+            print(details_str)
+            print(f"{'─' * 48}")
 
             while True:
                 try:
@@ -132,6 +150,11 @@ def configure_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser
         "--auto-approve",
         action="store_true",
         help="Approve all write actions for this CLI session.",
+    )
+    parser.add_argument(
+        "--no-stream",
+        action="store_true",
+        help="Disable streaming output (wait for full response before displaying).",
     )
     return parser
 
@@ -371,12 +394,41 @@ async def run_chat(args: argparse.Namespace) -> int:
             },
         )
 
-        response = await gateway.process_message(
-            message=message,
-            user_id=args.session,
-            client_id=args.client,
-            metadata={"source": "cli", "channel": "cli", "is_owner": True},
-        )
+        # Stream response token-by-token when possible
+        if not args.no_stream:
+            import sys
+            response_parts = []
+            print("\nable> ", end="", flush=True)
+            try:
+                async for chunk in gateway.stream_message(
+                    message=message,
+                    user_id=args.session,
+                    client_id=args.client,
+                    metadata={"source": "cli", "channel": "cli", "is_owner": True},
+                ):
+                    sys.stdout.write(chunk)
+                    sys.stdout.flush()
+                    response_parts.append(chunk)
+                response = "".join(response_parts)
+                print()  # Newline after streaming
+            except Exception:
+                # Fallback to non-streaming if stream_message fails
+                print("", end="\r")
+                response = await gateway.process_message(
+                    message=message,
+                    user_id=args.session,
+                    client_id=args.client,
+                    metadata={"source": "cli", "channel": "cli", "is_owner": True},
+                )
+                print(f"able> {response}")
+        else:
+            response = await gateway.process_message(
+                message=message,
+                user_id=args.session,
+                client_id=args.client,
+                metadata={"source": "cli", "channel": "cli", "is_owner": True},
+            )
+            print(f"\nable> {response}")
 
         gateway.transcript_manager.log_message(
             args.client,
@@ -387,7 +439,6 @@ async def run_chat(args: argparse.Namespace) -> int:
                 "channel": "cli",
             },
         )
-        print(f"\nable> {response}")
 
         # ── Check for buddy level-up (XP awarded in gateway) ──
         try:

@@ -34,13 +34,14 @@ python scripts/able-auth.py
 able chat
 ```
 
-`able chat` is the local operator interface. It runs the same gateway pipeline used by the service, keeps a persistent session id, prompts in-terminal for write approvals, and tries to expose the local control API on `http://127.0.0.1:8080` unless you pass `--control-port 0`.
+`able chat` is the local operator interface. It runs the same gateway pipeline used by the service, keeps a persistent session id, prompts in-terminal for write approvals, and streams AI responses token-by-token. Exposes the local control API on `http://127.0.0.1:8080` unless you pass `--control-port 0`.
 
 Useful local commands:
 
 ```bash
-able chat
+able chat                                       # Default — streaming enabled
 able chat --session showcase --client master
+able chat --no-stream                           # Disable streaming (wait for full response)
 able chat --control-port 0
 able serve
 ```
@@ -52,7 +53,9 @@ Inside `able chat`, these local commands are handled without going through the m
 - `/tools`
 - `/resources` — control plane resource inventory
 - `/eval` — distillation corpus progress and pair counts
-- `/evolve` — trigger a single evolution cycle on demand
+- `/evolve` — trigger a single evolution cycle (waters your buddy)
+- `/buddy` — show your buddy's stats, needs, and mood
+- `/battle <domain>` — run an eval-based battle (feeds your buddy)
 - `/exit`
 
 `able` with no subcommand still starts the packaged service path. `able serve` is the explicit version of that same behavior.
