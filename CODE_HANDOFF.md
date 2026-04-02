@@ -183,6 +183,6 @@ Claude should return:
   - `do not merge`
 - a short post-merge improvement list
 
-## Compatibility
+## Canonical Use
 
-`CLAUDE_HANDOFF.md` now exists as a compatibility pointer. Keep this file canonical going forward so the prompt surface stays stable.
+Use `CODE_HANDOFF.md` directly going forward. There is no second handoff file to reconcile.
