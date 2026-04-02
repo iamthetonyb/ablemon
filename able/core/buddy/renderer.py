@@ -13,6 +13,7 @@ from .model import (
     SPECIES_META,
     STAGE_NAMES,
     EVOLUTION_REQUIREMENTS,
+    LEGENDARY_REQUIREMENTS,
     Stage,
 )
 
@@ -38,14 +39,15 @@ def _need_bar(value: float, width: int = 8) -> str:
 def render_banner(buddy: BuddyState) -> str:
     """Compact one-line buddy banner for the chat startup."""
     meta = buddy.meta
-    emoji = meta["emoji"]
+    emoji = buddy.display_emoji
     label = meta["label"]
     stage_name = STAGE_NAMES[buddy.stage_enum]
     bar = _progress_bar(buddy.xp_progress_pct, 10)
     needs = buddy.get_needs()
     mood_icon = {"thriving": "\u2728", "content": "\u2714", "hungry": "\u26a0", "neglected": "\u2757"}.get(needs.mood, "\u2022")
+    rarity = f" [{buddy.rarity_label}]" if buddy.rarity_label != "Standard" else ""
     return (
-        f"  {emoji} {buddy.name} the {label}  "
+        f"  {emoji} {buddy.name} the {label}{rarity}  "
         f"Lv.{buddy.level}  {bar}  "
         f"Stage: {stage_name}  "
         f"W:{buddy.battles_won} D:{buddy.battles_drawn} L:{buddy.battles_lost}  "
@@ -56,7 +58,7 @@ def render_banner(buddy: BuddyState) -> str:
 def render_full(buddy: BuddyState, stats: BuddyStats | None = None) -> str:
     """Full buddy display for /buddy command."""
     meta = buddy.meta
-    emoji = meta["emoji"]
+    emoji = buddy.display_emoji
     stage_name = STAGE_NAMES[buddy.stage_enum]
     art_key = f"art_stage{buddy.stage}"
     art_lines = meta.get(art_key, meta["art_stage1"])
@@ -77,12 +79,18 @@ def render_full(buddy: BuddyState, stats: BuddyStats | None = None) -> str:
         f"{buddy.xp} XP  ({buddy.xp_to_next} to next)"
     )
     lines.append(f"  Stage: {stage_name}  ({buddy.stage_enum.value}/3)")
+    lines.append(f"  Rarity: {buddy.rarity_label}")
+    if buddy.is_legendary:
+        lines.append(f"  Legendary form: {buddy.legendary_title}")
 
     # Evolution progress
     next_stage = Stage(min(buddy.stage + 1, 3))
     if next_stage != buddy.stage_enum:
         reqs = EVOLUTION_REQUIREMENTS[next_stage]
         lines.append(f"  Next evolution: {reqs['description']}")
+    elif not buddy.is_legendary:
+        lines.append("  Legendary path: earned from sustained system performance.")
+        lines.append(f"  Need: {buddy.best_battle_streak}/3 streak | {LEGENDARY_REQUIREMENTS['description']}")
 
     lines.append(f"{'─' * 42}")
     lines.append(
@@ -93,6 +101,10 @@ def render_full(buddy: BuddyState, stats: BuddyStats | None = None) -> str:
         f"  Eval passes: {buddy.eval_passes}  "
         f"| Distillation pairs: {buddy.distillation_pairs}  "
         f"| Evo deploys: {buddy.evolution_deploys}"
+    )
+    lines.append(
+        f"  Battle streak: {buddy.current_battle_streak} current  "
+        f"| Best streak: {buddy.best_battle_streak}"
     )
 
     # Needs / Tamagotchi layer
@@ -117,11 +129,11 @@ def render_full(buddy: BuddyState, stats: BuddyStats | None = None) -> str:
     return "\n".join(lines)
 
 
-def render_evolution(buddy: BuddyState, new_stage: Stage) -> str:
+def render_evolution(buddy: BuddyState, from_stage: Stage, new_stage: Stage) -> str:
     """Dramatic evolution announcement."""
     meta = buddy.meta
-    emoji = meta["emoji"]
-    old_name = STAGE_NAMES[buddy.stage_enum]
+    emoji = buddy.display_emoji
+    old_name = STAGE_NAMES[from_stage]
     new_name = STAGE_NAMES[new_stage]
     art_key = f"art_stage{new_stage.value}"
     art_lines = meta.get(art_key, [])
@@ -137,6 +149,19 @@ def render_evolution(buddy: BuddyState, new_stage: Stage) -> str:
         lines.append(f"           {art_line}")
     lines.append("")
     lines.append(f"  {buddy.name} reached Stage {new_stage.value}!")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def render_legendary_unlock(buddy: BuddyState) -> str:
+    """Announcement when the buddy reaches its legendary form."""
+    lines = []
+    lines.append("")
+    lines.append(f"  {'=' * 42}")
+    lines.append(f"  \U0001f451 {buddy.name} awakened its legendary form!")
+    lines.append(f"  Title: {buddy.legendary_title}")
+    lines.append(f"  Rarity: {buddy.rarity_label}")
+    lines.append(f"  {'=' * 42}")
     lines.append("")
     return "\n".join(lines)
 
@@ -195,4 +220,5 @@ def render_starter_selection() -> str:
         lines.append("")
 
     lines.append(f"{'=' * 50}")
+    lines.append("  Rare hatch chance: some starters emerge as Shiny variants.")
     return "\n".join(lines)

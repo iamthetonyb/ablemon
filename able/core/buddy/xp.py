@@ -68,6 +68,7 @@ def award_interaction_xp(
     # Check evolution
     new_stage = buddy.check_evolution()
     leveled_up = buddy.level > old_level
+    legendary_title = buddy.unlock_legendary()
 
     save_buddy(buddy)
 
@@ -79,10 +80,17 @@ def award_interaction_xp(
 
     if new_stage:
         buddy.evolve(new_stage)
+        if not legendary_title:
+            legendary_title = buddy.unlock_legendary()
         save_buddy(buddy)
         logger.info(
             "Buddy %s EVOLVED to stage %d (%s)!",
             buddy.name, new_stage.value, new_stage.name,
+        )
+    if legendary_title:
+        logger.info(
+            "Buddy %s unlocked legendary form: %s",
+            buddy.name, legendary_title,
         )
 
     return xp
@@ -97,8 +105,11 @@ def award_evolution_deploy_xp() -> Optional[int]:
     buddy.evolution_deploys += 1
     xp = 30  # Meaningful — the system improved itself
     buddy.award_xp(xp)
+    legendary_title = buddy.unlock_legendary()
     save_buddy(buddy)
     logger.info("Buddy %s gained %d XP from evolution deploy", buddy.name, xp)
+    if legendary_title:
+        logger.info("Buddy %s unlocked legendary form: %s", buddy.name, legendary_title)
     return xp
 
 
@@ -111,6 +122,9 @@ def award_distillation_xp(new_pairs: int = 0) -> Optional[int]:
     buddy.distillation_pairs += new_pairs
     xp = new_pairs * 3  # Each pair is valuable — it's training data
     buddy.award_xp(xp)
+    legendary_title = buddy.unlock_legendary()
     save_buddy(buddy)
     logger.info("Buddy %s gained %d XP from %d new pairs", buddy.name, xp, new_pairs)
+    if legendary_title:
+        logger.info("Buddy %s unlocked legendary form: %s", buddy.name, legendary_title)
     return xp

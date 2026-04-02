@@ -166,10 +166,10 @@ async def run_chat(args: argparse.Namespace) -> int:
         return 1
 
     # ── Buddy system ──────────────────────────────────────────────
-    from able.core.buddy.model import load_buddy, save_buddy, BuddyState, Species, SPECIES_META
+    from able.core.buddy.model import load_buddy, save_buddy, Species, create_starter_buddy
     from able.core.buddy.renderer import (
         render_banner, render_full, render_starter_selection,
-        render_battle_result, render_evolution,
+        render_battle_result, render_evolution, render_legendary_unlock,
     )
 
     buddy = load_buddy()
@@ -190,24 +190,24 @@ async def run_chat(args: argparse.Namespace) -> int:
         while not name:
             name = (await asyncio.to_thread(input, "Name your buddy: ")).strip()
         phrase = (await asyncio.to_thread(input, "Catch phrase (or enter to skip): ")).strip()
-        buddy = BuddyState(
+        buddy = create_starter_buddy(
             name=name,
-            species=chosen.value,
-            stage=1,
-            xp=0,
-            catch_phrase=phrase or SPECIES_META[chosen]["desc"],
+            species=chosen,
+            catch_phrase=phrase,
             created_at=datetime.now(timezone.utc).isoformat(),
         )
         save_buddy(buddy)
-        print(f"\n  {SPECIES_META[chosen]['emoji']} {name} the {SPECIES_META[chosen]['label']} joins you!")
+        print(f"\n  {buddy.display_emoji} {name} the {buddy.meta['label']} joins you!")
         print(f"  \"{buddy.catch_phrase}\"\n")
+        if buddy.is_shiny:
+            print("  ✨ rare hatch: shiny variant unlocked\n")
 
     # Apply needs decay since last session
     mood = buddy.apply_needs_decay()
     save_buddy(buddy)
     if mood in ("hungry", "neglected"):
         needs = buddy.get_needs()
-        print(f"\n  {buddy.meta['emoji']} {buddy.name}: \"{needs.mood_message}\"")
+        print(f"\n  {buddy.display_emoji} {buddy.name}: \"{needs.mood_message}\"")
 
     print("ABLE local chat")
     print(render_banner(buddy))
@@ -296,7 +296,7 @@ async def run_chat(args: argparse.Namespace) -> int:
                     if buddy:
                         restored = buddy.water("evolve")
                         if restored > 0:
-                            print(f"  {buddy.meta['emoji']} watered! Thirst +{restored:.0f}")
+                            print(f"  {buddy.display_emoji} watered! Thirst +{restored:.0f}")
                         save_buddy(buddy)
                 except Exception as e:
                     print(f"  cycle error: {e}")
@@ -332,22 +332,29 @@ async def run_chat(args: argparse.Namespace) -> int:
             dry_run = "--dry-run" in args_str
             domain = args_str.replace("--dry-run", "").strip()
 
-            print(f"  {buddy.meta['emoji']} {buddy.name} enters battle: {domain}...")
+            print(f"  {buddy.display_emoji} {buddy.name} enters battle: {domain}...")
             record = run_battle(buddy, domain, dry_run=dry_run)
             if record is None:
                 print(f"  no eval config for domain '{domain}'")
                 continue
 
+            was_legendary = buddy.legendary_title
             buddy.record_battle(record)
             # Battle feeds the buddy (evals = food)
             restored = buddy.feed("battle")
             if restored > 0:
-                print(f"  {buddy.meta['emoji']} fed! Hunger +{restored:.0f}")
+                print(f"  {buddy.display_emoji} fed! Hunger +{restored:.0f}")
             # Check for evolution after battle
             new_stage = buddy.check_evolution()
             if new_stage:
+                previous_stage = buddy.stage_enum
                 buddy.evolve(new_stage)
-                print(render_evolution(buddy, new_stage))
+                legendary_title = buddy.unlock_legendary()
+                print(render_evolution(buddy, previous_stage, new_stage))
+                if legendary_title:
+                    print(render_legendary_unlock(buddy))
+            elif not was_legendary and buddy.legendary_title:
+                print(render_legendary_unlock(buddy))
             save_buddy(buddy)
 
             print(render_battle_result(buddy, record.domain, record.passed, record.total, record.result, record.xp_earned))
@@ -385,13 +392,22 @@ async def run_chat(args: argparse.Namespace) -> int:
         # ── Check for buddy level-up (XP awarded in gateway) ──
         try:
             new_buddy = load_buddy()
+            old_legendary = buddy.legendary_title if buddy else ""
+            showed_legendary = False
             if new_buddy and buddy and new_buddy.level > buddy.level:
-                print(f"  {new_buddy.meta['emoji']} {new_buddy.name} leveled up to {new_buddy.level}!")
+                print(f"  {new_buddy.display_emoji} {new_buddy.name} leveled up to {new_buddy.level}!")
                 new_stage = new_buddy.check_evolution()
                 if new_stage:
+                    previous_stage = new_buddy.stage_enum
                     new_buddy.evolve(new_stage)
+                    legendary_title = new_buddy.unlock_legendary()
                     save_buddy(new_buddy)
-                    print(render_evolution(new_buddy, new_stage))
+                    print(render_evolution(new_buddy, previous_stage, new_stage))
+                    if legendary_title:
+                        print(render_legendary_unlock(new_buddy))
+                        showed_legendary = True
+            if new_buddy and not showed_legendary and not old_legendary and new_buddy.legendary_title:
+                print(render_legendary_unlock(new_buddy))
             buddy = new_buddy or buddy
         except Exception:
             pass  # Buddy system is optional — never block chat

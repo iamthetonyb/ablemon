@@ -31,7 +31,7 @@ def check_nudge() -> Optional[str]:
     save_buddy(buddy)
 
     needs = buddy.get_needs()
-    emoji = buddy.meta["emoji"]
+    emoji = buddy.display_emoji
     name = buddy.name
     nudges = []
 
@@ -71,6 +71,6 @@ def get_status_line(buddy: Optional[BuddyState] = None) -> str:
     if needs.mood == "thriving":
         return ""
 
-    emoji = buddy.meta["emoji"]
+    emoji = buddy.display_emoji
     mood_msg = needs.mood_message
     return f"\n{emoji} {buddy.name}: {mood_msg}"
