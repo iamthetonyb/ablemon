@@ -102,7 +102,7 @@ def _enable_line_editing() -> None:
         readline.set_history_length(1000)
         doc = (readline.__doc__ or "").lower()
         if "libedit" in doc:
-            readline.parse_and_bind("bind ^I rl_insert")
+            readline.parse_and_bind("bind ^I ed-insert")
         else:
             readline.parse_and_bind("tab: self-insert")
         atexit.register(_save_readline_history)
