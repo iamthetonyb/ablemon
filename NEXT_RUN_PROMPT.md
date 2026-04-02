@@ -157,6 +157,7 @@ All four learning feedback loops are closed and tested:
 - 27B: H100 preferred → A100 (40GB+) → L4 (24GB, seq=2048, batch=1). Does NOT fit T4 (16GB)
 - GPU fallback chain: `GPU_FALLBACK_CHAINS` in model_configs — auto-resolves next GPU when budget exhausted
 - CPU-first: all harvesting, scrubbing, federation sync, corpus build run on CPU. GPU only for training step
+- MLX local training: `export_mlx_training_script()` generates shell scripts for Apple Silicon LoRA fine-tuning (mlx_lm.lora → fuse → llama.cpp GGUF → Ollama). 9B fits 32GB+ Macs, 27B needs 64GB+.
 - Notebooks auto-install Unsloth, load ChatML corpus, train with SFTTrainer, export GGUF, generate Modelfile
 - Training stats JSON for federation metrics tracking
 

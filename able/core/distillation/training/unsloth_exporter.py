@@ -470,6 +470,168 @@ print(f"Create Ollama model: ollama create {model_name} -f Modelfile")
         logger.info("Generated training script: %s", filepath)
         return filepath
 
+    def export_mlx_training_script(
+        self,
+        model_name: str,
+        corpus_path: str,
+        output_path: Optional[str] = None,
+        iters: int = 600,
+        batch_size: int = 1,
+        num_layers: int = 8,
+    ) -> Path:
+        """Generate a local MLX LoRA training script for Apple Silicon.
+
+        MLX fine-tuning runs entirely on-device using unified memory.
+        The 9B model at 4-bit fits comfortably on 36GB Macs. 27B is too
+        large for most Apple Silicon configs (needs ~40GB+ for 4-bit QLoRA).
+
+        The generated script:
+        1. Trains a LoRA adapter via ``mlx_lm.lora``
+        2. Fuses the adapter into the base model
+        3. Converts to GGUF via llama.cpp for Ollama import
+
+        Args:
+            model_name: Key from MODEL_REGISTRY.
+            corpus_path: Path to training JSONL (ChatML messages format).
+            output_path: Directory for the generated script.
+            iters: Training iterations (default 600).
+            batch_size: Per-device batch size (1 for 32GB, 2 for 64GB+).
+            num_layers: Number of layers to fine-tune (fewer = less memory).
+        """
+        config = MODEL_REGISTRY.get(model_name)
+        if not config:
+            raise ValueError(f"Unknown model: {model_name}")
+
+        lora = _UNSLOTH_LORA_DEFAULTS.get(model_name, _UNSLOTH_LORA_DEFAULTS["able-nano-9b"])
+
+        # MLX expects a 4-bit quantized model ID or local path
+        mlx_model = f"{config.base_model}-4bit"
+
+        script = f'''#!/usr/bin/env bash
+# ABLE Distillation — Local MLX LoRA Fine-Tuning
+# Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}
+# Model: {config.base_model} ({config.role})
+# Runtime: Apple Silicon MLX (unified memory)
+#
+# Requirements:
+#   pip install "mlx-lm[train]"
+#   The corpus must be ChatML JSONL with "messages" field.
+#
+# Memory: 9B 4-bit needs ~8-10GB for training. 36GB Mac = comfortable.
+#         27B 4-bit needs ~20-24GB — only for 64GB+ Macs.
+
+set -euo pipefail
+
+MODEL="{mlx_model}"
+CORPUS_DIR="$(dirname "{corpus_path}")"
+ADAPTER_DIR="adapters/{model_name}"
+FUSED_DIR="fused/{model_name}"
+GGUF_DIR="gguf/{model_name}"
+
+echo "══════════════════════════════════════════════════════════"
+echo "  ABLE MLX LoRA Training: {config.base_model}"
+echo "  Corpus: {corpus_path}"
+echo "  Iterations: {iters} | Batch: {batch_size} | Layers: {num_layers}"
+echo "══════════════════════════════════════════════════════════"
+
+# ── Step 1: Install dependencies ──────────────────────────────
+pip install -q "mlx-lm[train]" 2>/dev/null || true
+
+# ── Step 2: Train LoRA adapter ────────────────────────────────
+echo ""
+echo "▸ Training LoRA adapter..."
+python3 -m mlx_lm.lora \\
+    --model "$MODEL" \\
+    --train \\
+    --data "$CORPUS_DIR" \\
+    --adapter-path "$ADAPTER_DIR" \\
+    --batch-size {batch_size} \\
+    --num-layers {num_layers} \\
+    --lora-rank {lora["r"]} \\
+    --iters {iters} \\
+    --grad-checkpoint \\
+    --mask-prompt
+
+echo "▸ Adapter saved to $ADAPTER_DIR"
+
+# ── Step 3: Evaluate (optional) ──────────────────────────────
+if [ -f "$CORPUS_DIR/valid.jsonl" ]; then
+    echo ""
+    echo "▸ Evaluating on validation set..."
+    python3 -m mlx_lm.lora \\
+        --model "$MODEL" \\
+        --adapter-path "$ADAPTER_DIR" \\
+        --data "$CORPUS_DIR" \\
+        --test
+fi
+
+# ── Step 4: Fuse adapter into base model ─────────────────────
+echo ""
+echo "▸ Fusing adapter..."
+python3 -m mlx_lm.fuse \\
+    --model "$MODEL" \\
+    --adapter-path "$ADAPTER_DIR" \\
+    --save-path "$FUSED_DIR"
+
+echo "▸ Fused model at $FUSED_DIR"
+
+# ── Step 5: Convert to GGUF for Ollama ───────────────────────
+# Qwen is not in mlx-lm's native GGUF exporter, so we use llama.cpp.
+echo ""
+echo "▸ Converting to GGUF..."
+mkdir -p "$GGUF_DIR"
+
+if command -v python3 -c "import llama_cpp" &>/dev/null || [ -d "llama.cpp" ]; then
+    # If llama.cpp is available locally
+    python3 llama.cpp/convert_hf_to_gguf.py "$FUSED_DIR" \\
+        --outfile "$GGUF_DIR/{model_name}-f16.gguf" \\
+        --outtype f16
+    echo "▸ GGUF exported: $GGUF_DIR/{model_name}-f16.gguf"
+    echo ""
+    echo "  To quantize further:"
+    echo "    llama.cpp/llama-quantize $GGUF_DIR/{model_name}-f16.gguf $GGUF_DIR/{model_name}-q4_k_m.gguf q4_k_m"
+else
+    echo "▸ llama.cpp not found. Clone it for GGUF conversion:"
+    echo "    git clone https://github.com/ggml-org/llama.cpp"
+    echo "    pip install -r llama.cpp/requirements.txt"
+    echo "    python3 llama.cpp/convert_hf_to_gguf.py $FUSED_DIR --outfile $GGUF_DIR/{model_name}-f16.gguf --outtype f16"
+fi
+
+# ── Step 6: Register in Ollama ───────────────────────────────
+echo ""
+echo "▸ To deploy in Ollama:"
+echo "    cat > Modelfile <<MODELFILE"
+echo "FROM ./$GGUF_DIR/{model_name}-q4_k_m.gguf"
+echo "TEMPLATE \\"{{{{- if .System }}}}<|im_start|>system"
+echo "{{{{ .System }}}}<|im_end|>"
+echo "{{{{- end }}}}<|im_start|>user"
+echo "{{{{ .Prompt }}}}<|im_end|>"
+echo "<|im_start|>assistant"
+echo "{{{{ .Response }}}}<|im_end|>\\""
+echo "PARAMETER temperature 0.7"
+echo "PARAMETER stop \\"<|im_end|>\\""
+echo "SYSTEM You are ABLE, an autonomous AI agent."
+echo "MODELFILE"
+echo ""
+echo "    ollama create {model_name}-mlx -f Modelfile"
+echo "    ollama run {model_name}-mlx"
+
+echo ""
+echo "══════════════════════════════════════════════════════════"
+echo "  Training complete. Adapter: $ADAPTER_DIR"
+echo "  Fused model: $FUSED_DIR"
+echo "══════════════════════════════════════════════════════════"
+'''
+
+        out = Path(output_path) if output_path else self.output_dir
+        out.mkdir(parents=True, exist_ok=True)
+        filepath = out / f"train_mlx_{model_name}.sh"
+        filepath.write_text(script)
+        filepath.chmod(0o755)
+
+        logger.info("Generated MLX training script: %s", filepath)
+        return filepath
+
     # ── Notebook cell helpers ─────────────────────────────────────
 
     @staticmethod

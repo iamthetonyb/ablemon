@@ -541,6 +541,31 @@ class TestUnslothExporter:
         assert "iq2_m" in content
         assert "q4_k_m" in content
 
+    def test_export_mlx_training_script(self, tmp_path):
+        from able.core.distillation.training.unsloth_exporter import UnslothExporter
+
+        exporter = UnslothExporter(output_dir=tmp_path)
+        path = exporter.export_mlx_training_script(
+            "able-nano-9b", "data/corpus/default/v001/train.jsonl",
+        )
+        assert path.exists()
+        assert path.suffix == ".sh"
+
+        content = path.read_text()
+        assert "mlx_lm.lora" in content
+        assert "mlx_lm.fuse" in content
+        assert "convert_hf_to_gguf" in content
+        assert "ollama create" in content
+        # Verify it's executable
+        assert path.stat().st_mode & 0o111
+
+    def test_export_mlx_script_invalid_model(self, tmp_path):
+        from able.core.distillation.training.unsloth_exporter import UnslothExporter
+
+        exporter = UnslothExporter(output_dir=tmp_path)
+        with pytest.raises(ValueError, match="Unknown model"):
+            exporter.export_mlx_training_script("nonexistent", "corpus.jsonl")
+
     def test_export_notebook_l4_runtime(self, tmp_path):
         from able.core.distillation.training.unsloth_exporter import UnslothExporter
 

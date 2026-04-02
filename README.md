@@ -211,7 +211,26 @@ python -m able.core.distillation.training --check --model 9b --gpu-class t4_cola
 python -m able.core.distillation.training --train 9b --gpu-class t4_colab --runtime colab --checkpoint-dir ~/able-checkpoints/9b --resume
 ```
 
-Use the 9B lane for regular T4 runs. Keep the 27B lane for H100 sessions only.
+Use the 9B lane for regular T4 runs. Keep the 27B lane for H100/A100/L4 sessions.
+
+### Local MLX Fine-Tuning (Apple Silicon)
+
+For zero-cost local training on Mac using MLX (no cloud GPU needed):
+
+```bash
+# Generate the MLX training script
+python3 -c "
+from able.core.distillation.training.unsloth_exporter import UnslothExporter
+UnslothExporter().export_mlx_training_script('9b', 'data/distillation_corpus.jsonl')
+"
+
+# Run it
+bash notebooks/train_mlx_able-nano-9b.sh
+```
+
+The script trains a LoRA adapter via `mlx_lm.lora`, fuses it, converts to GGUF via `llama.cpp`, and generates an Ollama Modelfile. The 9B model at 4-bit needs ~8-10GB during training — fits any 32GB+ Mac. The 27B model needs ~20-24GB (64GB+ Macs only).
+
+MLX training is ~2-3x slower than Unsloth on NVIDIA but has zero setup friction and no GPU allocation wait. Quality is identical — LoRA math is the same.
 
 ### Unsloth Fine-Tuning (Colab + VS Code)
 
@@ -242,7 +261,7 @@ The entire distillation pipeline is designed to run on CPU, reserving GPU only f
 | **Federation sync** — contribute/fetch/ingest via GitHub Releases | CPU | Nightly (3:30am cron) |
 | **Corpus build** — domain balancing, ChatML format, train/val split | CPU | On demand |
 | **Promptfoo eval** — gold output generation, regression testing | CPU | On demand / battle |
-| **Fine-tuning** — Unsloth SFTTrainer + GGUF export | **GPU** (free T4 for 9B, A100/L4/H100 for 27B) | When corpus reaches threshold |
+| **Fine-tuning** — Unsloth (cloud) or MLX LoRA (local) | **GPU** (free T4/MLX for 9B, A100/L4/H100 for 27B) | When corpus reaches threshold |
 
 The promptfoo eval configs (`able/evals/`) serve double duty: they validate model quality AND generate gold T4 outputs that feed back into the distillation corpus via `corpus_eligible` flagging in the interaction log. The evolution daemon (M2.7, 6h cycles) tunes routing weights based on these eval results, closing the self-improvement loop.
 
