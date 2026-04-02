@@ -205,3 +205,89 @@ class GitHubClient:
         )
         self._log("enable_github_pages", {"repo": repo, "branch": branch})
         return result
+
+    # ── Release operations (federation) ───────────────────────────────────────
+
+    async def create_release(
+        self,
+        repo: str,
+        tag: str,
+        name: str,
+        body: str = "",
+        draft: bool = False,
+    ) -> Dict:
+        """Create a GitHub release."""
+        if repo.startswith(f"{self.owner}/"):
+            repo = repo[len(self.owner) + 1:]
+        result = await self._post(
+            f"/repos/{self.owner}/{repo}/releases",
+            {"tag_name": tag, "name": name, "body": body, "draft": draft},
+        )
+        self._log("create_release", {"repo": repo, "tag": tag, "name": name})
+        return result
+
+    async def upload_release_asset(
+        self,
+        upload_url: str,
+        filepath: Path,
+        content_type: str = "application/x-ndjson",
+    ) -> Dict:
+        """Upload a file as a release asset.
+
+        Args:
+            upload_url: The upload_url from create_release (has {?name,label} suffix).
+            filepath: Local file to upload.
+            content_type: MIME type for the asset.
+        """
+        # Strip the {?name,label} template from the upload URL
+        url = upload_url.split("{")[0]
+        url = f"{url}?name={filepath.name}"
+
+        data = filepath.read_bytes()
+        headers = self._headers()
+        headers["Content-Type"] = content_type
+        headers["Content-Length"] = str(len(data))
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, data=data) as resp:
+                resp.raise_for_status()
+                result = await resp.json()
+
+        self._log("upload_release_asset", {
+            "file": filepath.name,
+            "size_bytes": len(data),
+        })
+        return result
+
+    async def list_releases(
+        self, repo: str, per_page: int = 30
+    ) -> List[Dict]:
+        """List releases (newest first)."""
+        if repo.startswith(f"{self.owner}/"):
+            repo = repo[len(self.owner) + 1:]
+        return await self._get(
+            f"/repos/{self.owner}/{repo}/releases?per_page={per_page}"
+        )
+
+    async def download_release_asset(
+        self,
+        asset_url: str,
+        dest: Path,
+    ) -> Path:
+        """Download a release asset to a local path."""
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        headers = self._headers()
+        headers["Accept"] = "application/octet-stream"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(asset_url, headers=headers) as resp:
+                resp.raise_for_status()
+                data = await resp.read()
+                dest.write_bytes(data)
+
+        self._log("download_release_asset", {
+            "url": asset_url,
+            "dest": str(dest),
+            "size_bytes": len(data),
+        })
+        return dest

@@ -136,8 +136,23 @@ All four learning feedback loops are closed and tested:
 - Pipe to zsh blocked alongside sh/bash
 - SecureShell strips all DYLD_*/LD_* from execution environment
 
+**Federated distillation network** (`able/core/federation/`):
+- Zero-config: buddy creation auto-enrolls instance in network via `~/.able/instance.yaml` (UUID4)
+- Contributor exports high-quality pairs (≥0.85), strips PII (emails, phones, IPs, paths, API keys), removes tenant/model metadata
+- Ingester validates incoming pairs: TrustGate (52+ injection patterns), scaffolding strip, quality re-validation, content hash dedup
+- Distributor uses pluggable `DistributionBackend` protocol — `GitHubReleasesBackend` first, with offline outbox/inbox queuing
+- Sync cron at 3:30am daily (after harvest + evolution), incremental via `last_sync_cursor`
+- `DistillationStore.get_pairs()` accepts `since` param for incremental export
+- GitHub client: 4 new release methods for corpus distribution
+- `/metrics/federation` endpoint for network health monitoring
+- Domain snowball: more users in a domain = better distillation for everyone in that domain
+- Network pairs stored as `tenant_id='network'`, flow through existing corpus builder
+- `install.sh` seeds federation identity during workspace init
+- Research integration: llm-d prefix-cache routing → domain affinity, vLLM Ascend → pluggable backend pattern, Ollama 0.19 MLX → 2x T5 decode speed validates distillation flywheel
+
 **Test suite**:
-- Full-suite pass: 702 tests, 0 deprecation warnings
+- Full-suite pass: 736 tests, 0 deprecation warnings
+- 34 federation tests (identity, models, PII scrubbing, ingestion, sync, store since)
 - 70 harvester tests (scaffolding, entry types, harvesters, session writers, corpus scrubber)
 - 11 security tests (injection, command guard, binary hijack, cd+git, dangerous paths, subcommand cap)
 - datetime.utcnow() replaced with datetime.now(timezone.utc) across all tenant modules
@@ -196,6 +211,7 @@ python3 -m pytest able/tests/ -x --ignore=able/tests/test_routing.py --ignore=ab
 
 Or targeted runs:
 ```bash
+python3 -m pytest able/tests/test_federation.py -x -v
 python3 -m pytest able/tests/test_buddy.py -q
 python3 -m pytest able/tests/test_cli_chat.py -x
 python3 -m pytest able/tests/test_control_plane.py able/tests/test_resource_tools.py able/tests/test_learning_loops.py able/tests/test_collect_results.py able/tests/test_evolution_cycle.py -x

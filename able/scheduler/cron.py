@@ -743,6 +743,28 @@ def register_default_jobs(
         max_retries=2,
     )
 
+    # ── Federation sync — 3:30am daily (after harvest + evolution) ──
+    async def run_federation_sync():
+        from able.core.federation.sync import federation_sync
+
+        result = await federation_sync()
+        logger.info(
+            "Federation sync: contributed=%d ingested=%d dupes=%d",
+            result.get("contributed", 0),
+            result.get("ingested_accepted", 0),
+            result.get("ingested_duplicates", 0),
+        )
+        return result
+
+    scheduler.add_job(
+        "federation-sync",
+        "30 3 * * *",
+        run_federation_sync,
+        description="Contribute local pairs to network, ingest remote contributions",
+        timeout=300.0,
+        max_retries=2,
+    )
+
     # ── Morning report — daily at 7am ───────────────────────────
     async def generate_morning_report():
         from able.core.evolution.morning_report import MorningReporter

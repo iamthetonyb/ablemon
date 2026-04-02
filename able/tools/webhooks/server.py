@@ -608,6 +608,39 @@ class WebhookServer:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
+    async def _handle_metrics_federation(self, request) -> "web.Response":
+        """GET /metrics/federation — Federated distillation network stats."""
+        try:
+            from able.core.federation.identity import get_instance_config
+            config = get_instance_config()
+        except Exception:
+            config = {}
+
+        # Count network-sourced pairs in local store
+        network_stats: dict = {}
+        try:
+            from able.core.distillation.store import DistillationStore
+            store = DistillationStore()
+            network_pairs = store.get_pairs(tenant_id="network", limit=100_000)
+            domain_counts: dict = {}
+            for p in network_pairs:
+                domain_counts[p.domain] = domain_counts.get(p.domain, 0) + 1
+            network_stats = {
+                "total_network_pairs": len(network_pairs),
+                "domains": domain_counts,
+            }
+        except Exception:
+            network_stats = {"total_network_pairs": 0, "domains": {}}
+
+        return web.json_response({
+            "instance_id": (config.get("instance_id") or "")[:8],
+            "network_enabled": config.get("network_enabled", False),
+            "last_sync": config.get("last_sync_at"),
+            "domains_contributed": config.get("domains_contributed", []),
+            "network_corpus": network_stats,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
     async def _handle_tenant_dashboard(self, request) -> "web.Response":
         """GET /tenant/{tenant_id}/dashboard — Per-tenant dashboard."""
         tenant_id = request.match_info.get("tenant_id", "")
@@ -689,6 +722,7 @@ class WebhookServer:
         app.router.add_get("/metrics/skills", self._handle_metrics_skills)
         app.router.add_get("/metrics/corpus", self._handle_metrics_corpus)
         app.router.add_get("/metrics/tenants", self._handle_metrics_tenants)
+        app.router.add_get("/metrics/federation", self._handle_metrics_federation)
         app.router.add_get("/tenant/{tenant_id}/dashboard", self._handle_tenant_dashboard)
 
         # ── Payment integrations ────────────────────────────────

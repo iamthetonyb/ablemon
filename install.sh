@@ -141,6 +141,9 @@ else
     info "Workspace exists at $ABLE_HOME"
 fi
 
+# ── 8. Federation identity ──────────────────────────────────────
+"$VENV_DIR/bin/python3" -c "from able.core.federation.identity import get_or_create_instance_id; get_or_create_instance_id()" 2>/dev/null || true
+
 # ── Done ──────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}  Done!${NC} Run these commands:"

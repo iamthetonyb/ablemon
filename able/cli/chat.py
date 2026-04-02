@@ -557,6 +557,12 @@ async def _buddy_setup_flow(
                         created_at=datetime.now(timezone.utc).isoformat(),
                     )
                     save_buddy(buddy)
+                    # Enroll in federation network (non-fatal)
+                    try:
+                        from able.core.federation.identity import ensure_network_enrollment
+                        ensure_network_enrollment()
+                    except Exception:
+                        pass
                     try:
                         await _buddy_onboarding_flow(update_collection_profile)
                     except _SetupExit:

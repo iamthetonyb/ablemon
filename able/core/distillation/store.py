@@ -275,6 +275,7 @@ class DistillationStore:
         min_quality: float = 0.0,
         tenant_id: Optional[str] = None,
         corpus_version: Optional[str] = None,
+        since: Optional[datetime] = None,
         limit: int = 1000,
     ) -> List[DistillationPair]:
         """Query distillation pairs with filters."""
@@ -290,6 +291,9 @@ class DistillationStore:
         if corpus_version is not None:
             clauses.append("corpus_version = ?")
             params.append(corpus_version)
+        if since is not None:
+            clauses.append("created_at >= ?")
+            params.append(since.isoformat())
 
         where = " AND ".join(clauses)
         params.append(limit)

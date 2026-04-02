@@ -42,6 +42,7 @@ ABLE/
 │   │   ├── evolution/             # Self-tuning daemon (6h cycles, M2.7 analysis)
 │   │   ├── evolution/auto_improve.py   # Eval failure → improvement action classifier
 │   │   ├── distillation/          # Training pipeline, GPU budget, model configs
+│   │   ├── federation/            # Federated distillation network (cross-instance corpus)
 │   │   ├── providers/             # OpenAI OAuth, Anthropic, OpenRouter, NIM, Ollama
 │   │   ├── agents/                # Scanner, Auditor, Executor pipeline agents
 │   │   ├── agi/                   # Self-improvement, goal planner, proactive engine
@@ -351,6 +352,22 @@ Training lanes:
       - Pipe to zsh blocked alongside sh/bash
     - SecureShell strips all `DYLD_*` and `LD_*` from execution environment
     - 702 tests passing (70 harvester, 11 security)
+30. **Federated distillation network**:
+    - **New package `able/core/federation/`**: 7 modules (identity, models, contributor, distributor, ingester, sync, __init__)
+    - **Instance identity**: UUID4 generated on install or buddy creation, persisted in `~/.able/instance.yaml`
+    - **Zero-config enrollment**: buddy creation in `able chat` auto-enrolls in federation network (non-fatal)
+    - **Contributor**: exports high-quality pairs (≥0.85), strips PII (emails, phones, IPs, home paths, API keys, SSH keys), removes tenant_id/gold_model
+    - **Ingester**: 4-layer defense (TrustGate 52+ injection patterns, scaffolding strip, quality re-validation, content hash dedup via SQLite unique index)
+    - **Distributor**: pluggable `DistributionBackend` protocol (inspired by vLLM Ascend plugin pattern), `GitHubReleasesBackend` as first implementation, outbox/inbox queuing for offline resilience
+    - **Sync orchestrator**: cron at 3:30am daily (after harvest 2am + evolution 3am), incremental via `last_sync_cursor`
+    - **Store enhancement**: `DistillationStore.get_pairs()` now accepts `since: Optional[datetime]` for incremental export
+    - **GitHub client**: 4 new release methods (create_release, upload_release_asset, list_releases, download_release_asset)
+    - **Metrics**: `/metrics/federation` endpoint with instance_id, network_enabled, last_sync, domain distribution, network pair counts
+    - **Domain snowball**: instances naturally specialize — more users in security = better security distillation for everyone
+    - Network pairs stored with `tenant_id='network'`, flow through existing `CorpusBuilder.build_tenant_with_able_base()` path
+    - `install.sh` seeds federation identity during workspace init
+    - 34 federation tests (identity, models, PII scrubbing, ingestion validation, sync orchestrator, store since parameter)
+    - 736 tests passing total (34 federation + 702 existing)
 
 ## Next-Run Objectives
 
