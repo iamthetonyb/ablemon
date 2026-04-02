@@ -72,6 +72,18 @@ def _c(code: str, text: str) -> str:
     return f"{code}{text}{RESET}" if _COLOR else text
 
 
+def _rl(code: str, text: str) -> str:
+    """Colour helper safe for readline prompts (input()).
+
+    Wraps ANSI escapes in \\001/\\002 so readline knows they are
+    zero-width and calculates cursor position correctly.  Without this,
+    arrow-key history navigation corrupts the display.
+    """
+    if not _COLOR:
+        return text
+    return f"\001{code}\002{text}\001{RESET}\002"
+
+
 def _save_readline_history() -> None:
     try:
         import readline
@@ -527,7 +539,7 @@ async def _buddy_setup_flow(
         try:
             choice = await asyncio.to_thread(
                 _prompt_input,
-                f"  {_c(GREEN, 'pick')} [1-{starter_count}]"
+                f"  {_rl(GREEN, 'pick')} [1-{starter_count}]"
                 + (" or Enter to skip: " if allow_skip else ": "),
             )
             choice = choice.strip().lower()
@@ -541,7 +553,7 @@ async def _buddy_setup_flow(
                 if 0 <= idx < starter_count:
                     chosen = STARTER_SPECIES[idx]
                     default_name = chosen.value.capitalize()
-                    name_input = (await asyncio.to_thread(_prompt_input, f"  {_c(CYAN, 'name')} [{default_name}]: ")).strip()
+                    name_input = (await asyncio.to_thread(_prompt_input, f"  {_rl(CYAN, 'name')} [{default_name}]: ")).strip()
                     if name_input.lower() in _EXIT_WORDS:
                         print(_c(DIM, "  bye"))
                         raise SystemExit(0)
@@ -713,7 +725,7 @@ async def _handle_slash(message, ctx, buddy):
                     "gif": "image/gif", "webp": "image/webp"}.get(ext, "image/jpeg")
             b64 = _b64.b64encode(img_bytes).decode()
             caption = (await asyncio.to_thread(
-                _prompt_input, f"  {_c(CYAN, 'caption')} (Enter to skip): "
+                _prompt_input, f"  {_rl(CYAN, 'caption')} (Enter to skip): "
             )).strip() or "Describe this image."
             multimodal_msg = [
                 {"type": "text", "text": caption},
@@ -744,7 +756,7 @@ async def _handle_slash(message, ctx, buddy):
             print(f"  {_c(DIM, f'{result.duration_seconds:.1f}s · {result.provider.value} · {result.processing_time_ms:.0f}ms')}")
             # Optionally send to gateway
             followup = (await asyncio.to_thread(
-                _prompt_input, f"  {_c(CYAN, 'send to ABLE?')} [y/N]: "
+                _prompt_input, f"  {_rl(CYAN, 'send to ABLE?')} [y/N]: "
             )).strip().lower()
             if followup in ("y", "yes"):
                 response = await gateway.process_message(
@@ -1088,7 +1100,7 @@ async def run_chat(args: argparse.Namespace) -> int:
     try:
         while True:
             try:
-                raw = await asyncio.to_thread(_prompt_input, f"{_c(GREEN, '>')} ")
+                raw = await asyncio.to_thread(_prompt_input, f"{_rl(GREEN, '>')} ")
             except (EOFError, KeyboardInterrupt):
                 print(f"\n{_c(DIM, '  bye')}")
                 return 0
