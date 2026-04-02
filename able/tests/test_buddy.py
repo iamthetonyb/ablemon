@@ -40,7 +40,7 @@ from able.core.buddy.renderer import (
     render_starter_selection,
 )
 from able.core.buddy.battle import run_battle, list_available_battles
-from able.core.buddy.xp import award_interaction_xp
+from able.core.buddy.xp import award_interaction_xp, buddy_autonomous_tick
 
 
 # ── Model tests ──────────────────────────────────────────────────────────
@@ -710,3 +710,46 @@ def test_needs_persist_through_save_load(tmp_path, monkeypatch):
     assert loaded.needs_last_decay == "2026-04-01T00:00:00+00:00"
     assert loaded.domains_used_today == ["code", "security"]
     assert loaded.domains_today_date == "2026-04-01"
+
+
+# ── Autonomous tick tests ───────────────────────────────────────────────
+
+def test_autonomous_tick_returns_none_without_buddy(tmp_path, monkeypatch):
+    monkeypatch.setattr("able.core.buddy.model.BUDDY_PATH", tmp_path / "nope.yaml")
+    monkeypatch.setattr("able.core.buddy.model.BUDDY_COLLECTION_PATH", tmp_path / "nope_c.yaml")
+    assert buddy_autonomous_tick() is None
+
+
+def test_autonomous_tick_awards_passive_xp(tmp_path, monkeypatch):
+    monkeypatch.setattr("able.core.buddy.model.BUDDY_PATH", tmp_path / "buddy.yaml")
+    monkeypatch.setattr("able.core.buddy.model.BUDDY_COLLECTION_PATH", tmp_path / "buddy_c.yaml")
+    buddy = create_starter_buddy(
+        name="Volt", species=Species.SPARK,
+        created_at="2026-04-01T00:00:00+00:00",
+    )
+    save_buddy(buddy)
+    old_xp = buddy.xp
+
+    result = buddy_autonomous_tick()
+    assert result is not None
+    assert result["name"] == "Volt"
+    assert result["xp"] > old_xp
+    assert result["mood"] in ("thriving", "content", "hungry", "neglected")
+
+
+def test_autonomous_tick_restores_energy(tmp_path, monkeypatch):
+    monkeypatch.setattr("able.core.buddy.model.BUDDY_PATH", tmp_path / "buddy.yaml")
+    monkeypatch.setattr("able.core.buddy.model.BUDDY_COLLECTION_PATH", tmp_path / "buddy_c.yaml")
+    buddy = create_starter_buddy(
+        name="Root", species=Species.ROOT,
+        created_at="2026-04-01T00:00:00+00:00",
+    )
+    buddy.needs_energy = 30.0
+    save_buddy(buddy)
+
+    buddy_autonomous_tick()
+
+    reloaded = load_buddy()
+    assert reloaded is not None
+    # Energy should have been restored by the self_explore walk
+    assert reloaded.needs_energy > 30.0

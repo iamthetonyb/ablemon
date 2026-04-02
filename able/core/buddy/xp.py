@@ -108,6 +108,63 @@ def award_interaction_xp(
     return xp
 
 
+def buddy_autonomous_tick() -> Optional[dict]:
+    """Periodic background tick — buddy 'takes a walk' while the user is away.
+
+    Called every ~2h by the cron scheduler. Applies needs decay, awards a
+    small passive XP drip, and checks for evolution / legendary transitions.
+    Returns a status dict or None if no buddy exists.
+    """
+    buddy = load_buddy()
+    if buddy is None:
+        return None
+
+    # Apply time-based needs decay
+    mood = buddy.apply_needs_decay()
+
+    # Passive XP drip — buddy is self-training / exploring on its own
+    passive_xp = 5
+    old_level = buddy.level
+    buddy.award_xp(passive_xp)
+
+    # Small energy boost — buddy walked around on its own
+    buddy.walk("self_explore")
+
+    # Check for stage evolution and legendary unlock
+    new_stage = buddy.check_evolution()
+    if new_stage:
+        buddy.evolve(new_stage)
+        logger.info(
+            "Buddy %s EVOLVED to stage %d during autonomous walk!",
+            buddy.name, new_stage.value,
+        )
+    legendary_title = buddy.unlock_legendary()
+    if legendary_title:
+        logger.info(
+            "Buddy %s unlocked legendary form during autonomous walk: %s",
+            buddy.name, legendary_title,
+        )
+
+    save_buddy(buddy)
+
+    leveled_up = buddy.level > old_level
+    if leveled_up:
+        logger.info(
+            "Buddy %s leveled up to %d during autonomous walk",
+            buddy.name, buddy.level,
+        )
+
+    return {
+        "name": buddy.name,
+        "level": buddy.level,
+        "xp": buddy.xp,
+        "mood": mood,
+        "leveled_up": leveled_up,
+        "evolved": new_stage.value if new_stage else None,
+        "legendary": legendary_title or None,
+    }
+
+
 def award_evolution_deploy_xp() -> Optional[int]:
     """Award XP when the evolution daemon deploys new weights."""
     buddy = load_buddy()

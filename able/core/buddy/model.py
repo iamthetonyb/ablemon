@@ -422,6 +422,7 @@ NEED_RESTORE = {
         "new_domain": 25,  # Using a domain for the first time today
         "tool_use": 5,     # Using a tool = a short walk
         "variety": 15,     # Using 3+ different domains in a session
+        "self_explore": 8, # Autonomous background walk — buddy explores on its own
     },
 }
 

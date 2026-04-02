@@ -655,6 +655,16 @@ def register_default_jobs(
             }
             await self_sched.run_cycle(analysis_data, cycle_id=result.cycle_id)
 
+        # Award buddy XP for successful evolution deploys
+        if result.success and result.improvements_deployed > 0:
+            try:
+                from able.core.buddy.xp import award_evolution_deploy_xp
+                xp = award_evolution_deploy_xp()
+                if xp:
+                    logger.info(f"Buddy gained {xp} XP from evolution deploy")
+            except Exception as bxp_err:
+                logger.debug(f"Buddy XP skip (evolution): {bxp_err}")
+
         return {
             "cycle_id": result.cycle_id,
             "success": result.success,
@@ -704,6 +714,17 @@ def register_default_jobs(
         except Exception as e:
             logger.debug(f"Tenant harvest skipped: {e}")
 
+        # Award buddy XP for new distillation pairs
+        total_new = result.total_formatted + sum(tenant_results.values())
+        if total_new > 0:
+            try:
+                from able.core.buddy.xp import award_distillation_xp
+                xp = award_distillation_xp(new_pairs=total_new)
+                if xp:
+                    logger.info(f"Buddy gained {xp} XP from {total_new} distillation pairs")
+            except Exception as bxp_err:
+                logger.debug(f"Buddy XP skip (distillation): {bxp_err}")
+
         return {
             "conversations": result.total_conversations,
             "formatted": result.total_formatted,
@@ -729,6 +750,24 @@ def register_default_jobs(
         reporter = MorningReporter()
         report = await reporter.generate(period_hours=24)
         text = reporter.format_telegram(report)
+
+        # Append buddy status to morning report
+        try:
+            from able.core.buddy.model import load_buddy
+            buddy = load_buddy()
+            if buddy:
+                from able.core.buddy.renderer import render_banner
+                mood = buddy.apply_needs_decay()
+                from able.core.buddy.model import save_buddy
+                save_buddy(buddy)
+                buddy_line = (
+                    f"\n\n🐾 *Buddy*: {buddy.display_emoji} {buddy.name} "
+                    f"Lv.{buddy.level} — {mood.title()}"
+                )
+                text += buddy_line
+        except Exception:
+            pass
+
         logger.info(f"Morning report generated ({len(text)} chars)")
 
         # Deliver via Telegram if callback is available
@@ -753,7 +792,18 @@ def register_default_jobs(
     # ── Nightly research scan — 1am daily ───────────────────────
     async def run_nightly_research_scan():
         from able.core.evolution.weekly_research import run_nightly_research
-        return await run_nightly_research(send_telegram=send_telegram)
+        result = await run_nightly_research(send_telegram=send_telegram)
+
+        # Research counts as domain exploration — awards buddy XP
+        try:
+            from able.core.buddy.xp import award_interaction_xp
+            award_interaction_xp(
+                complexity_score=0.5, used_tools=True, domain="research",
+            )
+        except Exception:
+            pass
+
+        return result
 
     scheduler.add_job(
         "nightly-research",
@@ -767,7 +817,18 @@ def register_default_jobs(
     # ── Weekly deep research — Sunday 10am ──────────────────────
     async def run_weekly_research_scan():
         from able.core.evolution.weekly_research import run_weekly_research
-        return await run_weekly_research(send_telegram=send_telegram)
+        result = await run_weekly_research(send_telegram=send_telegram)
+
+        # Weekly deep research = bigger domain exploration
+        try:
+            from able.core.buddy.xp import award_interaction_xp
+            award_interaction_xp(
+                complexity_score=0.7, used_tools=True, domain="research",
+            )
+        except Exception:
+            pass
+
+        return result
 
     scheduler.add_job(
         "weekly-research",
@@ -793,6 +854,22 @@ def register_default_jobs(
         # Self-eval: identify weaknesses and generate targeted training data
         eval_result = await pilot.run_self_eval()
 
+        # Autopilot is heavy system work — buddy gets XP for each domain
+        total_pairs = (
+            result.distillation_pairs
+            + prompting_result.distillation_pairs
+            + eval_result.distillation_pairs
+        )
+        try:
+            from able.core.buddy.xp import award_interaction_xp, award_distillation_xp
+            award_interaction_xp(
+                complexity_score=0.8, used_tools=True, domain="coding",
+            )
+            if total_pairs > 0:
+                award_distillation_xp(new_pairs=total_pairs)
+        except Exception:
+            pass
+
         return {
             "objectives": {
                 "attempted": result.tasks_attempted,
@@ -817,4 +894,39 @@ def register_default_jobs(
         description="Daily autonomous task runner — objectives + auto-prompting + self-eval",
         timeout=900.0,
         max_retries=2,
+    )
+
+    # ── Buddy autonomous walk — every 2 hours ──────────────────
+    async def buddy_walk():
+        from able.core.buddy.xp import buddy_autonomous_tick
+
+        result = buddy_autonomous_tick()
+        if result is None:
+            return {"skipped": True, "reason": "no buddy"}
+
+        msg = None
+        if result.get("evolved"):
+            msg = f"🐾 {result['name']} EVOLVED to stage {result['evolved']} during self-training!"
+        elif result.get("legendary"):
+            msg = f"👑 {result['name']} unlocked legendary form: {result['legendary']}!"
+        elif result.get("leveled_up"):
+            msg = f"🐾 {result['name']} leveled up to {result['level']} during self-training!"
+        elif result["mood"] in ("hungry", "neglected"):
+            msg = f"🐾 {result['name']} is {result['mood']}. Run /battle or /evolve to help."
+
+        if msg and send_telegram:
+            try:
+                await send_telegram(msg)
+            except Exception:
+                pass
+
+        return result
+
+    scheduler.add_job(
+        "buddy-walk",
+        "0 */2 * * *",
+        buddy_walk,
+        description="Buddy autonomous walk — passive XP, needs decay, evolution checks",
+        timeout=30.0,
+        max_retries=1,
     )
