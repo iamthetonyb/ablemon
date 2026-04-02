@@ -327,7 +327,13 @@ Training lanes:
     - **Telegram**: Photos, videos (via thumbnail extraction), video notes, audio documents, and image documents all handled. Filter updated to accept `VIDEO | VIDEO_NOTE | Document.ALL`.
     - **Pluggable ASR**: `VoiceTranscriber` refactored with 3 backends: `ExternalASR` (HTTP endpoint for Voxtral/Qwen3/any frontier model), `OpenAIWhisper` (legacy), `LocalWhisper` (faster-whisper). Backend selected via `ABLE_ASR_PROVIDER` env var or auto-detected from `ABLE_ASR_ENDPOINT`.
     - Default ASR endpoint not yet configured — operator provides their preferred model endpoint via `ABLE_ASR_ENDPOINT` + `ABLE_ASR_API_KEY`.
-27. **662 tests passing** (up from 654): stream circuit breaker, input validation, rate limiting, provider chain fallback tests added.
+27. **Distillation pipeline gap closed**:
+    - CLI sessions (`able chat`) now write per-turn JSONL to `~/.able/sessions/{session_id}.jsonl` via `_SessionWriter` — feeds the nightly distillation harvest.
+    - `CLISessionHarvester` registered in `harvest_runner.py` as priority 2 source alongside `able_interaction`.
+    - **ExternalToolHarvester** added: reads `~/.able/external_sessions/*.jsonl` — any third-party AI tool (Cursor, Windsurf, Copilot, Grok, custom agents) can drop session files there and ABLE learns from them autonomously.
+    - Optional `_source.txt` tag file and per-record `"source"` field let users attribute sessions to specific tools.
+    - 15 new harvester tests: CLI session writing, end-to-end _SessionWriter → CLISessionHarvester pickup, ExternalToolHarvester with source tagging/override/domain detection/thinking extraction.
+28. **677 tests passing** (up from 662): full suite including new distillation pipeline tests.
 
 ## Next-Run Objectives
 
@@ -353,6 +359,8 @@ Push toward 100+ pairs for H100 fine-tuning:
 - Run reasoning + tools eval configs to generate T4 gold outputs
 - Monitor corpus pair count (`/eval` in CLI)
 - Verify interaction logger correctly marks corpus-eligible interactions
+- CLI sessions now feed the pipeline automatically — every `able chat` conversation is harvestable
+- External tool sessions can be dropped in `~/.able/external_sessions/` for cross-tool learning
 
 ### Priority 6: Keep docs and runtime in lockstep
 

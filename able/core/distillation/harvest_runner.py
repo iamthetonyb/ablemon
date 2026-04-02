@@ -27,11 +27,13 @@ SOURCE_PRIORITY: dict[str, int] = {
     "claude_code": 1,      # Claude Max subscription — richest reasoning traces
     "cowork": 1,            # Claude Cowork sessions — same quality as Claude Code
     "able_interaction": 2,  # ABLE's own high-quality responses
+    "able_cli": 2,          # ABLE CLI sessions (same quality as able_interaction)
     "0wav_ml": 3,           # 0wav labeled behavioral profiles (domain-specific)
     "0wav_claude_code": 3,  # 0wav Claude Code sessions (domain-specific)
     "codex": 4,             # OpenAI Codex CLI (bundled w/ GPT sub, clean transcripts)
     "chatgpt": 5,           # ChatGPT web (GPT sub, good reasoning)
     "antigravity": 6,       # Antigravity Pro sessions
+    "external_tool": 7,     # Third-party AI tools (user-configured drop dir)
     "grok": 7,              # Grok free tier (thinner reasoning)
     "inbox": 8,             # Manually saved conversations
 }
@@ -95,6 +97,7 @@ def _get_harvesters(project_root: Path, tenant_id: str = "default") -> list:
     """
     from able.core.distillation.harvesters.claude_code_harvester import ClaudeCodeHarvester
     from able.core.distillation.harvesters.able_interaction_harvester import ABLEInteractionHarvester
+    from able.core.distillation.harvesters.cli_session_harvester import CLISessionHarvester
     from able.core.distillation.harvesters.inbox_harvester import InboxHarvester
 
     harvesters = []
@@ -111,6 +114,9 @@ def _get_harvesters(project_root: Path, tenant_id: str = "default") -> list:
     db_path = project_root / "data" / "interaction_log.db"
     if db_path.exists():
         harvesters.append(("able_interaction", ABLEInteractionHarvester(db_path=str(db_path))))
+
+    # Priority 2b: ABLE CLI sessions (~/.able/sessions/*.jsonl)
+    harvesters.append(("able_cli", CLISessionHarvester()))
 
     # Priority 3: 0wav ML harvester (labeled profiles + 0wav Claude sessions)
     if tenant_id == "0wav":
@@ -136,6 +142,14 @@ def _get_harvesters(project_root: Path, tenant_id: str = "default") -> list:
         harvesters.append(("antigravity", AntigravityHarvester()))
     except Exception as e:
         logger.warning("Antigravity harvester unavailable: %s", e)
+
+    # Priority 7: External tool sessions (~/.able/external_sessions/*.jsonl)
+    # Users drop JSONL from any AI tool here — Cursor, Windsurf, Copilot, etc.
+    try:
+        from able.core.distillation.harvesters.external_tool_harvester import ExternalToolHarvester
+        harvesters.append(("external_tool", ExternalToolHarvester()))
+    except Exception as e:
+        logger.warning("External tool harvester unavailable: %s", e)
 
     # Priority 9: Inbox (manually saved conversations)
     inbox_dir = Path.home() / "able-corpus-inbox"

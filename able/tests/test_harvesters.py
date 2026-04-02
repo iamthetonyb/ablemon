@@ -20,6 +20,8 @@ from able.core.distillation.harvesters.claude_code_harvester import (
 from able.core.distillation.harvesters.able_interaction_harvester import (
     ABLEInteractionHarvester,
 )
+from able.core.distillation.harvesters.cli_session_harvester import CLISessionHarvester
+from able.core.distillation.harvesters.external_tool_harvester import ExternalToolHarvester
 from able.core.distillation.harvesters.inbox_harvester import InboxHarvester
 from able.core.distillation.harvesters.opencli_harvester import OpenCLIHarvester
 from able.core.distillation.formatter import TrainingFormatter
@@ -652,3 +654,185 @@ class TestTrainingFormatter:
         dup = fmt.normalize(self._make_convo(id="b"))
         deduped = fmt.deduplicate_pairs([pair, dup])
         assert len(deduped) == 1
+
+
+# ── CLISessionHarvester ───────────────────────────────────────────
+
+
+class TestCLISessionHarvester:
+    def _write_session(self, path: Path, records: list[dict]) -> None:
+        path.write_text(
+            "\n".join(json.dumps(r) for r in records), encoding="utf-8"
+        )
+
+    def test_harvest_basic_session(self, tmp_path):
+        self._write_session(tmp_path / "s1.jsonl", [
+            {"role": "user", "content": "Explain how async/await works in Python with practical examples."},
+            {"role": "assistant", "content": "Async/await lets you write concurrent code using coroutines without threads."},
+            {"role": "user", "content": "Show me an example with aiohttp that fetches multiple URLs concurrently."},
+            {"role": "assistant", "content": "Here is an aiohttp example using asyncio.gather to fetch URLs in parallel."},
+        ])
+        h = CLISessionHarvester(sessions_dir=tmp_path)
+        results = h.harvest()
+        assert len(results) == 1
+        assert results[0].source == "able_cli"
+        assert len(results[0].messages) == 4
+
+    def test_skips_short_sessions(self, tmp_path):
+        self._write_session(tmp_path / "s1.jsonl", [
+            {"role": "user", "content": "hi"},
+        ])
+        h = CLISessionHarvester(sessions_dir=tmp_path)
+        assert h.harvest() == []
+
+    def test_extracts_thinking_blocks(self, tmp_path):
+        self._write_session(tmp_path / "s1.jsonl", [
+            {"role": "user", "content": "Explain how garbage collection works in modern programming languages."},
+            {"role": "assistant", "content": "<think>GC overview needed</think>Garbage collection reclaims memory from objects no longer referenced."},
+        ])
+        h = CLISessionHarvester(sessions_dir=tmp_path)
+        results = h.harvest()
+        assert len(results) == 1
+        assert len(results[0].thinking_blocks) == 1
+        assert "GC" in results[0].thinking_blocks[0]
+
+    def test_handles_content_blocks(self, tmp_path):
+        self._write_session(tmp_path / "s1.jsonl", [
+            {"role": "user", "content": "Explain the observer pattern in object-oriented design with a real-world example."},
+            {"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "Design pattern explanation"},
+                {"type": "text", "text": "The observer pattern lets objects subscribe to events from a subject."},
+            ]},
+        ])
+        h = CLISessionHarvester(sessions_dir=tmp_path)
+        results = h.harvest()
+        assert len(results) == 1
+        assert len(results[0].thinking_blocks) == 1
+
+    def test_missing_dir_returns_empty(self):
+        h = CLISessionHarvester(sessions_dir="/nonexistent/path")
+        assert h.harvest() == []
+
+    def test_model_extraction(self, tmp_path):
+        self._write_session(tmp_path / "s1.jsonl", [
+            {"role": "user", "content": "Explain dependency injection and inversion of control in software architecture."},
+            {"role": "assistant", "content": "DI passes dependencies instead of creating them internally.", "model": "gpt-5.4"},
+        ])
+        h = CLISessionHarvester(sessions_dir=tmp_path)
+        results = h.harvest()
+        assert len(results) == 1
+        assert results[0].model == "gpt-5.4"
+
+
+# ── ExternalToolHarvester ─────────────────────────────────────────
+
+
+class TestExternalToolHarvester:
+    def _write_session(self, path: Path, records: list[dict]) -> None:
+        path.write_text(
+            "\n".join(json.dumps(r) for r in records), encoding="utf-8"
+        )
+
+    def test_harvest_basic_session(self, tmp_path):
+        self._write_session(tmp_path / "cursor_session.jsonl", [
+            {"role": "user", "content": "Refactor this function to use the strategy pattern for payment processing."},
+            {"role": "assistant", "content": "Here is the refactored code using the strategy pattern with separate payment handlers.", "model": "gpt-4.1"},
+        ])
+        h = ExternalToolHarvester(sessions_dir=tmp_path)
+        results = h.harvest()
+        assert len(results) == 1
+        assert results[0].model == "gpt-4.1"
+
+    def test_source_tag_file(self, tmp_path):
+        (tmp_path / "_source.txt").write_text("cursor", encoding="utf-8")
+        self._write_session(tmp_path / "s1.jsonl", [
+            {"role": "user", "content": "Explain how WebSockets differ from HTTP for real-time communication."},
+            {"role": "assistant", "content": "WebSockets maintain a persistent bidirectional connection unlike HTTP request-response."},
+        ])
+        h = ExternalToolHarvester(sessions_dir=tmp_path)
+        results = h.harvest()
+        assert len(results) == 1
+        assert results[0].source == "cursor"
+
+    def test_per_record_source_override(self, tmp_path):
+        self._write_session(tmp_path / "s1.jsonl", [
+            {"role": "user", "content": "How do I implement rate limiting for a REST API in production?", "source": "windsurf"},
+            {"role": "assistant", "content": "Use token bucket or sliding window algorithms for API rate limiting.", "source": "windsurf"},
+        ])
+        h = ExternalToolHarvester(sessions_dir=tmp_path)
+        results = h.harvest()
+        assert len(results) == 1
+        assert results[0].source == "windsurf"
+
+    def test_creates_dir_if_missing(self, tmp_path):
+        target = tmp_path / "new_external"
+        h = ExternalToolHarvester(sessions_dir=target)
+        results = h.harvest()
+        assert results == []
+        assert target.exists()
+
+    def test_skips_meta_conversation(self, tmp_path):
+        self._write_session(tmp_path / "s1.jsonl", [
+            {"role": "user", "content": "ok"},
+            {"role": "assistant", "content": "sure"},
+        ])
+        h = ExternalToolHarvester(sessions_dir=tmp_path)
+        assert h.harvest() == []
+
+    def test_domain_detection(self, tmp_path):
+        self._write_session(tmp_path / "s1.jsonl", [
+            {"role": "user", "content": "Check this code for SQL injection vulnerabilities and XSS exploits."},
+            {"role": "assistant", "content": "I found two SQL injection vectors and one reflected XSS vulnerability."},
+        ])
+        h = ExternalToolHarvester(sessions_dir=tmp_path)
+        results = h.harvest()
+        assert len(results) == 1
+        assert results[0].domain == "security"
+
+    def test_thinking_extraction(self, tmp_path):
+        self._write_session(tmp_path / "s1.jsonl", [
+            {"role": "user", "content": "What design patterns should I use for a plugin architecture?"},
+            {"role": "assistant", "content": "<think>Plugin patterns needed</think>Use the strategy and observer patterns for extensible plugins."},
+        ])
+        h = ExternalToolHarvester(sessions_dir=tmp_path)
+        results = h.harvest()
+        assert len(results) == 1
+        assert len(results[0].thinking_blocks) == 1
+
+
+# ── _SessionWriter (CLI → distillation bridge) ───────────────────
+
+
+class TestSessionWriter:
+    def test_writes_jsonl_records(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("able.cli.chat._SESSIONS_DIR", tmp_path)
+        from able.cli.chat import _SessionWriter
+        w = _SessionWriter("test-session")
+        w.write("user", "Hello world")
+        w.write("assistant", "Hi there", model="test-model")
+
+        lines = (tmp_path / "test-session.jsonl").read_text().strip().split("\n")
+        assert len(lines) == 2
+
+        r1 = json.loads(lines[0])
+        assert r1["role"] == "user"
+        assert r1["content"] == "Hello world"
+        assert "ts" in r1
+
+        r2 = json.loads(lines[1])
+        assert r2["role"] == "assistant"
+        assert r2["model"] == "test-model"
+
+    def test_session_files_harvestable(self, tmp_path, monkeypatch):
+        """End-to-end: _SessionWriter → CLISessionHarvester picks it up."""
+        monkeypatch.setattr("able.cli.chat._SESSIONS_DIR", tmp_path)
+        from able.cli.chat import _SessionWriter
+        w = _SessionWriter("e2e-session")
+        w.write("user", "Explain how database indexing works and when to use composite indexes.")
+        w.write("assistant", "Database indexes are B-tree structures that speed up lookups. Composite indexes cover multi-column queries.")
+
+        h = CLISessionHarvester(sessions_dir=tmp_path)
+        results = h.harvest()
+        assert len(results) == 1
+        assert results[0].source == "able_cli"
+        assert len(results[0].messages) == 2

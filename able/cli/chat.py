@@ -16,6 +16,37 @@ from typing import Optional
 
 from able.core.approval.workflow import ApprovalResult, ApprovalStatus, ApprovalWorkflow
 
+# ── Session writer (feeds CLISessionHarvester → distillation) ─────────────
+
+_SESSIONS_DIR = Path.home() / ".able" / "sessions"
+
+
+class _SessionWriter:
+    """Append per-turn JSONL to ~/.able/sessions/{session_id}.jsonl.
+
+    This is the bridge between CLI chat and the distillation pipeline.
+    CLISessionHarvester reads these files during the nightly harvest.
+    """
+
+    def __init__(self, session_id: str) -> None:
+        self._dir = _SESSIONS_DIR
+        self._dir.mkdir(parents=True, exist_ok=True)
+        self._path = self._dir / f"{session_id}.jsonl"
+
+    def write(self, role: str, content: str, **extra: object) -> None:
+        record = {
+            "role": role,
+            "content": content,
+            "ts": datetime.now(timezone.utc).isoformat(),
+            **extra,
+        }
+        try:
+            with open(self._path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(record, default=str) + "\n")
+        except OSError:
+            pass  # Non-fatal — don't break chat for a write failure
+
+
 # ── ANSI helpers ──────────────────────────────────────────────────────────
 BOLD = "\033[1m"
 DIM = "\033[2m"
@@ -1043,6 +1074,9 @@ async def run_chat(args: argparse.Namespace) -> int:
         render_legendary_unlock=render_legendary_unlock,
     )
 
+    # ── Session writer (feeds distillation pipeline) ────────────
+    session_writer = _SessionWriter(args.session)
+
     # ── Chat loop ─────────────────────────────────────────────────
     spinner = _Spinner()
     try:
@@ -1071,6 +1105,7 @@ async def run_chat(args: argparse.Namespace) -> int:
                 {"user_id": args.session, "message": message,
                  "direction": "inbound", "channel": "cli"},
             )
+            session_writer.write("user", message)
 
             # ── Get response ──────────────────────────────────────────
             t0 = time.monotonic()
@@ -1160,6 +1195,8 @@ async def run_chat(args: argparse.Namespace) -> int:
                 {"user_id": "able", "message": response,
                  "direction": "outbound", "channel": "cli"},
             )
+            session_writer.write("assistant", response, model=getattr(
+                gateway, '_last_provider', 'unknown'))
 
             # ── Buddy level-up check ─────────────────────────────────
             try:

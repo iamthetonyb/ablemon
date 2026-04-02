@@ -119,10 +119,15 @@ All four learning feedback loops are closed and tested:
 - Pluggable ASR: `VoiceTranscriber` supports ExternalASR (HTTP endpoint for Voxtral/Qwen3), OpenAI Whisper (legacy), LocalWhisper. Selected via `ABLE_ASR_PROVIDER` / `ABLE_ASR_ENDPOINT`.
 - Default ASR endpoint not yet configured — operator provides their preferred model endpoint.
 
+**Distillation pipeline fully closed**:
+- CLI sessions now write per-turn JSONL to `~/.able/sessions/` — CLISessionHarvester picks them up during nightly harvest
+- ExternalToolHarvester reads `~/.able/external_sessions/*.jsonl` for third-party AI tool learning (Cursor, Windsurf, Copilot, etc.)
+- All learning loops are autonomous: interaction → evolution (3am), all sources → distillation (2am), buddy XP awarded on harvest/deploy
+
 **Test suite**:
-- Full-suite pass: 662 tests, 0 deprecation warnings
+- Full-suite pass: 677 tests, 0 deprecation warnings
 - datetime.utcnow() replaced with datetime.now(timezone.utc) across all tenant modules
-- New tests: stream circuit breaker, input validation, rate limiting, provider chain fallback
+- New tests: stream circuit breaker, input validation, rate limiting, provider chain fallback, CLI session harvesting, external tool harvesting
 
 Plus: resource action tool, control-plane endpoint tests, legacy shim removal, CLI slash commands (/resources, /eval, /evolve, /buddy, /battle).
 
