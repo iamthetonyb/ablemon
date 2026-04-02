@@ -693,6 +693,7 @@ def test_buddy_apply_needs_decay():
 
 def test_needs_persist_through_save_load(tmp_path, monkeypatch):
     monkeypatch.setattr("able.core.buddy.model.BUDDY_PATH", tmp_path / "buddy.yaml")
+    monkeypatch.setattr("able.core.buddy.model.BUDDY_COLLECTION_PATH", tmp_path / "buddy_collection.yaml")
     buddy = BuddyState(
         name="Ember", species="blaze",
         needs_hunger=42.5, needs_thirst=65.0, needs_energy=88.0,

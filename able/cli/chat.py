@@ -252,12 +252,21 @@ _DISTILLATION_OPTIONS = [
 ]
 
 
+class _SetupExit(Exception):
+    """Raised when the user wants to exit during setup."""
+
+
+_EXIT_WORDS = {"/exit", "/quit", "/q", "exit", "quit"}
+
+
 async def _choose_profile_option(title: str, options: list[tuple[str, str]]) -> str:
     print(f"\n  {_c(BOLD, title)}")
     for idx, (value, description) in enumerate(options, 1):
         print(f"    [{idx}] {value.replace('-', ' ')} — {description}")
     while True:
         choice = (await asyncio.to_thread(input, "  pick a number (Enter for recommended): ")).strip()
+        if choice.lower() in _EXIT_WORDS:
+            raise _SetupExit()
         if not choice:
             return options[0][0]
         if choice.isdigit():
@@ -280,6 +289,7 @@ async def _buddy_onboarding_flow(update_collection_profile):
     """Capture operator-facing preferences after the starter is chosen."""
     print(f"\n  {_c(BOLD, 'buddy onboarding')}")
     print("  This sets the companion up for your main domain focus and preferred distillation lane.")
+    print(f"  {_c(DIM, 'Type /exit at any prompt to quit.')}")
     focus = await _choose_profile_option("Primary focus", _FOCUS_OPTIONS)
     work_style = await _choose_profile_option("Work style", _WORK_STYLE_OPTIONS)
     distillation_track = await _choose_profile_option("Distillation track", _DISTILLATION_OPTIONS)
@@ -296,7 +306,7 @@ async def _buddy_onboarding_flow(update_collection_profile):
 
 
 async def _buddy_setup_flow(
-    Species,
+    STARTER_SPECIES,
     create_starter_buddy,
     save_buddy,
     render_starter_selection,
@@ -304,41 +314,58 @@ async def _buddy_setup_flow(
     *,
     allow_skip: bool,
 ):
-    """Quick inline buddy creation. Returns buddy or None."""
-    species_list = list(Species)
+    """Quick inline buddy creation. Returns buddy or None.
+
+    Only the 5 starter species are selectable. Aether is a hidden unlock.
+    Type /exit, /quit, or /q at any prompt to bail out.
+    """
+    starter_count = len(STARTER_SPECIES)
     print(render_starter_selection())
     while True:
         try:
             choice = await asyncio.to_thread(
                 input,
-                f"  {_c(GREEN, 'pick')} [1-{len(species_list)}]"
+                f"  {_c(GREEN, 'pick')} [1-{starter_count}]"
                 + (" or Enter to skip: " if allow_skip else ": "),
             )
             choice = choice.strip().lower()
+            if choice in _EXIT_WORDS:
+                print(_c(DIM, "  bye"))
+                raise SystemExit(0)
             if allow_skip and (not choice or choice in {"s", "skip"}):
                 return None
             if choice.isdigit():
                 idx = int(choice) - 1
-                if 0 <= idx < len(species_list):
-                    chosen = species_list[idx]
+                if 0 <= idx < starter_count:
+                    chosen = STARTER_SPECIES[idx]
                     default_name = chosen.value.capitalize()
-                    name = (await asyncio.to_thread(input, f"  {_c(CYAN, 'name')} [{default_name}]: ")).strip() or default_name
-                    phrase = (await asyncio.to_thread(input, "  catch phrase (Enter to use the default): ")).strip()
+                    name_input = (await asyncio.to_thread(input, f"  {_c(CYAN, 'name')} [{default_name}]: ")).strip()
+                    if name_input.lower() in _EXIT_WORDS:
+                        print(_c(DIM, "  bye"))
+                        raise SystemExit(0)
+                    name = name_input or default_name
+                    phrase_input = (await asyncio.to_thread(input, "  catch phrase (Enter to use the default): ")).strip()
+                    if phrase_input.lower() in _EXIT_WORDS:
+                        print(_c(DIM, "  bye"))
+                        raise SystemExit(0)
                     buddy = create_starter_buddy(
                         name=name,
                         species=chosen,
-                        catch_phrase=phrase,
+                        catch_phrase=phrase_input,
                         created_at=datetime.now(timezone.utc).isoformat(),
                     )
                     save_buddy(buddy)
-                    await _buddy_onboarding_flow(update_collection_profile)
+                    try:
+                        await _buddy_onboarding_flow(update_collection_profile)
+                    except _SetupExit:
+                        print(_c(DIM, "  skipped onboarding — you can finish later with /buddy setup"))
                     shiny_tag = " shiny!" if buddy.is_shiny else ""
                     print(f"  {buddy.display_emoji} {name} the {buddy.meta['label']} joins you!{shiny_tag}")
                     return buddy
             if allow_skip:
-                print(f"  {_c(YELLOW, 'choose 1-5 or press Enter to skip')}")
+                print(f"  {_c(YELLOW, f'choose 1-{starter_count} or press Enter to skip')}")
             else:
-                print(f"  {_c(YELLOW, 'starter selection is required — choose 1-5')}")
+                print(f"  {_c(YELLOW, f'starter selection is required — choose 1-{starter_count}')}")
         except (EOFError, KeyboardInterrupt):
             break
     return None
@@ -391,7 +418,7 @@ def _print_collection_updates(before_collection, after_collection) -> None:
 
 async def _handle_slash(message, gateway, args, buddy, load_buddy, save_buddy,
                         load_buddy_collection, switch_active_buddy, update_collection_profile, record_collection_progress,
-                        Species, create_starter_buddy, render_full, render_banner, render_backpack,
+                        STARTER_SPECIES, create_starter_buddy, render_full, render_banner, render_backpack,
                         render_starter_selection, render_battle_result, render_evolution, render_legendary_unlock):
     """Handle slash commands. Returns (handled: bool, updated_buddy)."""
     if message in {"/exit", "/quit", "/q"}:
@@ -506,7 +533,7 @@ async def _handle_slash(message, gateway, args, buddy, load_buddy, save_buddy,
                     from able.core.buddy.model import reset_buddy_collection
                     reset_buddy_collection()
                     buddy = await _buddy_setup_flow(
-                        Species,
+                        STARTER_SPECIES,
                         create_starter_buddy,
                         save_buddy,
                         render_starter_selection,
@@ -515,11 +542,14 @@ async def _handle_slash(message, gateway, args, buddy, load_buddy, save_buddy,
                     )
                     return True, buddy
                 print(render_backpack(collection))
-                await _buddy_onboarding_flow(update_collection_profile)
+                try:
+                    await _buddy_onboarding_flow(update_collection_profile)
+                except _SetupExit:
+                    print(_c(DIM, "  skipped onboarding — you can finish later with /buddy setup"))
                 print(_c(DIM, "  starter team kept. use /buddy switch <name> to rotate."))
                 return True, load_buddy()
             buddy = await _buddy_setup_flow(
-                Species,
+                STARTER_SPECIES,
                 create_starter_buddy,
                 save_buddy,
                 render_starter_selection,
@@ -535,7 +565,7 @@ async def _handle_slash(message, gateway, args, buddy, load_buddy, save_buddy,
                 from able.core.buddy.model import reset_buddy_collection
                 reset_buddy_collection()
                 buddy = await _buddy_setup_flow(
-                    Species,
+                    STARTER_SPECIES,
                     create_starter_buddy,
                     save_buddy,
                     render_starter_selection,
@@ -543,7 +573,10 @@ async def _handle_slash(message, gateway, args, buddy, load_buddy, save_buddy,
                     allow_skip=False,
                 )
                 return True, buddy
-            await _buddy_onboarding_flow(update_collection_profile)
+            try:
+                await _buddy_onboarding_flow(update_collection_profile)
+            except _SetupExit:
+                print(_c(DIM, "  skipped onboarding — you can finish later with /buddy setup"))
             collection = load_buddy_collection()
             buddy = load_buddy()
         if buddy:
@@ -552,7 +585,7 @@ async def _handle_slash(message, gateway, args, buddy, load_buddy, save_buddy,
                 print(render_backpack(collection))
         else:
             buddy = await _buddy_setup_flow(
-                Species,
+                STARTER_SPECIES,
                 create_starter_buddy,
                 save_buddy,
                 render_starter_selection,
@@ -631,6 +664,7 @@ async def run_chat(args: argparse.Namespace) -> int:
         update_collection_profile,
         record_collection_progress,
         Species,
+        STARTER_SPECIES,
         create_starter_buddy,
     )
     from able.core.buddy.renderer import (
@@ -645,7 +679,7 @@ async def run_chat(args: argparse.Namespace) -> int:
             print(_c(DIM, "  starter selection is required to finish initial setup."))
             reset_buddy_collection()
         buddy = await _buddy_setup_flow(
-            Species,
+            STARTER_SPECIES,
             create_starter_buddy,
             save_buddy,
             render_starter_selection,
@@ -723,7 +757,7 @@ async def run_chat(args: argparse.Namespace) -> int:
                 handled, buddy = await _handle_slash(
                     message, gateway, args, buddy, load_buddy, save_buddy,
                     load_buddy_collection, switch_active_buddy, update_collection_profile, record_collection_progress,
-                    Species, create_starter_buddy, render_full, render_banner, render_backpack,
+                    STARTER_SPECIES, create_starter_buddy, render_full, render_banner, render_backpack,
                     render_starter_selection, render_battle_result, render_evolution, render_legendary_unlock,
                 )
                 if handled:
