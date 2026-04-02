@@ -288,6 +288,18 @@ Training lanes:
     - The Telegram research summary now points at `~/.able/reports/research/latest.md` instead of a vague repo-relative directory.
     - Control plane now exposes real Strix status (`inactive` / `available` / `configured` / `misconfigured`) rather than a placeholder note.
     - Weekly self-pentest can optionally run a Strix sidecar scan when `ABLE_ENABLE_STRIX_PENTEST=1`, `STRIX_LLM`, `LLM_API_KEY`, and the `strix` CLI are present.
+19. **Buddy wired into all system events**:
+    - Evolution daemon: auto_improve eval passes feed `buddy.eval_passes` + hunger
+    - Morning briefing (9am): LLM prompt includes buddy level, mood, needs, battle record
+    - Evening check-in (9pm): LLM prompt includes buddy mood + action suggestions
+    - Nightly research (1am): counts as research domain exploration XP
+    - Weekly research (Sun 10am): counts as higher-complexity research interaction
+    - Autopilot (5am): awards XP for objectives + distillation pairs
+    - Nightly distillation (2am): awards 3 XP per new pair
+    - Evolution daemon (3am): awards 30 XP + thirst on deploy
+    - `buddy-walk` (every 2h): 5 passive XP + 8 energy + decay + evolution checks
+20. **`datetime.utcnow()` eliminated**: all 14 occurrences across tenant modules replaced with `datetime.now(timezone.utc)` — 0 deprecation warnings in test suite.
+21. **PhasedCoordinatorProtocol merged**: 4-phase agent execution for swarm (from `wu-g` branch).
 
 ## Next-Run Objectives
 
