@@ -16,6 +16,9 @@ from .model import (
     EVOLUTION_REQUIREMENTS,
     LEGENDARY_REQUIREMENTS,
     CATCH_PROGRESS_TARGET,
+    STARTER_SPECIES,
+    HIDDEN_SIGNAL_SPECIES,
+    SECRET_SIGNAL_LEVEL,
     Stage,
     Species,
 )
@@ -257,7 +260,10 @@ def render_backpack(collection: BuddyCollection | None) -> str:
     lines.append(f"{'=' * 54}")
 
     owned = collection.list_buddies()
-    lines.append(f"  Caught: {len(owned)}/{len(Species)}")
+    starter_ids = {species.value for species in STARTER_SPECIES}
+    starter_owned = [buddy for buddy in owned if buddy.species in starter_ids]
+    hidden_buddy = next((buddy for buddy in owned if buddy.species == HIDDEN_SIGNAL_SPECIES.value), None)
+    lines.append(f"  Caught: {len(starter_owned)}/{len(STARTER_SPECIES)} starters")
     if collection.operator_profile:
         focus = collection.operator_profile.get("focus", "unset")
         work_style = collection.operator_profile.get("work_style", "unset")
@@ -265,7 +271,7 @@ def render_backpack(collection: BuddyCollection | None) -> str:
         lines.append(
             f"  Operator profile: {focus} · {work_style} · {distillation}"
         )
-    for buddy in owned:
+    for buddy in starter_owned:
         active = "▶" if collection.active_species == buddy.species else " "
         stage = STAGE_NAMES[buddy.stage_enum]
         lines.append(
@@ -273,7 +279,7 @@ def render_backpack(collection: BuddyCollection | None) -> str:
             f"Lv.{buddy.level:<3} {stage:<8} {buddy.rarity_label}"
         )
 
-    missing = [species for species in Species if species.value not in collection.buddies]
+    missing = [species for species in STARTER_SPECIES if species.value not in collection.buddies]
     if missing:
         lines.append(f"{'─' * 54}")
         lines.append("  Uncaught")
@@ -284,6 +290,23 @@ def render_backpack(collection: BuddyCollection | None) -> str:
                 f"  [{progress:>2}/{CATCH_PROGRESS_TARGET}] {meta['emoji']} {meta['label']} "
                 f"· {meta['best_for']}"
             )
+
+    lines.append(f"{'─' * 54}")
+    if hidden_buddy:
+        secret_stage = STAGE_NAMES[hidden_buddy.stage_enum]
+        lines.append("  Secret Signal")
+        lines.append(
+            f"  {'▶' if collection.active_species == hidden_buddy.species else ' '} "
+            f"{hidden_buddy.display_emoji} {hidden_buddy.name} "
+            f"Lv.{hidden_buddy.level} {secret_stage} {hidden_buddy.rarity_label}"
+        )
+        if hidden_buddy.level < SECRET_SIGNAL_LEVEL or not hidden_buddy.is_legendary:
+            lines.append(
+                f"  Final mastery path: Stage 3 + legendary + level {SECRET_SIGNAL_LEVEL}"
+            )
+    else:
+        lines.append("  Secret Signal")
+        lines.append("  ??? Locked — complete the full starter dex to awaken it.")
 
     if collection.badges:
         lines.append(f"{'─' * 54}")
@@ -312,7 +335,7 @@ def render_starter_selection() -> str:
     lines.append(f"{'=' * 72}")
     lines.append("")
 
-    for i, species in enumerate(SPECIES_META, 1):
+    for i, species in enumerate(STARTER_SPECIES, 1):
         meta = SPECIES_META[species]
         emoji = meta["emoji"]
         label = meta["label"]

@@ -373,7 +373,10 @@ def _print_collection_updates(before_collection, after_collection) -> None:
                 k: v for k, v in active.items()
                 if k in BuddyState.__dataclass_fields__
             })
-        print(f"  🎒 caught {buddy.display_emoji} {buddy.name} the {buddy.meta['label']}!")
+        if species_id == "aether":
+            print(f"  ✨ sixth signal awakened: {buddy.display_emoji} {buddy.name} the {buddy.meta['label']}!")
+        else:
+            print(f"  🎒 caught {buddy.display_emoji} {buddy.name} the {buddy.meta['label']}!")
 
     for badge in after_collection.badges:
         badge_id = badge.get("id", "")

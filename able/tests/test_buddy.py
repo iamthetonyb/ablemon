@@ -13,6 +13,8 @@ from able.core.buddy.model import (
     Species,
     Stage,
     CATCH_PROGRESS_TARGET,
+    SECRET_SIGNAL_LEVEL,
+    STARTER_SPECIES,
     EVOLUTION_REQUIREMENTS,
     LEGENDARY_REQUIREMENTS,
     load_buddy,
@@ -280,7 +282,7 @@ def test_full_collection_unlocks_badges_and_easter_egg(tmp_path, monkeypatch):
     monkeypatch.setattr("able.core.buddy.model.BUDDY_PATH", tmp_path / "buddy.yaml")
     monkeypatch.setattr("able.core.buddy.model.BUDDY_COLLECTION_PATH", tmp_path / "buddy_collection.yaml")
 
-    for species in Species:
+    for species in STARTER_SPECIES:
         buddy = BuddyState(
             name=species.value.capitalize(),
             species=species.value,
@@ -299,10 +301,57 @@ def test_full_collection_unlocks_badges_and_easter_egg(tmp_path, monkeypatch):
     assert collection is not None
     badge_ids = {badge["id"] for badge in collection.badges}
     assert "full-dex" in badge_ids
+    assert "sixth-signal" in badge_ids
     assert "evolution-league" in badge_ids
     assert "legendary-league" in badge_ids
     assert "master-trainer" in badge_ids
     assert collection.easter_egg_title
+    assert any(buddy.species == "aether" for buddy in collection.list_buddies())
+
+
+def test_secret_signal_crown_unlocks_after_hidden_buddy_mastery(tmp_path, monkeypatch):
+    monkeypatch.setattr("able.core.buddy.model.BUDDY_PATH", tmp_path / "buddy.yaml")
+    monkeypatch.setattr("able.core.buddy.model.BUDDY_COLLECTION_PATH", tmp_path / "buddy_collection.yaml")
+
+    for species in STARTER_SPECIES:
+        starter = BuddyState(
+            name=species.value.capitalize(),
+            species=species.value,
+            stage=Stage.EVOLVED.value,
+            xp=xp_for_level(LEGENDARY_REQUIREMENTS["min_level"]),
+            eval_passes=LEGENDARY_REQUIREMENTS["min_eval_passes"],
+            battles_won=LEGENDARY_REQUIREMENTS["min_battles_won"],
+            best_battle_streak=LEGENDARY_REQUIREMENTS["min_battle_streak"],
+            distillation_pairs=LEGENDARY_REQUIREMENTS["min_distillation_pairs"],
+            evolution_deploys=LEGENDARY_REQUIREMENTS["min_evolution_deploys"],
+            legendary_title="Unlocked",
+        )
+        save_buddy(starter)
+
+    secret = next(
+        buddy for buddy in load_buddy_collection().list_buddies()  # type: ignore[union-attr]
+        if buddy.species == "aether"
+    )
+    secret.stage = Stage.EVOLVED.value
+    secret.xp = xp_for_level(SECRET_SIGNAL_LEVEL)
+    secret.legendary_title = "Prime Orchestrator"
+    save_buddy(secret)
+
+    collection = load_buddy_collection()
+    assert collection is not None
+    badge_ids = {badge["id"] for badge in collection.badges}
+    assert "signal-crown" in badge_ids
+
+
+def test_trainer_badge_unlocks_on_first_evolution(tmp_path, monkeypatch):
+    monkeypatch.setattr("able.core.buddy.model.BUDDY_PATH", tmp_path / "buddy.yaml")
+    monkeypatch.setattr("able.core.buddy.model.BUDDY_COLLECTION_PATH", tmp_path / "buddy_collection.yaml")
+
+    save_buddy(BuddyState(name="Ember", species="blaze", stage=Stage.TRAINED.value))
+    collection = load_buddy_collection()
+    assert collection is not None
+    badge_ids = {badge["id"] for badge in collection.badges}
+    assert "trainer" in badge_ids
 
 
 # ── Renderer tests ───────────────────────────────────────────────────────
@@ -365,6 +414,7 @@ def test_render_starter_selection_lists_all_species():
     assert "Root" in output
     assert "Spark" in output
     assert "Phantom" in output
+    assert "Aether" not in output
 
 
 def test_render_starter_selection_explains_roles_and_routing_scope():
@@ -392,9 +442,10 @@ def test_render_backpack_shows_owned_and_uncaught_species(tmp_path, monkeypatch)
     )
     output = render_backpack(load_buddy_collection())
     assert "Buddy Backpack" in output
-    assert "Caught: 1/5" in output
+    assert "Caught: 1/5 starters" in output
     assert "Operator profile:" in output
     assert "Uncaught" in output
+    assert "Secret Signal" in output
 
 
 def test_render_evolution_announcement():

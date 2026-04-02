@@ -41,6 +41,7 @@ All four learning feedback loops are closed and tested:
 
 **Buddy gamification system** (system-wide, all channels):
 - 5 starter species, 3 evolution stages, XP from real interactions
+- Hidden endgame species: `Aether`, the sixth-signal orchestrator unlock, sits outside the normal starter pool
 - Deterministic shiny starter hatch + earned legendary form tied to real runtime milestones
 - Interactive first-run setup now requires a real starter pick plus onboarding for `focus`, `work_style`, and `distillation_track`
 - Backpack/collection system is live: `/buddy bag`, `/buddy switch <name>`, badges, full-dex completion, and easter egg unlocks

@@ -28,6 +28,17 @@ class Species(Enum):
     ROOT = "root"         # Builder — deploy, infra, automation
     SPARK = "spark"       # Creative — copywriting, design, content
     PHANTOM = "phantom"   # Security — audits, threat analysis, hardening
+    AETHER = "aether"     # Secret — master/orchestrator archetype
+
+
+STARTER_SPECIES = (
+    Species.BLAZE,
+    Species.WAVE,
+    Species.ROOT,
+    Species.SPARK,
+    Species.PHANTOM,
+)
+HIDDEN_SIGNAL_SPECIES = Species.AETHER
 
 
 SPECIES_META = {
@@ -186,6 +197,37 @@ SPECIES_META = {
             "  ╰~~╯  ",
         ],
     },
+    Species.AETHER: {
+        "emoji": "\U0001f409",
+        "label": "Aether",
+        "desc": "The hidden sixth signal. Orchestrates the whole field.",
+        "element": "Dragon/Psychic",
+        "role": "Orchestrator",
+        "best_for": "cross-domain orchestration, synthesis, and mastery across the full ABLE stack",
+        "abilities": ["team orchestration", "cross-domain mastery", "signal fusion"],
+        "bonus_domains": ["coding", "research", "production", "creative", "security"],
+        "art_stage1": [
+            "   ╭◇╮   ",
+            "  ╭┤◉├╮  ",
+            "   ╰┬┬╯   ",
+            "  ≋╱╲≋  ",
+        ],
+        "art_stage2": [
+            "  ╭─◇─╮  ",
+            " ╭┤ ✦ ├╮ ",
+            " ││◉ ◉││ ",
+            " ╰┤╱╲├╯ ",
+            "  ≋╰╯≋  ",
+        ],
+        "art_stage3": [
+            " ╭──◇◇──╮ ",
+            "╭┤  ✦✦  ├╮",
+            "││ ◉  ◉ ││",
+            "││╭────╮││",
+            "╰┤╱╲╱╲╱├╯",
+            " ≋╰────╯≋ ",
+        ],
+    },
 }
 
 
@@ -229,6 +271,7 @@ LEGENDARY_TITLES = {
     Species.ROOT: "Ironroot Warden",
     Species.SPARK: "Storm Scribe",
     Species.PHANTOM: "Night Sentinel",
+    Species.AETHER: "Prime Orchestrator",
 }
 
 LEGENDARY_REQUIREMENTS = {
@@ -246,6 +289,7 @@ LEGENDARY_REQUIREMENTS = {
 }
 
 CATCH_PROGRESS_TARGET = 12
+SECRET_SIGNAL_LEVEL = 50
 
 BADGE_DEFS = {
     "starter-license": {
@@ -256,9 +300,17 @@ BADGE_DEFS = {
         "title": "Field Guide",
         "description": "Catch at least 3 buddy species.",
     },
+    "trainer": {
+        "title": "Trainer",
+        "description": "Earn your first real evolution or fully build one buddy.",
+    },
     "full-dex": {
         "title": "Full Dex",
         "description": "Catch all 5 starter species.",
+    },
+    "sixth-signal": {
+        "title": "Sixth Signal",
+        "description": "Unlock the hidden orchestrator buddy.",
     },
     "evolution-league": {
         "title": "Evolution League",
@@ -272,13 +324,17 @@ BADGE_DEFS = {
         "title": "Master Trainer",
         "description": "Reach level 40 with the full roster.",
     },
+    "signal-crown": {
+        "title": "Signal Crown",
+        "description": "Fully evolve and level the hidden sixth signal to its final form.",
+    },
 }
 
 OMNIDEX_EASTER_EGG = {
-    "title": "Apex Archive",
+    "title": "Sixth Signal",
     "message": (
-        "100% completion reached. You caught the full ABLE dex, "
-        "evolved every line, and awakened the hidden sixth signal."
+        "100% starter completion reached. Aether, the hidden sixth signal, "
+        "has awakened as the orchestrator of the whole roster."
     ),
 }
 
@@ -770,6 +826,18 @@ class BuddyCollection:
         return {badge.get("id", "") for badge in self.badges}
 
 
+def _starter_buddies(buddies: List[BuddyState]) -> List[BuddyState]:
+    starter_ids = {species.value for species in STARTER_SPECIES}
+    return [buddy for buddy in buddies if buddy.species in starter_ids]
+
+
+def _secret_signal_buddy(buddies: List[BuddyState]) -> Optional[BuddyState]:
+    for buddy in buddies:
+        if buddy.species == HIDDEN_SIGNAL_SPECIES.value:
+            return buddy
+    return None
+
+
 def starter_is_shiny(
     *,
     name: str,
@@ -803,6 +871,20 @@ def create_starter_buddy(
         catch_phrase=catch_phrase or SPECIES_META[species]["desc"],
         created_at=created,
         is_shiny=starter_is_shiny(name=name, species=species, created_at=created),
+    )
+
+
+def create_hidden_signal_buddy(*, created_at: str = "") -> BuddyState:
+    """Create the hidden orchestrator buddy unlocked from full completion."""
+    created = created_at or datetime.now(timezone.utc).isoformat()
+    return BuddyState(
+        name=SPECIES_META[HIDDEN_SIGNAL_SPECIES]["label"],
+        species=HIDDEN_SIGNAL_SPECIES.value,
+        stage=Stage.STARTER.value,
+        xp=0,
+        catch_phrase="Master of the full signal field.",
+        created_at=created,
+        is_shiny=False,
     )
 
 
@@ -880,48 +962,87 @@ def _unlock_badge(collection: BuddyCollection, badge_id: str) -> Optional[Dict[s
 
 def _refresh_collection_rewards(collection: BuddyCollection) -> Dict[str, Any]:
     buddies = collection.list_buddies()
-    total_species = len(Species)
+    starter_buddies = _starter_buddies(buddies)
+    starter_total = len(STARTER_SPECIES)
+    secret_buddy = _secret_signal_buddy(buddies)
     new_badges: List[Dict[str, str]] = []
+    new_buddies: List[BuddyState] = []
 
     if len(buddies) >= 1:
         badge = _unlock_badge(collection, "starter-license")
         if badge:
             new_badges.append(badge)
-    if len(buddies) >= 3:
+    if any(b.stage >= Stage.TRAINED.value or b.level >= Stage.EVOLVED.value for b in buddies):
+        badge = _unlock_badge(collection, "trainer")
+        if badge:
+            new_badges.append(badge)
+    if len(starter_buddies) >= 3:
         badge = _unlock_badge(collection, "field-guide")
         if badge:
             new_badges.append(badge)
-    if len(buddies) == total_species:
+    if len(starter_buddies) == starter_total:
         badge = _unlock_badge(collection, "full-dex")
         if badge:
             new_badges.append(badge)
-    if len(buddies) == total_species and all(b.stage >= Stage.EVOLVED.value for b in buddies):
+    if (
+        len(starter_buddies) == starter_total
+        and all(b.stage >= Stage.EVOLVED.value for b in starter_buddies)
+    ):
         badge = _unlock_badge(collection, "evolution-league")
         if badge:
             new_badges.append(badge)
-    if len(buddies) == total_species and all(b.is_legendary for b in buddies):
+    if (
+        len(starter_buddies) == starter_total
+        and all(b.is_legendary for b in starter_buddies)
+    ):
         badge = _unlock_badge(collection, "legendary-league")
         if badge:
             new_badges.append(badge)
-    if len(buddies) == total_species and all(b.level >= LEGENDARY_REQUIREMENTS["min_level"] for b in buddies):
+    if (
+        len(starter_buddies) == starter_total
+        and all(b.level >= LEGENDARY_REQUIREMENTS["min_level"] for b in starter_buddies)
+    ):
         badge = _unlock_badge(collection, "master-trainer")
         if badge:
             new_badges.append(badge)
 
     easter_egg_unlocked = False
     if (
-        len(buddies) == total_species
-        and all(b.stage >= Stage.EVOLVED.value for b in buddies)
-        and all(b.is_legendary for b in buddies)
-        and all(b.level >= LEGENDARY_REQUIREMENTS["min_level"] for b in buddies)
-        and not collection.easter_egg_title
+        len(starter_buddies) == starter_total
+        and all(b.stage >= Stage.EVOLVED.value for b in starter_buddies)
+        and all(b.is_legendary for b in starter_buddies)
+        and all(b.level >= LEGENDARY_REQUIREMENTS["min_level"] for b in starter_buddies)
+        and secret_buddy is None
     ):
+        secret_buddy = create_hidden_signal_buddy(
+            created_at=datetime.now(timezone.utc).isoformat()
+        )
+        collection.upsert_buddy(secret_buddy, make_active=False)
+        new_buddies.append(secret_buddy)
+        badge = _unlock_badge(collection, "sixth-signal")
+        if badge:
+            new_badges.append(badge)
         collection.easter_egg_title = OMNIDEX_EASTER_EGG["title"]
         collection.easter_egg_message = OMNIDEX_EASTER_EGG["message"]
         collection.easter_egg_unlocked_at = datetime.now(timezone.utc).isoformat()
         easter_egg_unlocked = True
+    elif secret_buddy and not collection.easter_egg_title:
+        collection.easter_egg_title = OMNIDEX_EASTER_EGG["title"]
+        collection.easter_egg_message = OMNIDEX_EASTER_EGG["message"]
+        collection.easter_egg_unlocked_at = collection.easter_egg_unlocked_at or datetime.now(timezone.utc).isoformat()
+
+    if (
+        secret_buddy
+        and secret_buddy.stage >= Stage.EVOLVED.value
+        and secret_buddy.level >= SECRET_SIGNAL_LEVEL
+        and secret_buddy.is_legendary
+    ):
+        badge = _unlock_badge(collection, "signal-crown")
+        if badge:
+            new_badges.append(badge)
 
     return {
+        "new_buddies": new_buddies,
         "new_badges": new_badges,
         "easter_egg_unlocked": easter_egg_unlocked,
     }
@@ -1045,7 +1166,8 @@ def record_collection_progress(domain: str, *, points: int = 1) -> Dict[str, Any
         return {"new_buddies": [], "new_badges": [], "easter_egg_unlocked": False}
 
     new_buddies: List[BuddyState] = []
-    for species, meta in SPECIES_META.items():
+    for species in STARTER_SPECIES:
+        meta = SPECIES_META[species]
         if domain not in meta.get("bonus_domains", []):
             continue
         current = collection.catch_progress.get(species.value, 0)
@@ -1063,7 +1185,7 @@ def record_collection_progress(domain: str, *, points: int = 1) -> Dict[str, Any
     reward_update = _refresh_collection_rewards(collection)
     save_buddy_collection(collection)
     return {
-        "new_buddies": new_buddies,
+        "new_buddies": new_buddies + reward_update.get("new_buddies", []),
         "new_badges": reward_update["new_badges"],
         "easter_egg_unlocked": reward_update["easter_egg_unlocked"],
     }
