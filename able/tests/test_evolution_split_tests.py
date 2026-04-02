@@ -22,12 +22,12 @@ import pytest
 # Ensure able package is importable
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.evolution.split_test_integration import (
+from able.core.evolution.split_test_integration import (
     EvolutionSplitTestPolicy,
     SplitTestProposal,
     WeightChange,
 )
-from core.evolution.improver import Improvement
+from able.core.evolution.improver import Improvement
 
 
 # ═══════════════════════════════════════════════════════════════

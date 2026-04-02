@@ -14,7 +14,7 @@ import pytest
 # Ensure able package is importable
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.session.session_manager import Session, SessionManager
+from able.core.session.session_manager import Session, SessionManager
 
 
 # ═══════════════════════════════════════════════════════════════

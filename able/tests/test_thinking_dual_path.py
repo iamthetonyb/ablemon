@@ -11,7 +11,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
-from core.providers.base import CompletionResult, UsageStats, strip_thinking_tokens
+from able.core.providers.base import CompletionResult, UsageStats, strip_thinking_tokens
 
 
 def _make_result(content: str) -> CompletionResult:

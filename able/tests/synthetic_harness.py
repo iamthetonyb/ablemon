@@ -39,7 +39,7 @@ import yaml
 # Ensure able package is importable
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.routing.complexity_scorer import ComplexityScorer, ScoringResult
+from able.core.routing.complexity_scorer import ComplexityScorer, ScoringResult
 
 logger = logging.getLogger(__name__)
 

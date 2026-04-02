@@ -12,7 +12,7 @@ import pytest
 # Ensure able package is importable
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.agi.autopilot import (
+from able.core.agi.autopilot import (
     AutoPilot,
     AutoPilotResult,
     ComparisonPair,
@@ -20,7 +20,7 @@ from core.agi.autopilot import (
     _load_objectives,
     _parse_simple_yaml,
 )
-from core.agi.planner import GoalPlanner, PlannerResult, SubTask, TaskStatus
+from able.core.agi.planner import GoalPlanner, PlannerResult, SubTask, TaskStatus
 
 
 # ═══════════════════════════════════════════════════════════════

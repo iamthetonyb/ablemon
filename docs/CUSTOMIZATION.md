@@ -1,6 +1,6 @@
-# ATLAS System Customization Guide
+# ABLE System Customization Guide
 
-> **Complete guide to configuring, extending, and securing your ATLAS agent.**
+> **Complete guide to configuring, extending, and securing your ABLE agent.**
 > Start here. This document links to everything else.
 
 ---
@@ -8,19 +8,19 @@
 ## Quick Start
 
 ```bash
-# 1. Initialize ATLAS (creates all directories and default files)
-curl -sL https://raw.githubusercontent.com/your-repo/atlas/main/atlas-setup.sh | bash
+# 1. Initialize ABLE (creates all directories and default files)
+curl -sL https://raw.githubusercontent.com/your-repo/able/main/able-setup.sh | bash
 
 # 2. Configure your identity
-nano ~/.atlas/IDENTITY.md
+nano ~/.able/IDENTITY.md
 
 # 3. Add your API keys
-echo "your-key" > ~/.atlas/.secrets/GROQ_API_KEY
-chmod 600 ~/.atlas/.secrets/*
+echo "your-key" > ~/.able/.secrets/GROQ_API_KEY
+chmod 600 ~/.able/.secrets/*
 
 # 4. Start the gateway
-source ~/.atlas/venv/bin/activate
-python ~/.atlas/atlas_gateway.py
+source ~/.able/venv/bin/activate
+python ~/.able/able_gateway.py
 ```
 
 ---
@@ -67,7 +67,7 @@ python ~/.atlas/atlas_gateway.py
 ## File Structure
 
 ```
-~/.atlas/
+~/.able/
 ├── SOUL.md                    # Core identity (keep under 60 lines)
 ├── IDENTITY.md                # Who you are, your preferences
 ├── AGENTS.md                  # Sub-agent definitions
@@ -117,7 +117,7 @@ python ~/.atlas/atlas_gateway.py
 │   ├── TELEGRAM_BOT_TOKEN
 │   └── ...
 │
-└── atlas_gateway.py           # Main gateway script
+└── able_gateway.py           # Main gateway script
 ```
 
 ---
@@ -132,7 +132,7 @@ This is loaded every session. Keep it under 60 lines.
 # SOUL.md
 
 ## Identity
-I am ATLAS — an autonomous executive AI agent.
+I am ABLE — an autonomous executive AI agent.
 I ship work, protect secrets, and learn continuously.
 
 ## Core Behaviors
@@ -176,7 +176,7 @@ Read SECURITY.md for threat handling.
 - **Batch Notifications**: Yes (don't spam me)
 
 ## Environment
-- **Workspace**: ~/.atlas
+- **Workspace**: ~/.able
 - **Shell**: bash
 - **Editor**: nano/vim
 - **Git**: Configured
@@ -197,12 +197,12 @@ Read SECURITY.md for threat handling.
 
 ## Agent Architecture
 
-ATLAS uses a hub-and-spoke model. The Master agent (you) orchestrates 
+ABLE uses a hub-and-spoke model. The Master agent (you) orchestrates 
 specialized sub-agents for specific tasks.
 
 ## Registered Agents
 
-### Master (ATLAS)
+### Master (ABLE)
 - **Role**: Orchestrator, final authority
 - **Sandbox**: Host (full access)
 - **Trust**: L4 (Autonomous)
@@ -332,7 +332,7 @@ See: clients/{client_id}/SOUL.md for per-client personality.
 
 ## Threat Model
 
-ATLAS defends against:
+ABLE defends against:
 1. **Prompt Injection** — Malicious instructions in content
 2. **Command Injection** — Shell command exploitation  
 3. **Secret Extraction** — Attempts to leak API keys
@@ -545,10 +545,10 @@ This preserves context window for actual work.
 ```bash
 # Create client directory
 CLIENT_ID="acme_corp"
-mkdir -p ~/.atlas/clients/$CLIENT_ID/transcripts
+mkdir -p ~/.able/clients/$CLIENT_ID/transcripts
 
 # Create client context
-cat > ~/.atlas/clients/$CLIENT_ID/context.yaml << 'EOF'
+cat > ~/.able/clients/$CLIENT_ID/context.yaml << 'EOF'
 client:
   id: "acme_corp"
   name: "Acme Corporation"
@@ -570,7 +570,7 @@ created: "2026-02-03"
 EOF
 
 # Create client-specific SOUL (optional)
-cat > ~/.atlas/clients/$CLIENT_ID/SOUL.md << 'EOF'
+cat > ~/.able/clients/$CLIENT_ID/SOUL.md << 'EOF'
 # Client: Acme Corporation
 
 ## Context
@@ -588,7 +588,7 @@ They prefer detailed explanations and formal tone.
 EOF
 
 # Add to index
-echo "  $CLIENT_ID: $(date +%Y-%m-%d)" >> ~/.atlas/clients/CLIENT_INDEX.yaml
+echo "  $CLIENT_ID: $(date +%Y-%m-%d)" >> ~/.able/clients/CLIENT_INDEX.yaml
 ```
 
 ### Client Agent Isolation
@@ -596,17 +596,17 @@ echo "  $CLIENT_ID: $(date +%Y-%m-%d)" >> ~/.atlas/clients/CLIENT_INDEX.yaml
 Each client can have a dedicated Telegram bot:
 
 ```yaml
-# In atlas_gateway.py configuration
+# In able_gateway.py configuration
 clients:
   acme_corp:
     telegram_bot_token: "BOT_TOKEN_FOR_ACME"
     trust_tier: 2
-    workspace: "~/.atlas/clients/acme_corp"
+    workspace: "~/.able/clients/acme_corp"
     
   beta_inc:
     telegram_bot_token: "BOT_TOKEN_FOR_BETA"
     trust_tier: 1
-    workspace: "~/.atlas/clients/beta_inc"
+    workspace: "~/.able/clients/beta_inc"
 ```
 
 All client activity syncs to master audit log.
@@ -618,7 +618,7 @@ All client activity syncs to master audit log.
 ### Rates Configuration
 
 ```yaml
-# ~/.atlas/billing/rates.yaml
+# ~/.able/billing/rates.yaml
 default:
   input_per_million: 6.25
   output_per_million: 31.25
@@ -661,7 +661,7 @@ client_multipliers:
 
 ## AI Providers
 
-ATLAS supports multiple AI providers with automatic fallback.
+ABLE supports multiple AI providers with automatic fallback.
 
 ### Provider Priority
 
@@ -693,15 +693,15 @@ providers:
 
 ```bash
 # Add key
-echo "your-api-key" > ~/.atlas/.secrets/PROVIDER_API_KEY
-chmod 600 ~/.atlas/.secrets/PROVIDER_API_KEY
+echo "your-api-key" > ~/.able/.secrets/PROVIDER_API_KEY
+chmod 600 ~/.able/.secrets/PROVIDER_API_KEY
 
 # Test it
 python -c "
 from openai import OpenAI
 client = OpenAI(
     base_url='https://api.provider.com/v1',
-    api_key=open('$HOME/.atlas/.secrets/PROVIDER_API_KEY').read().strip()
+    api_key=open('$HOME/.able/.secrets/PROVIDER_API_KEY').read().strip()
 )
 r = client.chat.completions.create(
     model='model-name',
@@ -720,26 +720,26 @@ print(r.choices[0].message.content)
 
 ```bash
 # Terminal 1: Run gateway
-source ~/.atlas/venv/bin/activate
-export ATLAS_HOME=~/.atlas
-python ~/.atlas/atlas_gateway.py
+source ~/.able/venv/bin/activate
+export ABLE_HOME=~/.able
+python ~/.able/able_gateway.py
 ```
 
 ### Production (Digital Ocean)
 
 ```bash
 # As root
-cat > /etc/systemd/system/atlas.service << 'EOF'
+cat > /etc/systemd/system/able.service << 'EOF'
 [Unit]
-Description=ATLAS AI Gateway
+Description=ABLE AI Gateway
 After=network.target
 
 [Service]
 Type=simple
-User=atlas
-Environment=ATLAS_HOME=/home/atlas/.atlas
-WorkingDirectory=/home/atlas/.atlas
-ExecStart=/home/atlas/.atlas/venv/bin/python /home/atlas/.atlas/atlas_gateway.py
+User=able
+Environment=ABLE_HOME=/home/able/.able
+WorkingDirectory=/home/able/.able
+ExecStart=/home/able/.able/venv/bin/python /home/able/.able/able_gateway.py
 Restart=always
 RestartSec=10
 
@@ -748,21 +748,21 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable atlas
-systemctl start atlas
+systemctl enable able
+systemctl start able
 ```
 
 ### Monitoring
 
 ```bash
 # View logs
-journalctl -u atlas -f
+journalctl -u able -f
 
 # Check status
-systemctl status atlas
+systemctl status able
 
 # View audit log
-tail -f ~/.atlas/audit/logs/gateway.log
+tail -f ~/.able/audit/logs/gateway.log
 ```
 
 ---
@@ -773,8 +773,8 @@ tail -f ~/.atlas/audit/logs/gateway.log
 
 Another instance is running:
 ```bash
-pkill -f atlas_gateway
-sudo systemctl stop atlas
+pkill -f able_gateway
+sudo systemctl stop able
 sleep 5
 # Then restart
 ```
@@ -784,28 +784,28 @@ sleep 5
 Key is invalid or expired:
 ```bash
 # Check key format
-cat ~/.atlas/.secrets/GROQ_API_KEY
+cat ~/.able/.secrets/GROQ_API_KEY
 
 # Should be one line, no whitespace
 # Re-save if needed:
-echo -n "your-key" > ~/.atlas/.secrets/GROQ_API_KEY
+echo -n "your-key" > ~/.able/.secrets/GROQ_API_KEY
 ```
 
 ### No Response from Bot
 
 Check if gateway is running:
 ```bash
-ps aux | grep atlas_gateway
+ps aux | grep able_gateway
 ```
 
 Check logs:
 ```bash
-tail -50 ~/.atlas/logs/gateway.log
+tail -50 ~/.able/logs/gateway.log
 ```
 
 ---
 
-## Extending ATLAS
+## Extending ABLE
 
 ### Adding New Tools
 
@@ -826,7 +826,7 @@ tail -50 ~/.atlas/logs/gateway.log
 Extensions are Python modules that hook into the gateway:
 
 ```python
-# ~/.atlas/extensions/my_extension.py
+# ~/.able/extensions/my_extension.py
 
 def on_message(message, context):
     """Called for every inbound message"""

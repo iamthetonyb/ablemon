@@ -26,27 +26,27 @@ try:
 except (ImportError, RuntimeError):
     _RATE_LIMITER_AVAILABLE = False
 
-from core.security.trust_gate import TrustGate, TrustTier
-from core.agents.base import ScannerAgent, AuditorAgent, ExecutorAgent, AgentContext, AgentAction, AgentRole
-from core.queue.lane_queue import LaneQueue
-from clients.client_manager import ClientRegistry, ClientTranscriptManager
-from core.providers.nvidia_nim import NVIDIANIMProvider
-from core.providers.openrouter import OpenRouterProvider
-from core.providers.anthropic_provider import AnthropicProvider
-from core.providers.ollama import OllamaProvider
-from core.providers.base import ProviderChain, ProviderConfig, Message, Role
-from core.routing.provider_registry import ProviderRegistry, ProviderTierConfig
-from core.routing.complexity_scorer import ComplexityScorer, ScoringResult
-from core.routing.interaction_log import InteractionLogger, InteractionRecord
-from core.routing.prompt_enricher import PromptEnricher, EnrichmentResult, DeepEnricher
-from core.approval.workflow import ApprovalWorkflow, ApprovalStatus
-from tools.github.client import GitHubClient
-from tools.digitalocean.client import DigitalOceanClient
-from tools.vercel.client import VercelClient
-from scheduler.cron import CronScheduler, register_default_jobs
-from core.gateway.initiative import InitiativeEngine
-from memory.hybrid_memory import HybridMemory, MemoryType
-from core.session.session_manager import SessionManager
+from able.core.security.trust_gate import TrustGate, TrustTier
+from able.core.agents.base import ScannerAgent, AuditorAgent, ExecutorAgent, AgentContext, AgentAction, AgentRole
+from able.core.queue.lane_queue import LaneQueue
+from able.clients.client_manager import ClientRegistry, ClientTranscriptManager
+from able.core.providers.nvidia_nim import NVIDIANIMProvider
+from able.core.providers.openrouter import OpenRouterProvider
+from able.core.providers.anthropic_provider import AnthropicProvider
+from able.core.providers.ollama import OllamaProvider
+from able.core.providers.base import ProviderChain, ProviderConfig, Message, Role
+from able.core.routing.provider_registry import ProviderRegistry, ProviderTierConfig
+from able.core.routing.complexity_scorer import ComplexityScorer, ScoringResult
+from able.core.routing.interaction_log import InteractionLogger, InteractionRecord
+from able.core.routing.prompt_enricher import PromptEnricher, EnrichmentResult, DeepEnricher
+from able.core.approval.workflow import ApprovalWorkflow, ApprovalStatus
+from able.tools.github.client import GitHubClient
+from able.tools.digitalocean.client import DigitalOceanClient
+from able.tools.vercel.client import VercelClient
+from able.scheduler.cron import CronScheduler, register_default_jobs
+from able.core.gateway.initiative import InitiativeEngine
+from able.memory.hybrid_memory import HybridMemory, MemoryType
+from able.core.session.session_manager import SessionManager
 from able.core.control_plane.resources import ResourcePlane
 from able.core.gateway.tool_registry import ToolContext, ToolRegistry, build_default_registry
 from able.tools.search.web_search import WebSearch
@@ -54,7 +54,7 @@ from able.tools.search.web_search import WebSearch
 logger = logging.getLogger(__name__)
 
 try:
-    from tools.voice.transcription import VoiceTranscriber
+    from able.tools.voice.transcription import VoiceTranscriber
     _VOICE_AVAILABLE = True
 except ImportError:
     _VOICE_AVAILABLE = False
@@ -386,7 +386,7 @@ class ABLEGateway:
         # Voice transcription
         if _VOICE_AVAILABLE:
             self.voice_transcriber = VoiceTranscriber()
-            logger.info("Voice transcription available (Whisper)")
+            logger.info("Voice transcription available")
         else:
             self.voice_transcriber = None
 
@@ -1672,8 +1672,12 @@ class ABLEGateway:
             resource_id,
             action,
             approved_by=approved_by,
+            service_token_verified=True,
         )
-        status = 202 if result.get("status") == "approval_required" else 200
+        status_code = {
+            "approval_required": 202,
+            "unauthorized": 403,
+        }.get(result.get("status", ""), 200)
         return web.json_response(result, status=status)
 
     async def _control_collections_handler(self, request: web.Request) -> web.Response:

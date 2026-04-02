@@ -7,7 +7,7 @@
 
 ## Threat Model
 
-ATLAS defends against:
+ABLE defends against:
 
 | Threat | Vector | Impact |
 |--------|--------|--------|
@@ -357,10 +357,10 @@ All security events logged to `audit/logs/security.jsonl`:
 
 ```bash
 # 1. Stop the gateway immediately
-sudo systemctl stop atlas
+sudo systemctl stop able
 
 # 2. Preserve logs
-cp -r ~/.atlas/audit/logs ~/atlas-incident-$(date +%Y%m%d)
+cp -r ~/.able/audit/logs ~/able-incident-$(date +%Y%m%d)
 
 # 3. Rotate all secrets
 # - Generate new API keys
@@ -368,21 +368,21 @@ cp -r ~/.atlas/audit/logs ~/atlas-incident-$(date +%Y%m%d)
 # - Update .secrets/ files
 
 # 4. Review audit trail
-grep -i "critical\|high" ~/atlas-incident-*/security.jsonl
+grep -i "critical\|high" ~/able-incident-*/security.jsonl
 
 # 5. Restart with fresh secrets
-sudo systemctl start atlas
+sudo systemctl start able
 ```
 
 ### Runaway Agent
 
 ```bash
 # Kill all Python processes
-pkill -9 -f atlas_gateway
+pkill -9 -f able_gateway
 
 # Stop any Docker containers
 docker stop $(docker ps -q)
 
 # Review what happened
-tail -100 ~/.atlas/audit/logs/gateway.log
+tail -100 ~/.able/audit/logs/gateway.log
 ```

@@ -1,10 +1,10 @@
-# ATLAS Phoenix Observability
+# ABLE Phoenix Observability
 
-> Tracing, evaluation, and quality scoring for the ATLAS routing pipeline.
+> Tracing, evaluation, and quality scoring for the ABLE routing pipeline.
 
 ## Overview
 
-Phoenix provides end-to-end observability for every request that flows through ATLAS. It traces provider calls, evaluates response quality, and feeds scores back into the distillation corpus builder.
+Phoenix provides end-to-end observability for every request that flows through ABLE. It traces provider calls, evaluates response quality, and feeds scores back into the distillation corpus builder.
 
 ## Setup
 
@@ -14,9 +14,9 @@ Phoenix runs as a self-hosted instance on `localhost:6006`:
 
 ```bash
 docker run -d \
-    --name atlas-phoenix \
+    --name able-phoenix \
     -p 6006:6006 \
-    -v atlas-phoenix-data:/data \
+    -v able-phoenix-data:/data \
     arizephoenix/phoenix:latest
 ```
 
@@ -26,7 +26,7 @@ Access the dashboard at `http://localhost:6006`.
 
 ```bash
 export PHOENIX_COLLECTOR_ENDPOINT="http://localhost:6006"
-export PHOENIX_PROJECT_NAME="atlas-default"
+export PHOENIX_PROJECT_NAME="able-default"
 ```
 
 ### Fallback: JSONL Mode
@@ -34,7 +34,7 @@ export PHOENIX_PROJECT_NAME="atlas-default"
 When Phoenix is unavailable (Docker not running, network issues), traces fall back to local JSONL files:
 
 ```
-~/.atlas/traces/
+~/.able/traces/
     YYYY-MM-DD.jsonl       # Daily trace files
     _fallback_buffer.jsonl  # Buffer for retry when Phoenix comes back
 ```
@@ -48,19 +48,19 @@ Every traced operation produces a span with the following structure:
 ```
 Trace (trace_id)
   |
-  +-- Root Span: "atlas.request"
+  +-- Root Span: "able.request"
   |     attributes:
-  |       atlas.session_id
-  |       atlas.channel (cli, telegram, discord, api)
-  |       atlas.tenant_id (multi-tenant mode)
+  |       able.session_id
+  |       able.channel (cli, telegram, discord, api)
+  |       able.tenant_id (multi-tenant mode)
   |
-  +-- Child Span: "atlas.enricher"
+  +-- Child Span: "able.enricher"
   |     attributes:
   |       enricher.level (none, light, standard, deep)
   |       enricher.domains_detected
   |       enricher.flavor_words_expanded
   |
-  +-- Child Span: "atlas.scorer"
+  +-- Child Span: "able.scorer"
   |     attributes:
   |       scorer.complexity_score
   |       scorer.selected_tier
@@ -69,7 +69,7 @@ Trace (trace_id)
   |       scorer.version
   |       scorer.budget_gated
   |
-  +-- Child Span: "atlas.provider"
+  +-- Child Span: "able.provider"
   |     attributes:
   |       provider.name
   |       provider.model_id
@@ -80,7 +80,7 @@ Trace (trace_id)
   |       llm.latency_ms
   |       llm.cost_usd
   |
-  +-- Child Span: "atlas.evaluation" (async, post-response)
+  +-- Child Span: "able.evaluation" (async, post-response)
         attributes:
           eval.hallucination_score
           eval.correctness_score
@@ -96,7 +96,7 @@ Trace (trace_id)
 | `trace_id` | string | Unique identifier for the full request lifecycle |
 | `span_id` | string | Unique identifier for each operation within a trace |
 | `parent_span_id` | string | Links child spans to parent |
-| `atlas.tenant_id` | string | Tenant identifier (empty for default tenant) |
+| `able.tenant_id` | string | Tenant identifier (empty for default tenant) |
 | `eval.corpus_eligible` | bool | Whether this interaction qualifies for distillation |
 
 ## Instrumentors
@@ -182,9 +182,9 @@ This flag is written to both the Phoenix span (`eval.corpus_eligible`) and the i
 In multi-tenant mode, each tenant gets an isolated Phoenix project:
 
 ```
-atlas-default          # Default tenant
-atlas-tenant-acme      # Tenant "acme"
-atlas-tenant-globex    # Tenant "globex"
+able-default          # Default tenant
+able-tenant-acme      # Tenant "acme"
+able-tenant-globex    # Tenant "globex"
 ```
 
 This provides:
@@ -197,7 +197,7 @@ Set the project per request:
 
 ```python
 import os
-os.environ["PHOENIX_PROJECT_NAME"] = f"atlas-tenant-{tenant_id}"
+os.environ["PHOENIX_PROJECT_NAME"] = f"able-tenant-{tenant_id}"
 ```
 
 ## Integration Points
@@ -230,7 +230,7 @@ Phoenix data enriches the routing metrics dashboard:
 
 | File | Purpose |
 |------|---------|
-| `atlas/core/routing/interaction_log.py` | Interaction logger (stores trace_id) |
-| `atlas/core/routing/metrics.py` | Metrics dashboard (reads Phoenix data) |
-| `atlas/core/evolution/collector.py` | Evolution data collector (reads evaluator scores) |
+| `able/core/routing/interaction_log.py` | Interaction logger (stores trace_id) |
+| `able/core/routing/metrics.py` | Metrics dashboard (reads Phoenix data) |
+| `able/core/evolution/collector.py` | Evolution data collector (reads evaluator scores) |
 | `config/routing_config.yaml` | Provider definitions (instrumentor mapping) |

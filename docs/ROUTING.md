@@ -2,7 +2,7 @@
 
 ## Overview
 
-ATLAS uses a 5-tier complexity-scored routing system that replaces the linear provider fallback chain with intelligent task-aware routing. An async self-evolution daemon continuously improves routing accuracy. A prompt enricher expands vague inputs into actionable prompts before scoring.
+ABLE uses a 5-tier complexity-scored routing system that replaces the linear provider fallback chain with intelligent task-aware routing. An async self-evolution daemon continuously improves routing accuracy. A prompt enricher expands vague inputs into actionable prompts before scoring.
 
 ## Architecture
 
@@ -50,11 +50,11 @@ Response                           |
 | 5 | Qwen 3.5 27B | qwen3.5-27b-ud (Ollama) | $0 | 131K | Offline / distillation base |
 | 5 (fallback) | Qwen 3.5 9B Edge | qwen3.5-9b-edge (Ollama) | $0 | 131K | Edge/mobile deployment |
 | 5 (last resort) | Qwen 3.5 9B Balanced | qwen3.5-9b-balanced (Ollama) | $0 | 131K | Balanced edge option |
-| 0 (future) | atlas-student-27b | Custom fine-tuned (Ollama) | $0 | 131K | Self-hosted student model |
+| 0 (future) | able-student-27b | Custom fine-tuned (Ollama) | $0 | 131K | Self-hosted student model |
 
 **M2.7 is never user-facing.** It only runs as the evolution daemon's analysis brain.
 
-**GPT 5.4 Mini and GPT 5.4 route through OpenAI OAuth** (ChatGPT subscription), not OpenRouter or API keys. Authenticate once with `python scripts/atlas-auth.py` -- tokens auto-refresh. OpenRouter is retained only for MiMo fallback and M2.7 evolution.
+**GPT 5.4 Mini and GPT 5.4 route through OpenAI OAuth** (ChatGPT subscription), not OpenRouter or API keys. Authenticate once with `python scripts/able-auth.py` -- tokens auto-refresh. OpenRouter is retained only for MiMo fallback and M2.7 evolution.
 
 **Both T1 and T2 run at `xhigh` reasoning effort** -- maximum thinking depth on every request at $0 per token.
 
@@ -178,13 +178,13 @@ Background async daemon using M2.7 to continuously improve routing.
 
 ```bash
 # Single cycle
-python -m atlas.core.evolution.daemon --once
+python -m able.core.evolution.daemon --once
 
 # Continuous (6-hour interval)
-python -m atlas.core.evolution.daemon --interval 6
+python -m able.core.evolution.daemon --interval 6
 
 # Dry run (analyze but don't deploy)
-python -m atlas.core.evolution.daemon --once --dry-run
+python -m able.core.evolution.daemon --once --dry-run
 ```
 
 ### Tuning History
@@ -210,7 +210,7 @@ The evolution daemon can operate in two modes:
 - **Split test mode**: Changes are wrapped in a split test, run for N interactions, then promoted or rolled back based on results
 
 ```python
-from atlas.core.routing import SplitTestManager
+from able.core.routing import SplitTestManager
 
 mgr = SplitTestManager()
 mgr.create_test(
@@ -249,7 +249,7 @@ When enabled, Tier 0 sits below the current tier_1_max threshold:
 
 | Score | Tier | Provider |
 |-------|------|----------|
-| < 0.2 | 0 | atlas-student-27b (Ollama, local) |
+| < 0.2 | 0 | able-student-27b (Ollama, local) |
 | 0.2 - 0.4 | 1 | GPT 5.4 Mini (OpenAI OAuth) |
 | 0.4 - 0.7 | 2 | GPT 5.4 (OpenAI OAuth) |
 | > 0.7 | 4 | Claude Opus 4.6 (budget-gated) |
@@ -260,7 +260,7 @@ Tier 0 is disabled by default. Enable via `config/routing_config.yaml`:
 routing:
   tier_0_enabled: false
   tier_0_max_score: 0.2
-  tier_0_model: "atlas-student-27b"
+  tier_0_model: "able-student-27b"
 ```
 
 ## Tenant Routing
@@ -286,32 +286,32 @@ JSON endpoints for routing observability:
 
 | File | Purpose |
 |------|---------|
-| `atlas/core/routing/__init__.py` | Package exports |
-| `atlas/core/routing/provider_registry.py` | YAML-driven provider registry |
-| `atlas/core/routing/complexity_scorer.py` | Rule-based complexity scorer |
-| `atlas/core/routing/interaction_log.py` | SQLite interaction logger |
-| `atlas/core/routing/log_queries.py` | Analytical queries for evolution |
-| `atlas/core/routing/metrics.py` | JSON metrics dashboard |
-| `atlas/core/routing/split_test.py` | A/B testing framework |
-| `atlas/core/routing/prompt_enricher.py` | Prompt enrichment (rule-based) |
-| `atlas/core/evolution/__init__.py` | Evolution daemon package |
-| `atlas/core/evolution/daemon.py` | Main daemon orchestrator |
-| `atlas/core/evolution/collector.py` | Metrics collection (Step 1) |
-| `atlas/core/evolution/analyzer.py` | M2.7 / rule-based analysis (Step 2) |
-| `atlas/core/evolution/improver.py` | Weight change generation (Step 3) |
-| `atlas/core/evolution/validator.py` | Change validation (Step 4) |
-| `atlas/core/evolution/deployer.py` | Hot deployment + rollback (Step 5) |
-| `atlas/core/evolution/auto_improve.py` | Failure classification + auto-fix |
+| `able/core/routing/__init__.py` | Package exports |
+| `able/core/routing/provider_registry.py` | YAML-driven provider registry |
+| `able/core/routing/complexity_scorer.py` | Rule-based complexity scorer |
+| `able/core/routing/interaction_log.py` | SQLite interaction logger |
+| `able/core/routing/log_queries.py` | Analytical queries for evolution |
+| `able/core/routing/metrics.py` | JSON metrics dashboard |
+| `able/core/routing/split_test.py` | A/B testing framework |
+| `able/core/routing/prompt_enricher.py` | Prompt enrichment (rule-based) |
+| `able/core/evolution/__init__.py` | Evolution daemon package |
+| `able/core/evolution/daemon.py` | Main daemon orchestrator |
+| `able/core/evolution/collector.py` | Metrics collection (Step 1) |
+| `able/core/evolution/analyzer.py` | M2.7 / rule-based analysis (Step 2) |
+| `able/core/evolution/improver.py` | Weight change generation (Step 3) |
+| `able/core/evolution/validator.py` | Change validation (Step 4) |
+| `able/core/evolution/deployer.py` | Hot deployment + rollback (Step 5) |
+| `able/core/evolution/auto_improve.py` | Failure classification + auto-fix |
 | `config/routing_config.yaml` | Provider registry config |
 | `config/scorer_weights.yaml` | Scorer weights (evolution-tunable) |
 | `config/split_tests.yaml` | A/B test definitions |
-| `atlas/tests/test_routing.py` | 56 tests across 5 phases |
+| `able/tests/test_routing.py` | 56 tests across 5 phases |
 
 ## Environment Variables
 
 | Variable | Required By |
 |----------|-------------|
-| *(OpenAI OAuth)* | GPT 5.4 Mini (T1), GPT 5.4 (T2) -- `python scripts/atlas-auth.py` |
+| *(OpenAI OAuth)* | GPT 5.4 Mini (T1), GPT 5.4 (T2) -- `python scripts/able-auth.py` |
 | `OPENROUTER_API_KEY` | MiMo (Tier 2 fallback), M2.7 (Tier 3 evolution) |
 | `NVIDIA_API_KEY` | Nemotron 120B (Tier 1 fallback, free NIM) |
 | `ANTHROPIC_API_KEY` | Claude Opus 4.6 (Tier 4) |

@@ -4,7 +4,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.routing.prompt_enricher import PromptEnricher, enrich_prompt
+from able.core.routing.prompt_enricher import PromptEnricher, enrich_prompt
 
 
 def test_basic_enrichment():

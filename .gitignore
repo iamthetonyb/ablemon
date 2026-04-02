@@ -9,15 +9,19 @@ __pycache__/
 *.key
 *.pem
 .env
-atlas-v2/.env
 
-# ATLAS runtime state (lives in ~/.atlas/, not in repo)
+# Runtime state (lives in ~/.able/, not in repo)
 *.log
 audit/logs/
 
 # macOS
 .DS_Store
 **/.DS_Store
+*\ 2.*
+*\ 2/
+
+# Egg-info (rebuilt on install)
+*.egg-info/
 
 # Node / Next.js
 node_modules/

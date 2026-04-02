@@ -5,13 +5,13 @@ import os
 import json
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'atlas'))
-os.chdir(os.path.expanduser('~/.atlas'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'able'))
+os.chdir(os.path.expanduser('~/.able'))
 
 from core.auth.storage import SecureStorage
 from core.auth.manager import AuthManager
 
-auth_path = os.path.expanduser('~/.atlas/auth.json')
+auth_path = os.path.expanduser('~/.able/auth.json')
 
 # 1. Can we read the file?
 print(f"auth.json path: {auth_path}")

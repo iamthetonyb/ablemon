@@ -8,9 +8,9 @@
       "WebSearch",
       "WebFetch",
       "Bash(git *)",
-      "Bash(python atlas/*)",
+      "Bash(python able/*)",
       "Bash(ls *)",
-      "Bash(cat ~/.atlas/*)"
+      "Bash(cat ~/.able/*)"
     ],
     "deny": []
   }

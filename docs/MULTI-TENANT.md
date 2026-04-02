@@ -1,10 +1,10 @@
-# ATLAS Multi-Tenant System
+# ABLE Multi-Tenant System
 
 > Per-tenant routing, billing, training, and observability.
 
 ## Overview
 
-Multi-tenancy allows ATLAS to serve multiple clients/organizations with isolated data, independent budgets, custom routing, and per-tenant distilled models.
+Multi-tenancy allows ABLE to serve multiple clients/organizations with isolated data, independent budgets, custom routing, and per-tenant distilled models.
 
 ## Tenant Lifecycle
 
@@ -23,7 +23,7 @@ Onboard --> Operate --> Improve --> Distill --> Serve
 Create a tenant configuration and provision resources:
 
 ```bash
-python -m atlas.core.tenants.manage --create \
+python -m able.core.tenants.manage --create \
     --id acme \
     --name "Acme Corp" \
     --contact "admin@acme.com" \
@@ -33,8 +33,8 @@ python -m atlas.core.tenants.manage --create \
 ```
 
 This creates:
-- Tenant config at `~/.atlas/tenants/acme/config.yaml`
-- Isolated Phoenix project `atlas-tenant-acme`
+- Tenant config at `~/.able/tenants/acme/config.yaml`
+- Isolated Phoenix project `able-tenant-acme`
 - Budget tracking entry in billing system
 - Interaction log index on `(tenant_id, timestamp)`
 
@@ -63,7 +63,7 @@ When a tenant accumulates enough high-quality interactions:
 ### 5. Serve
 
 Validated tenant-specific student model is deployed:
-- Registered in Ollama as `atlas-student-{tenant_id}`
+- Registered in Ollama as `able-student-{tenant_id}`
 - Available as the tenant's Tier 0 provider
 - Monitored via the tenant's Phoenix project
 
@@ -179,7 +179,7 @@ The training scheduler manages GPU time across tenants using a priority queue.
 ### Budget Allocation
 
 Monthly GPU hours are split:
-- 8h core ATLAS model (shared across all tenants)
+- 8h core ABLE model (shared across all tenants)
 - 12h tenant-specific training (allocated by priority)
 - 2.5h buffer for retries and validation
 
@@ -213,29 +213,29 @@ Per-tenant metrics available via the routing metrics dashboard:
 
 ```bash
 # Tenant management
-python -m atlas.core.tenants.manage --create --id acme --name "Acme Corp"
-python -m atlas.core.tenants.manage --list
-python -m atlas.core.tenants.manage --show acme
-python -m atlas.core.tenants.manage --update acme --budget-monthly 200.00
-python -m atlas.core.tenants.manage --disable acme
+python -m able.core.tenants.manage --create --id acme --name "Acme Corp"
+python -m able.core.tenants.manage --list
+python -m able.core.tenants.manage --show acme
+python -m able.core.tenants.manage --update acme --budget-monthly 200.00
+python -m able.core.tenants.manage --disable acme
 
 # Tenant metrics
-python -m atlas.core.tenants.manage --metrics acme
-python -m atlas.core.tenants.manage --metrics acme --period 30d
+python -m able.core.tenants.manage --metrics acme
+python -m able.core.tenants.manage --metrics acme --period 30d
 
 # Tenant training
-python -m atlas.core.tenants.manage --training-status acme
-python -m atlas.core.tenants.manage --schedule-training acme
+python -m able.core.tenants.manage --training-status acme
+python -m able.core.tenants.manage --schedule-training acme
 
 # Tenant billing
-python -m atlas.core.tenants.manage --billing acme
-python -m atlas.core.tenants.manage --billing acme --period 2026-03
-python -m atlas.core.tenants.manage --invoice acme --period 2026-03
+python -m able.core.tenants.manage --billing acme
+python -m able.core.tenants.manage --billing acme --period 2026-03
+python -m able.core.tenants.manage --invoice acme --period 2026-03
 ```
 
 ## Example Tenant Config
 
-Full tenant configuration at `~/.atlas/tenants/acme/config.yaml`:
+Full tenant configuration at `~/.able/tenants/acme/config.yaml`:
 
 ```yaml
 tenant:
@@ -272,8 +272,8 @@ training:
   gpu_hours_monthly: 4.0
   gpu_hours_used: 0.0
   priority: "normal"
-  corpus_path: "~/.atlas/tenants/acme/corpus/"
-  model_name: "atlas-student-acme"
+  corpus_path: "~/.able/tenants/acme/corpus/"
+  model_name: "able-student-acme"
 
 notifications:
   budget_warning_pct: 80    # Alert at 80% budget usage
@@ -284,10 +284,10 @@ notifications:
 
 | File | Purpose |
 |------|---------|
-| `~/.atlas/tenants/{id}/config.yaml` | Per-tenant configuration |
-| `~/.atlas/tenants/{id}/scorer_weights.yaml` | Per-tenant scorer weights |
-| `~/.atlas/tenants/{id}/corpus/` | Per-tenant training corpus |
-| `atlas/core/routing/interaction_log.py` | Tenant-tagged interaction records |
-| `atlas/core/routing/complexity_scorer.py` | Tenant-aware scoring |
-| `atlas/core/evolution/daemon.py` | Per-tenant evolution cycles |
+| `~/.able/tenants/{id}/config.yaml` | Per-tenant configuration |
+| `~/.able/tenants/{id}/scorer_weights.yaml` | Per-tenant scorer weights |
+| `~/.able/tenants/{id}/corpus/` | Per-tenant training corpus |
+| `able/core/routing/interaction_log.py` | Tenant-tagged interaction records |
+| `able/core/routing/complexity_scorer.py` | Tenant-aware scoring |
+| `able/core/evolution/daemon.py` | Per-tenant evolution cycles |
 | `config/routing_config.yaml` | Global provider definitions |

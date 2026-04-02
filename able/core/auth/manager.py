@@ -1,7 +1,7 @@
 import time
 import logging
 from typing import Optional, Dict
-from core.auth.storage import SecureStorage
+from able.core.auth.storage import SecureStorage
 # Note: OpenAIOAuthProvider will be imported from providers when needed to avoid circular imports
 # or we can define the auth logic here and use it in providers.
 

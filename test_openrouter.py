@@ -17,8 +17,8 @@ def new_client_session_init(self, *args, **kwargs):
 
 aiohttp.ClientSession.__init__ = new_client_session_init
 
-from atlas.core.providers.base import Message, Role, ToolCall
-from atlas.core.providers.openrouter import OpenRouterProvider
+from able.core.providers.base import Message, Role, ToolCall
+from able.core.providers.openrouter import OpenRouterProvider
 
 logging.basicConfig(level=logging.INFO)
 
@@ -36,7 +36,7 @@ async def test_openrouter():
     # 3. Tool returns the repos
     
     messages = [
-        Message(role=Role.SYSTEM, content="You are ATLAS..."),
+        Message(role=Role.SYSTEM, content="You are ABLE..."),
         Message(role=Role.ASSISTANT, content="⚠️ Security check failed: HIGH threat detected - suspicious patterns require human review"),
         Message(role=Role.USER, content="Using my GitHub repo ;\nInside—\niamthetonyb/atlas-mission-control\n\nbuild the following:\nWork on building the atlas dashboard..."),
         Message(role=Role.USER, content="- Clean, well-organized code with comments for each section\n- CSS variables for all colors/spacing (easy to re-theme)\n- Smooth transitions on all interactive elements\n- Keyboard shortcut: Cmd/Ctrl+K to focus search\n\nBuild the complete file. Make it production quality — this should look like a premium SaaS dashboard, not a hobby project."),
@@ -90,5 +90,5 @@ async def test_openrouter():
 
 if __name__ == "__main__":
     from dotenv import load_dotenv
-    load_dotenv("/Users/abenton333/Desktop/ATLAS/atlas/.env")
+    load_dotenv("/Users/abenton333/Desktop/ABLE/able/.env")
     asyncio.run(test_openrouter())

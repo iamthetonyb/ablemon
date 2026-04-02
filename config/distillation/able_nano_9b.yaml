@@ -17,9 +17,10 @@ qlora:
   load_in_4bit: true
 
 training:
-  sequence_len: 4096
-  micro_batch_size: 2
-  gradient_accumulation_steps: 4
+  # T4-first defaults (see able/core/distillation/training/model_configs.py)
+  sequence_len: 2048
+  micro_batch_size: 1
+  gradient_accumulation_steps: 8
   learning_rate: 2.0e-4
   num_epochs: 3
   warmup_steps: 10

@@ -14,8 +14,8 @@ def new_client_session_init(self, *args, **kwargs):
     original_client_session_init(self, *args, **kwargs)
 aiohttp.ClientSession.__init__ = new_client_session_init
 
-from atlas.core.providers.base import Message, Role
-from atlas.core.providers.openrouter import OpenRouterProvider
+from able.core.providers.base import Message, Role
+from able.core.providers.openrouter import OpenRouterProvider
 
 async def test_api():
     api_key = os.environ.get("OPENROUTER_API_KEY")
@@ -60,5 +60,5 @@ async def test_api():
 
 if __name__ == "__main__":
     from dotenv import load_dotenv
-    load_dotenv("/Users/abenton333/Desktop/ATLAS/atlas/.env")
+    load_dotenv("/Users/abenton333/Desktop/ABLE/able/.env")
     asyncio.run(test_api())
