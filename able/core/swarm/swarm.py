@@ -515,8 +515,21 @@ class MeshWorkflow:
         goal: str,
         max_depth: int = 3,
         auto_critique: bool = True,
+        phased: bool = False,
+        context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Execute a mesh workflow for a complex goal"""
+        """Execute a mesh workflow for a complex goal.
+
+        Args:
+            goal: The high-level task description
+            max_depth: Maximum decomposition depth (flat mode only)
+            auto_critique: Add critic role automatically (flat mode only)
+            phased: If True, use PhasedCoordinatorProtocol (Research -> Synthesis -> Implementation -> Verification)
+            context: Optional initial context dict (phased mode only)
+        """
+        if phased:
+            protocol = PhasedCoordinatorProtocol(self.coordinator)
+            return await protocol.execute(goal, context)
 
         # Analyze goal to determine roles needed
         roles = await self._analyze_goal(goal)
@@ -576,3 +589,157 @@ class MeshWorkflow:
             roles = [AgentRole.RESEARCHER, AgentRole.ANALYST, AgentRole.WRITER]
 
         return roles
+
+
+class PhasedCoordinatorProtocol:
+    """
+    4-phase execution protocol for complex agent swarm tasks.
+    Inspired by Claude Code's coordinator protocol (Claurst spec).
+
+    Phase 1 (Research): RESEARCHER + ANALYST gather context and information
+    Phase 2 (Synthesis): PLANNER + CRITIC synthesize findings into an actionable plan
+    Phase 3 (Implementation): CODER + EXECUTOR execute the plan
+    Phase 4 (Verification): REVIEWER + CRITIC validate output quality
+
+    Each phase must complete before the next starts.
+    Results from each phase feed into the next as context.
+    Phase failure halts execution.
+    """
+
+    PHASES = [
+        ("research", [AgentRole.RESEARCHER, AgentRole.ANALYST]),
+        ("synthesis", [AgentRole.PLANNER, AgentRole.CRITIC]),
+        ("implementation", [AgentRole.CODER, AgentRole.EXECUTOR]),
+        ("verification", [AgentRole.REVIEWER, AgentRole.CRITIC]),
+    ]
+
+    def __init__(self, coordinator: SwarmCoordinator):
+        self.coordinator = coordinator
+
+    async def execute(
+        self,
+        goal: str,
+        context: Optional[Dict[str, Any]] = None,
+        phases: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Run goal through phased execution.
+
+        Args:
+            goal: The high-level task description
+            context: Optional initial context dict
+            phases: Optional list of phase names to run (default: all 4).
+                    e.g. ["research", "synthesis"] for planning-only tasks.
+
+        Returns:
+            Dict with phase results, final output, and metadata.
+        """
+        context = dict(context or {})
+        phase_results: Dict[str, Dict[str, Any]] = {}
+
+        # Filter phases if specified
+        active_phases = self.PHASES
+        if phases:
+            active_phases = [(n, r) for n, r in self.PHASES if n in phases]
+
+        for phase_name, roles in active_phases:
+            logger.info(f"Starting phase: {phase_name} with roles: {[r.value for r in roles]}")
+
+            # Inject previous phase results as context
+            phase_context = {**context, "previous_phases": phase_results}
+
+            # Build phase-specific goal with previous phase summaries
+            phase_goal = f"[{phase_name.upper()} PHASE] {goal}"
+            if phase_results:
+                prev_summary = "\n\n".join(
+                    f"[{name} phase result]: {r.get('output', '')[:500]}"
+                    for name, r in phase_results.items()
+                )
+                phase_goal += f"\n\nPrevious phase results:\n{prev_summary}"
+
+            try:
+                results = await self.coordinator.execute_swarm_task(
+                    goal=phase_goal,
+                    roles=roles,
+                    context=phase_context,
+                    parallel=True,
+                )
+
+                phase_output = self._extract_phase_output(results)
+                success = self._check_phase_success(results)
+
+                phase_results[phase_name] = {
+                    "output": phase_output,
+                    "agents": len(roles),
+                    "success": success,
+                    "roles": [r.value for r in roles],
+                }
+
+                logger.info(f"Phase {phase_name} complete: success={success}")
+
+                if not success:
+                    logger.warning(f"Phase {phase_name} failed — halting execution")
+                    break
+
+            except Exception as e:
+                logger.error(f"Phase {phase_name} error: {e}")
+                phase_results[phase_name] = {
+                    "output": f"Error: {e}",
+                    "agents": len(roles),
+                    "success": False,
+                    "error": str(e),
+                    "roles": [r.value for r in roles],
+                }
+                break
+
+        return self._build_final_result(goal, active_phases, phase_results)
+
+    def _extract_phase_output(self, results: Dict[str, Any]) -> str:
+        """Extract combined output from swarm task results."""
+        if not isinstance(results, dict):
+            return str(results)
+
+        if "_consensus" in results:
+            consensus = results["_consensus"]
+            return consensus.output if hasattr(consensus, "output") else str(consensus)
+
+        return "\n\n".join(
+            str(getattr(r, "output", r))
+            for r in results.values()
+            if r and (not hasattr(r, "success") or r.success)
+        )
+
+    def _check_phase_success(self, results: Dict[str, Any]) -> bool:
+        """Check whether all agents in a phase succeeded."""
+        if isinstance(results, dict):
+            return all(
+                getattr(r, "success", True)
+                for r in results.values()
+                if hasattr(r, "success")
+            )
+        return True
+
+    def _build_final_result(
+        self,
+        goal: str,
+        active_phases: List[tuple],
+        phase_results: Dict[str, Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Assemble the final result dict from all phase results."""
+        final_phase = list(phase_results.keys())[-1] if phase_results else None
+
+        # Prefer verification > implementation > last completed phase
+        final_output = ""
+        if final_phase:
+            for candidate in ("verification", "implementation", final_phase):
+                if candidate in phase_results:
+                    final_output = phase_results[candidate].get("output", "")
+                    break
+
+        return {
+            "goal": goal,
+            "phases_completed": len(phase_results),
+            "total_phases": len(active_phases),
+            "phases": phase_results,
+            "final_output": final_output,
+            "success": all(p.get("success", False) for p in phase_results.values()),
+        }
