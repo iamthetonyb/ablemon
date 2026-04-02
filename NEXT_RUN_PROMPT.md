@@ -49,7 +49,7 @@ All four learning feedback loops are closed and tested:
 - Proactive engine `BuddyNeedsCheck` runs every 2h for auto-nudges
 - Telegram nudges appended to responses when needs are low
 - CLI renders rarity badges, streaks, and legendary unlock state correctly
-- 48 tests covering model, persistence, rendering, battles, rarity, XP, needs, and mood
+- 45 tests covering model, persistence, rendering, battles, rarity, XP, needs, and mood
 
 **Streaming + approval UX**:
 - `stream_message()` async generator in the gateway — runs full pipeline then streams AI response
@@ -61,7 +61,14 @@ All four learning feedback loops are closed and tested:
 - Prompt bank: domain aliases, dedup on load/add
 - New eval configs: reasoning (7 tests), tools (7 tests), wired into `/battle`
 
-**Test suite**: 583 tests passing across the full suite.
+**Deploy hardening**:
+- Git operations on the DigitalOcean host now run as the `able` user
+- Existing `/opt/able/ABLE` working trees are re-owned by `able` before fetch/checkout
+- This fixes Git's `dubious ownership` failure during deploy without weakening `safe.directory`
+
+**Test suite**:
+- This pass revalidated CLI smoke, buddy, and focused new-surface tests
+- Last recorded full-suite pass in the handoff was 583 tests; rerun if you need a fresh full-suite claim
 
 Plus: resource action tool, control-plane endpoint tests, legacy shim removal, CLI slash commands (/resources, /eval, /evolve, /buddy, /battle).
 
@@ -73,8 +80,6 @@ Good work usually looks like:
 - grow the distillation corpus toward 100+ pairs for H100 fine-tuning
 - harden runtime seams (deploy, gateway, approval, control plane)
 - add Studio dashboard integration for buddy and routing metrics
-- add missing tests around new or risky surfaces
-- fix doc/runtime drift
 - add missing tests around new or risky surfaces
 - fix doc/runtime drift
 
@@ -111,10 +116,11 @@ python3 -m pytest able/tests/ -x --ignore=able/tests/test_routing.py --ignore=ab
 
 Or targeted runs:
 ```bash
-python3 -m pytest able/tests/test_buddy.py -x                # Buddy + needs + rarity
-python3 -m pytest able/tests/test_cli_chat.py -x              # CLI + streaming
-python3 -m pytest able/tests/test_harvesters.py -x            # Distillation harvester
-python3 -m pytest able/tests/test_evolution_split_tests.py -x  # Evolution daemon
+python3 -m pytest able/tests/test_buddy.py -q
+python3 -m pytest able/tests/test_cli_chat.py -x
+python3 -m pytest able/tests/test_control_plane.py able/tests/test_resource_tools.py able/tests/test_learning_loops.py able/tests/test_collect_results.py able/tests/test_evolution_cycle.py -x
+python3 -m pytest able/tests/test_harvesters.py -x
+python3 -m pytest able/tests/test_evolution_split_tests.py -x
 ```
 
 If you change deploy/runtime wiring:

@@ -59,6 +59,10 @@ jobs:
           script: |
             set -euo pipefail
 
+            run_as_able() {
+              runuser -u able -- "$@"
+            }
+
             echo "=== Ensuring able system user exists ==="
             if ! getent group able >/dev/null 2>&1; then
               groupadd --system able
@@ -69,16 +73,20 @@ jobs:
             install -d -o able -g able /opt/able /home/able/.able
 
             echo "=== Pulling target ref ==="
+            if [ -d /opt/able/ABLE ]; then
+              chown -R able:able /opt/able/ABLE
+            else
+              install -d -o able -g able /opt/able/ABLE
+            fi
             if [ ! -d /opt/able/ABLE/.git ]; then
-              git clone https://github.com/iamthetonyb/ABLE.git /opt/able/ABLE
+              run_as_able git clone https://github.com/iamthetonyb/ABLE.git /opt/able/ABLE
             fi
             cd /opt/able/ABLE
-            git fetch --tags origin "${TARGET_REF}"
-            git checkout -B deployed FETCH_HEAD
-            chown -R able:able /opt/able/ABLE
+            run_as_able git fetch --tags origin "${TARGET_REF}"
+            run_as_able git checkout -B deployed FETCH_HEAD
             mkdir -p /opt/able/ABLE/data
             chown -R able:able /opt/able/ABLE/data
-            echo "✓ Code updated to $(git rev-parse --short HEAD) from ${TARGET_REF}"
+            echo "✓ Code updated to $(run_as_able git rev-parse --short HEAD) from ${TARGET_REF}"
 
             echo "=== Updating .env file ==="
             mkdir -p /home/able/.able

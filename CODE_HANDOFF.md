@@ -1,7 +1,7 @@
 # ABLE — Code Handoff
 
-Date: 2026-04-01
-Branch: `codex/able-rewrite-integration`
+Date: 2026-04-02
+Branch: `main` is the current production baseline. `codex/able-rewrite-integration` is fully merged into `main` (no file diff).
 Git state: always verify with `git log --oneline -10` before starting work.
 
 ## Source Of Truth
@@ -186,7 +186,9 @@ Training lanes:
 2. **Resource lifecycle tool**: `resource_action` in `able/core/gateway/tool_defs/resource_tools.py` with approval gating.
 3. **Control-plane hardened**: all endpoints token-gated, `perform_action()` requires `service_token_verified`, HTTP status codes corrected.
 4. **Operator slash commands expanded**: `/resources`, `/eval`, `/evolve` added to `able chat`. README updated.
-5. **Test coverage**: 45 buddy tests + 26 tests across 6 other test files, all passing.
+5. **Test coverage**:
+   - Buddy suite: 45 tests passing
+   - Focused new-surface suite: 23 tests across control plane, resource tools, learning loops, collect_results, and evolution cycle passing
 6. **Legacy cleanup**: all 87 bare imports migrated, 5 root-level shims removed, pyproject.toml simplified.
 7. **Buddy system (system-wide)**: Pokemon + Tamagotchi gamified agent companion in `able/core/buddy/`:
    - 5 starter species (Blaze/Wave/Root/Spark/Phantom) with domain bonuses
@@ -208,7 +210,7 @@ Training lanes:
    - **Telegram nudges**: buddy status appended to responses when needs are low
    - **Proactive engine**: `BuddyNeedsCheck` runs every 2h, dispatches nudge notifications
    - Nudge module (`able/core/buddy/nudge.py`) for cross-channel care reminders
-   - 48 tests covering model, persistence, rendering, battles, rarity, XP engine, needs, and mood
+   - 45 tests covering model, persistence, rendering, battles, rarity, XP engine, needs, and mood
 8. **Streaming output for `able chat`**:
    - Gateway: `stream_message()` async generator runs full pipeline then streams AI response
    - CLI: tokens printed as they arrive via `async for chunk in gateway.stream_message(...)`
@@ -228,25 +230,36 @@ Training lanes:
     - Morning reporter test: correct table name (`interaction_log` not `interactions`)
     - Split test daemon: fully-qualified import patches after shim removal
     - Total: 583 tests passing across the full test suite
+12. **Deploy hardening**:
+    - Git operations on the DigitalOcean host now run as the `able` user in both `.github/workflows/deploy.yml` and `deploy-to-server.sh`
+    - Existing `/opt/able/ABLE` working trees are re-owned by `able` before clone/fetch/checkout
+    - This fixes Git's `detected dubious ownership in repository at '/opt/able/ABLE'` failure without weakening `safe.directory`
 
 ## Next-Run Objectives
 
-### Priority 1: Studio dashboard buddy integration
+### Priority 1: Verify the production deploy path end-to-end
+
+The safe-directory fix is committed, but the critical next proof is a real server run:
+- Dispatch the GitHub deploy workflow against the updated branch or push to `main`
+- Confirm clone/fetch/checkout succeeds on the VPS as `able`
+- Confirm systemd restart and `/health` pass after the repo sync
+
+### Priority 2: Studio dashboard buddy integration
 
 The buddy system works across all channels (CLI, Telegram, API) but the Studio web dashboard doesn't display buddy state yet. Wire buddy status, needs, and battle history into the Studio API so operators can see their buddy's progress from the web.
 
-### Priority 2: Streaming for tool-dispatch iterations
+### Priority 3: Streaming for tool-dispatch iterations
 
 Current streaming (`stream_message()`) handles the common case (text-only responses). For messages that trigger tool dispatch, the full `process_message()` still blocks. Investigate whether tool iterations can stream partial results and tool execution notifications.
 
-### Priority 3: Distillation corpus growth
+### Priority 4: Distillation corpus growth
 
 The harvester and prompt bank are improved but the corpus still needs more pairs. Focus on:
 - Running the new eval configs (reasoning, tools) to generate T4 gold outputs
 - Monitoring the corpus pair count (`/eval` in the CLI) and pushing toward 100+
 - Verifying the interaction logger correctly marks corpus-eligible interactions
 
-### Priority 4: Keep docs and runtime in lockstep
+### Priority 5: Keep docs and runtime in lockstep
 
 - Refresh `README.md` only when code changes make its current commands stale.
 - Keep `CODE_HANDOFF.md` and `NEXT_RUN_PROMPT.md` updated at the end of each pass.
@@ -255,6 +268,9 @@ The harvester and prompt bank are improved but the corpus still needs more pairs
 
 ```bash
 python3 -m able chat --help
+python3 -m pytest able/tests/test_cli_chat.py -x
+python3 -m pytest able/tests/test_buddy.py -q
+python3 -m pytest able/tests/test_control_plane.py able/tests/test_resource_tools.py able/tests/test_learning_loops.py able/tests/test_collect_results.py able/tests/test_evolution_cycle.py -x
 python3 -m pytest able/tests/ -x --ignore=able/tests/test_routing.py --ignore=able/tests/test_gateway.py -q
 bash -n deploy-to-server.sh
 python3 -m py_compile scripts/able-auth.py

@@ -49,14 +49,21 @@ install -d -o ${APP_USER} -g ${APP_GROUP} /opt/able ${RUNTIME_HOME}
 echo -e "${GREEN}[2/6] Syncing repository...${NC}"
 ssh_run "
 set -euo pipefail
+run_as_able() {
+  runuser -u ${APP_USER} -- \"\$@\"
+}
 mkdir -p /opt/able
+if [ -d ${REPO_PATH} ]; then
+  chown -R ${APP_USER}:${APP_GROUP} ${REPO_PATH}
+else
+  install -d -o ${APP_USER} -g ${APP_GROUP} ${REPO_PATH}
+fi
 if [ ! -d ${REPO_PATH}/.git ]; then
-  git clone ${REPO_URL} ${REPO_PATH}
+  run_as_able git clone ${REPO_URL} ${REPO_PATH}
 fi
 cd ${REPO_PATH}
-git fetch --tags origin ${TARGET_REF}
-git checkout -B deployed FETCH_HEAD
-chown -R ${APP_USER}:${APP_GROUP} ${REPO_PATH}
+run_as_able git fetch --tags origin ${TARGET_REF}
+run_as_able git checkout -B deployed FETCH_HEAD
 "
 
 echo -e "${GREEN}[3/6] Preparing runtime directories...${NC}"
