@@ -356,8 +356,9 @@ class BuddyNeedsCheck(ProactiveCheck):
             nudge = check_nudge()
             if nudge:
                 actions.append(ProactiveAction(
-                    action_type=ProactiveActionType.NOTIFY,
-                    message=nudge,
+                    action_type=ProactiveActionType.ALERT,
+                    title="Buddy needs attention",
+                    description=nudge,
                     urgency=3,
                     requires_human=False,
                 ))

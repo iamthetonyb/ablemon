@@ -20,6 +20,18 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+# Singleton — AuthManager runs PBKDF2 (100k iterations, ~62ms each).
+# Without caching, is_available checks re-construct it 14+ times during init.
+_auth_manager_instance = None
+
+
+def _cached_auth_manager():
+    global _auth_manager_instance
+    if _auth_manager_instance is None:
+        from able.core.auth.manager import AuthManager
+        _auth_manager_instance = AuthManager()
+    return _auth_manager_instance
+
 
 @dataclass
 class ProviderTierConfig:
@@ -59,7 +71,7 @@ class ProviderTierConfig:
         if self.provider_type == "openai_oauth":
             try:
                 from able.core.auth.manager import AuthManager
-                return AuthManager().is_authenticated("openai_oauth")
+                return _cached_auth_manager().is_authenticated("openai_oauth")
             except Exception:
                 return False
         # Claude Code uses CLI + Max subscription — check CLI exists
