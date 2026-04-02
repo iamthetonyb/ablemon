@@ -71,8 +71,6 @@ Inside the chat, these are handled locally (no model call):
 
 On first interactive run, ABLE now requires starter selection plus a short onboarding profile. The starter affects buddy theme and bonus XP, while the onboarding stores your focus, work style, and preferred distillation lane. Non-interactive sessions skip this flow so scripted smokes do not block.
 
-The hidden endgame unlock is **Aether**: the sixth signal, a Dragon/Psychic-style orchestrator buddy that only appears after fully completing the five public starter lines. Early badge path now includes `Trainer`, while the late-game path includes the hidden-signal unlock and a final mastery badge for fully evolving and leveling Aether.
-
 Research scout outputs are written to `~/.able/reports/research/latest.md` and `~/.able/reports/research/latest.json`, with a JSON mirror still kept under `data/research_reports/`.
 
 ### Auth Setup (Optional)

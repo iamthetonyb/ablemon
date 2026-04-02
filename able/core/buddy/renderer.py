@@ -291,10 +291,10 @@ def render_backpack(collection: BuddyCollection | None) -> str:
                 f"· {meta['best_for']}"
             )
 
-    lines.append(f"{'─' * 54}")
     if hidden_buddy:
+        lines.append(f"{'─' * 54}")
         secret_stage = STAGE_NAMES[hidden_buddy.stage_enum]
-        lines.append("  Secret Signal")
+        lines.append("  Collection Bonus")
         lines.append(
             f"  {'▶' if collection.active_species == hidden_buddy.species else ' '} "
             f"{hidden_buddy.display_emoji} {hidden_buddy.name} "
@@ -304,21 +304,12 @@ def render_backpack(collection: BuddyCollection | None) -> str:
             lines.append(
                 f"  Final mastery path: Stage 3 + legendary + level {SECRET_SIGNAL_LEVEL}"
             )
-    else:
-        lines.append("  Secret Signal")
-        lines.append("  ??? Locked — complete the full starter dex to awaken it.")
 
     if collection.badges:
         lines.append(f"{'─' * 54}")
         lines.append("  Badges")
         for badge in collection.badges:
             lines.append(f"  🏅 {badge['title']} — {badge['description']}")
-
-    if collection.easter_egg_title:
-        lines.append(f"{'─' * 54}")
-        lines.append(f"  ✨ Easter Egg: {collection.easter_egg_title}")
-        if collection.easter_egg_message:
-            lines.append(f"  {collection.easter_egg_message}")
 
     lines.append(f"{'=' * 54}")
     return "\n".join(lines)

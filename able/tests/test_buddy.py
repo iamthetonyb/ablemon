@@ -445,7 +445,7 @@ def test_render_backpack_shows_owned_and_uncaught_species(tmp_path, monkeypatch)
     assert "Caught: 1/5 starters" in output
     assert "Operator profile:" in output
     assert "Uncaught" in output
-    assert "Secret Signal" in output
+    assert "Collection Bonus" not in output
 
 
 def test_render_evolution_announcement():

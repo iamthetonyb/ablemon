@@ -103,7 +103,7 @@ def award_interaction_xp(
     for badge in collection_update["new_badges"]:
         logger.info("Buddy badge unlocked: %s", badge["title"])
     if collection_update["easter_egg_unlocked"]:
-        logger.info("Buddy collection easter egg unlocked: full completion reached")
+        logger.info("Buddy collection milestone unlocked: full completion reached")
 
     return xp
 

@@ -374,7 +374,7 @@ def _print_collection_updates(before_collection, after_collection) -> None:
                 if k in BuddyState.__dataclass_fields__
             })
         if species_id == "aether":
-            print(f"  ✨ sixth signal awakened: {buddy.display_emoji} {buddy.name} the {buddy.meta['label']}!")
+            print(f"  ✨ collection bonus unlocked: {buddy.display_emoji} {buddy.name} joined your backpack")
         else:
             print(f"  🎒 caught {buddy.display_emoji} {buddy.name} the {buddy.meta['label']}!")
 
@@ -384,7 +384,7 @@ def _print_collection_updates(before_collection, after_collection) -> None:
             print(f"  🏅 badge unlocked: {badge['title']}")
 
     if after_easter and not before_easter:
-        print(f"  ✨ easter egg unlocked: {after_collection.easter_egg_title}")
+        print("  ✨ collection milestone unlocked")
 
 
 # ── Slash command handler ─────────────────────────────────────────────────

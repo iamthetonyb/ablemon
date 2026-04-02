@@ -192,7 +192,7 @@ Training lanes:
 6. **Legacy cleanup**: all 87 bare imports migrated, 5 root-level shims removed, pyproject.toml simplified.
 7. **Buddy system (system-wide)**: Pokemon + Tamagotchi gamified agent companion in `able/core/buddy/`:
    - 5 starter species (Blaze/Wave/Root/Spark/Phantom) with domain bonuses
-   - Hidden endgame species: **Aether** — the sixth signal, a Dragon/Psychic-style orchestrator unlock that stays out of the starter pool and only appears after full public-dex completion
+   - A late-game hidden unlock exists outside the starter pool; keep it out of user-facing docs and pre-unlock UI so operators discover it organically
    - Interactive starter selection is now mandatory for first-time setup; legacy auto-created starters are forced back through selection before the buddy system is considered initialized
    - Post-selection onboarding stores operator profile (`focus`, `work_style`, `distillation_track`) so the buddy setup reflects actual domain needs instead of just mascot choice
    - 3 evolution stages tied to real milestones (interactions, eval passes, distillation pairs, evolution deploys)
@@ -202,8 +202,8 @@ Training lanes:
      - Legendary form is earned only from real runtime milestones: stage 3, level 40, eval passes, battle wins/streak, distillation pairs, and evolution deploys
    - **XP awards in the gateway** — fires on ALL channels (Telegram, CLI, API), not just CLI
    - Battle system runs real promptfoo evals — wins feed distillation, losses identify skill gaps
-   - Collection/backpack layer: catch the full starter roster through real domain work, rotate active buddies with `/buddy switch <name>`, inspect the roster with `/buddy bag`, and unlock badges plus a full-completion easter egg
-   - Badge ladder now includes `Trainer` (first real evolution), `Sixth Signal` (hidden unlock), and `Signal Crown` (fully evolve + level the hidden orchestrator)
+   - Collection/backpack layer: catch the full starter roster through real domain work, rotate active buddies with `/buddy switch <name>`, inspect the roster with `/buddy bag`, and unlock hidden late-game content without pre-unlock spoilers
+   - Badge ladder now includes `Trainer` (first real evolution) plus hidden endgame badges that should remain undisclosed in user-facing copy until earned
    - Starter selection plus onboarding on first `able chat` run, `/buddy`, `/buddy bag`, `/buddy setup`, `/buddy switch`, and `/battle` slash commands
    - CLI renderer now shows shiny/legendary badges, streak progress, and legendary unlock state
    - Evolution announcement bug fixed: old/new stage names now render correctly
@@ -215,7 +215,7 @@ Training lanes:
    - **Telegram nudges**: buddy status appended to responses when needs are low
    - **Proactive engine**: `BuddyNeedsCheck` runs every 2h, dispatches nudge notifications
    - Nudge module (`able/core/buddy/nudge.py`) for cross-channel care reminders
-   - 53 buddy tests covering model, persistence, backpack collection, badges/easter egg, rendering, battles, rarity, XP engine, needs, and mood
+   - 53 buddy tests covering model, persistence, backpack collection, badges/late-game progression, rendering, battles, rarity, XP engine, needs, and mood
 8. **Streaming output for `able chat`**:
    - Gateway: `stream_message()` async generator runs full pipeline then streams AI response
    - CLI: tokens printed as they arrive via `async for chunk in gateway.stream_message(...)`
