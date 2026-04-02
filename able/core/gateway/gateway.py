@@ -311,6 +311,7 @@ class ABLEGateway:
         config_path: str = "config/gateway.json",
         *,
         require_telegram: bool = True,
+        skip_phoenix: bool = False,
     ):
         # Load config file (non-secret settings only)
         config_file = Path(config_path)
@@ -485,15 +486,17 @@ class ABLEGateway:
             logger.info("ABLETracer + ABLEEvaluator initialized (JSONL → %s)", traces_path)
 
             # Try to start Phoenix dashboard (localhost:6006)
-            from able.core.observability.phoenix_setup import PhoenixObserver
-            self.phoenix = PhoenixObserver(
-                project_name="able",
-                fallback_path=traces_path,
-            )
-            if self.phoenix.is_available:
-                logger.info("Phoenix dashboard live at http://localhost:6006")
-            else:
-                logger.info("Phoenix unavailable — JSONL tracing active as fallback")
+            # Skip in CLI mode — Phoenix is a heavy server, not needed for chat
+            if not skip_phoenix:
+                from able.core.observability.phoenix_setup import PhoenixObserver
+                self.phoenix = PhoenixObserver(
+                    project_name="able",
+                    fallback_path=traces_path,
+                )
+                if self.phoenix.is_available:
+                    logger.info("Phoenix dashboard live at http://localhost:6006")
+                else:
+                    logger.info("Phoenix unavailable — JSONL tracing active as fallback")
         except Exception as e:
             logger.warning(f"Observability init failed (non-fatal): {e}")
 

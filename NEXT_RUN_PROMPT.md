@@ -66,6 +66,20 @@ All four learning feedback loops are closed and tested:
 - Existing `/opt/able/ABLE` working trees are re-owned by `able` before fetch/checkout
 - This fixes Git's `dubious ownership` failure during deploy without weakening `safe.directory`
 
+**Terminal UX overhaul**:
+- One-command install: `bash install.sh` — handles Python, venv, deps, PATH, workspace init. `able` works from any terminal.
+- Bare `able` defaults to `chat` in interactive terminals, `serve` in non-interactive.
+- Phoenix/OTel skipped entirely in CLI mode (`skip_phoenix=True`) — eliminates all startup print spam.
+- Warnings + stderr redirected during gateway init to catch SAWarning, DeprecationWarning residue.
+- Double response bug fixed: streaming fallback only fires if zero chunks received (was re-fetching full response on mid-stream errors).
+- ANSI color: green prompt, cyan agent prefix, dim metadata. Respects `NO_COLOR`.
+- Thinking spinner (braille animation) while waiting for first token.
+- Response timing `[1.2s]` after each response.
+- Slash command shortcuts: `/q`, `/h`, `/?`. Formatted help table.
+- Claude Code-style header with buddy ASCII art mascot and stats.
+- Buddy selection skippable, `/buddy` supports mid-session setup.
+- 52 tests (6 CLI chat + 46 buddy).
+
 **Test suite**:
 - This pass revalidated CLI smoke, buddy, and focused new-surface tests
 - Last recorded full-suite pass in the handoff was 583 tests; rerun if you need a fresh full-suite claim

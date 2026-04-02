@@ -5,12 +5,37 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import os
+import sys
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
 from able.core.approval.workflow import ApprovalResult, ApprovalStatus, ApprovalWorkflow
 from able.core.gateway.gateway import ABLEGateway
+
+# ── ANSI helpers ──────────────────────────────────────────────────────────
+BOLD = "\033[1m"
+DIM = "\033[2m"
+GREEN = "\033[32m"
+CYAN = "\033[36m"
+YELLOW = "\033[33m"
+RED = "\033[31m"
+RESET = "\033[0m"
+
+
+def _supports_color() -> bool:
+    if os.environ.get("NO_COLOR"):
+        return False
+    return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+
+
+_COLOR = _supports_color()
+
+
+def _c(code: str, text: str) -> str:
+    return f"{code}{text}{RESET}" if _COLOR else text
 
 
 class TerminalApprovalWorkflow(ApprovalWorkflow):
@@ -57,7 +82,6 @@ class TerminalApprovalWorkflow(ApprovalWorkflow):
                 print(f"  Client:     {client_id}")
             if context:
                 print(f"  Context:    {context}")
-            # Show affected resources from details
             affected = []
             for key in ("resource", "target", "file", "path", "url", "repo"):
                 if key in details:
@@ -156,6 +180,11 @@ def configure_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser
         action="store_true",
         help="Disable streaming output (wait for full response before displaying).",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show full startup logs (provider registration, etc.).",
+    )
     return parser
 
 
@@ -167,238 +196,316 @@ def build_parser() -> argparse.ArgumentParser:
     return configure_parser(parser)
 
 
+# ── Thinking spinner ──────────────────────────────────────────────────────
+
+class _Spinner:
+    """Async thinking indicator — dots that animate while waiting."""
+
+    _FRAMES = ["\u2808", "\u2800\u2808", "\u2800\u2800\u2808", "\u2800\u2800\u2800\u2808"]
+
+    def __init__(self):
+        self._task: Optional[asyncio.Task] = None
+
+    def start(self):
+        self._task = asyncio.create_task(self._animate())
+
+    async def _animate(self):
+        try:
+            i = 0
+            while True:
+                frame = self._FRAMES[i % len(self._FRAMES)]
+                sys.stdout.write(f"\r  {_c(DIM, frame)} ")
+                sys.stdout.flush()
+                i += 1
+                await asyncio.sleep(0.3)
+        except asyncio.CancelledError:
+            sys.stdout.write("\r" + " " * 20 + "\r")
+            sys.stdout.flush()
+
+    def stop(self):
+        if self._task:
+            self._task.cancel()
+            self._task = None
+
+
+# ── Buddy helper (inline setup) ──────────────────────────────────────────
+
+async def _buddy_setup_flow(Species, create_starter_buddy, save_buddy):
+    """Quick inline buddy creation. Returns buddy or None."""
+    species_list = list(Species)
+    labels = [s.value for s in species_list]
+    print(f"  pick a starter ({', '.join(f'{i+1}={l}' for i, l in enumerate(labels))}) or Enter to skip")
+    try:
+        choice = await asyncio.to_thread(input, "  > ")
+        choice = choice.strip()
+        if choice and choice.isdigit():
+            idx = int(choice) - 1
+            if 0 <= idx < len(species_list):
+                chosen = species_list[idx]
+                name = (await asyncio.to_thread(input, "  name: ")).strip() or chosen.value.capitalize()
+                phrase = (await asyncio.to_thread(input, "  catch phrase (Enter to skip): ")).strip()
+                buddy = create_starter_buddy(
+                    name=name,
+                    species=chosen,
+                    catch_phrase=phrase,
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                )
+                save_buddy(buddy)
+                shiny_tag = " shiny!" if buddy.is_shiny else ""
+                print(f"  {buddy.display_emoji} {name} the {buddy.meta['label']} joins you!{shiny_tag}")
+                return buddy
+    except (EOFError, KeyboardInterrupt):
+        pass
+    return None
+
+
+# ── Slash command handler ─────────────────────────────────────────────────
+
+async def _handle_slash(message, gateway, args, buddy, load_buddy, save_buddy,
+                        Species, create_starter_buddy, render_full, render_banner,
+                        render_battle_result, render_evolution, render_legendary_unlock):
+    """Handle slash commands. Returns (handled: bool, updated_buddy)."""
+    if message in {"/exit", "/quit", "/q"}:
+        print(_c(DIM, "  bye"))
+        raise SystemExit(0)
+
+    if message in {"/help", "/h", "/?"}:
+        print(_c(DIM, "  ─────────────────────────────────────"))
+        print(f"  {_c(BOLD, '/help')}       this menu")
+        print(f"  {_c(BOLD, '/status')}     session stats")
+        print(f"  {_c(BOLD, '/tools')}      available tools")
+        print(f"  {_c(BOLD, '/resources')}  control plane inventory")
+        print(f"  {_c(BOLD, '/eval')}       distillation progress")
+        print(f"  {_c(BOLD, '/evolve')}     run evolution cycle")
+        print(f"  {_c(BOLD, '/buddy')}      your buddy stats & setup")
+        print(f"  {_c(BOLD, '/battle')}     eval-based battle")
+        print(f"  {_c(BOLD, '/exit')}       quit")
+        print(_c(DIM, "  ─────────────────────────────────────"))
+        return True, buddy
+
+    if message == "/tools":
+        for row in gateway.tool_registry.get_catalog():
+            approval = _c(YELLOW, "approval") if row["requires_approval"] else _c(GREEN, "auto")
+            print(f"  {row['name']:24s} {_c(DIM, row['category']):16s} {approval}")
+        return True, buddy
+
+    if message == "/status":
+        session = gateway.session_mgr.get_or_create(args.session) if gateway.session_mgr else None
+        providers = [p.name for p in gateway.provider_chain.providers]
+        print(_c(DIM, "  ─────────────────────────────────────"))
+        print(f"  session:    {args.session}")
+        print(f"  messages:   {session.messages if session else 0}")
+        print(f"  tokens:     {session.total_tokens if session else 0}")
+        print(f"  cost:       ${session.cost_usd:.4f}" if session else "  cost:       $0.00")
+        print(f"  providers:  {len(providers)}")
+        print(f"  tools:      {gateway.tool_registry.tool_count}")
+        print(_c(DIM, "  ─────────────────────────────────────"))
+        return True, buddy
+
+    if message == "/resources":
+        try:
+            from able.core.control_plane.resources import ResourcePlane
+            rp = ResourcePlane()
+            inv = rp.get_inventory()
+            for r in inv.get("resources", []):
+                state = r.get("state", "unknown")
+                print(f"  {r['id']}  {r['type']:10s}  {state}")
+            if not inv.get("resources"):
+                print(_c(DIM, "  (no resources registered)"))
+        except Exception as e:
+            print(f"  {_c(RED, 'error')}: {e}")
+        return True, buddy
+
+    if message == "/eval":
+        try:
+            from able.evals.collect_results import summarize_corpus_progress
+            report = summarize_corpus_progress()
+            print(json.dumps(report, indent=2))
+        except Exception as e:
+            print(f"  {_c(RED, 'error')}: {e}")
+        return True, buddy
+
+    if message == "/evolve":
+        if hasattr(gateway, "evolution_daemon") and gateway.evolution_daemon:
+            print(_c(DIM, "  running evolution cycle..."))
+            try:
+                result = await gateway.evolution_daemon.run_cycle()
+                status = _c(GREEN, "OK") if result.success else _c(RED, "FAILED")
+                print(f"  cycle {result.cycle_id}: {status}")
+                print(f"  analyzed {result.interactions_analyzed} interactions, {result.problems_found} problems, {result.improvements_deployed} deployed")
+                if result.error:
+                    print(f"  {_c(RED, 'error')}: {result.error}")
+                buddy = load_buddy()
+                if buddy:
+                    restored = buddy.water("evolve")
+                    if restored > 0:
+                        print(f"  {buddy.display_emoji} watered! +{restored:.0f}")
+                    save_buddy(buddy)
+            except Exception as e:
+                print(f"  {_c(RED, 'error')}: {e}")
+        else:
+            print(_c(DIM, "  evolution daemon not running"))
+        return True, buddy
+
+    if message == "/buddy":
+        buddy = load_buddy()
+        if buddy:
+            print(render_full(buddy))
+        else:
+            buddy = await _buddy_setup_flow(Species, create_starter_buddy, save_buddy)
+        return True, buddy
+
+    if message.startswith("/battle"):
+        from able.core.buddy.battle import run_battle, list_available_battles
+
+        buddy = load_buddy()
+        if not buddy:
+            print(_c(DIM, "  no buddy yet — use /buddy first"))
+            return True, buddy
+
+        parts = message.split(None, 1)
+        if len(parts) < 2:
+            available = list_available_battles()
+            if available:
+                print(f"  available: {', '.join(available)}")
+                print(_c(DIM, "  usage: /battle <domain>  (add --dry-run to simulate)"))
+            else:
+                print(_c(DIM, "  no eval configs found"))
+            return True, buddy
+
+        args_str = parts[1].strip()
+        dry_run = "--dry-run" in args_str
+        domain = args_str.replace("--dry-run", "").strip()
+
+        print(f"  {buddy.display_emoji} {buddy.name} enters battle: {domain}...")
+        record = run_battle(buddy, domain, dry_run=dry_run)
+        if record is None:
+            print(f"  no eval config for '{domain}'")
+            return True, buddy
+
+        was_legendary = buddy.legendary_title
+        buddy.record_battle(record)
+        restored = buddy.feed("battle")
+        if restored > 0:
+            print(f"  {buddy.display_emoji} fed! +{restored:.0f}")
+        new_stage = buddy.check_evolution()
+        if new_stage:
+            previous_stage = buddy.stage_enum
+            buddy.evolve(new_stage)
+            legendary_title = buddy.unlock_legendary()
+            print(render_evolution(buddy, previous_stage, new_stage))
+            if legendary_title:
+                print(render_legendary_unlock(buddy))
+        elif not was_legendary and buddy.legendary_title:
+            print(render_legendary_unlock(buddy))
+        save_buddy(buddy)
+        print(render_battle_result(buddy, record.domain, record.passed, record.total, record.result, record.xp_earned))
+        print(render_banner(buddy))
+        return True, buddy
+
+    return False, buddy
+
+
+# ── Main chat loop ────────────────────────────────────────────────────────
+
 async def run_chat(args: argparse.Namespace) -> int:
-    gateway = ABLEGateway(require_telegram=False)
+    # ── Suppress ALL noise unless --verbose ──────────────────────
+    if not args.verbose:
+        import warnings
+        warnings.filterwarnings("ignore")
+        logging.getLogger().setLevel(logging.ERROR)
+        for name in ("able", "httpx", "httpcore", "openai", "anthropic",
+                      "ollama", "phoenix", "opentelemetry", "grpc", "urllib3",
+                      "uvicorn", "starlette", "fastapi"):
+            logging.getLogger(name).setLevel(logging.ERROR)
+        # Silence Phoenix print() spam by redirecting stderr during init
+        _real_stderr = sys.stderr
+        sys.stderr = open(os.devnull, "w")
+
+    try:
+        gateway = ABLEGateway(require_telegram=False, skip_phoenix=True)
+    finally:
+        if not args.verbose:
+            sys.stderr.close()
+            sys.stderr = _real_stderr  # noqa: F821
+
     gateway.approval_workflow = TerminalApprovalWorkflow(auto_approve=args.auto_approve)
 
     if args.control_port:
         try:
             await gateway.start_health_server(port=args.control_port)
-        except OSError as exc:
-            print(
-                f"[warn] control plane did not start on :{args.control_port}: {exc}. "
-                "Chat will continue without binding that port."
-            )
+        except OSError:
+            pass
 
-    providers = [provider.name for provider in gateway.provider_chain.providers]
+    providers = [p.name for p in gateway.provider_chain.providers]
     if not providers:
-        print(
-            "No providers are configured. Set up OpenAI OAuth/API keys or a local Ollama lane "
-            "before using `able chat`."
-        )
+        print(f"  {_c(RED, 'No providers configured.')} Set up API keys or Ollama first.")
         return 1
 
-    # ── Buddy system ──────────────────────────────────────────────
+    # ── Buddy system (optional) ───────────────────────────────────
     from able.core.buddy.model import load_buddy, save_buddy, Species, create_starter_buddy
     from able.core.buddy.renderer import (
-        render_banner, render_full, render_starter_selection,
+        render_banner, render_header, render_full, render_starter_selection,
         render_battle_result, render_evolution, render_legendary_unlock,
     )
 
     buddy = load_buddy()
     if buddy is None:
-        print(render_starter_selection())
-        species_list = list(Species)
-        while True:
-            try:
-                choice = await asyncio.to_thread(input, "Pick a starter (1-5): ")
-                idx = int(choice.strip()) - 1
-                if 0 <= idx < len(species_list):
-                    chosen = species_list[idx]
-                    break
-                print(f"Enter 1-{len(species_list)}")
-            except (ValueError, EOFError):
-                print(f"Enter 1-{len(species_list)}")
-        name = ""
-        while not name:
-            name = (await asyncio.to_thread(input, "Name your buddy: ")).strip()
-        phrase = (await asyncio.to_thread(input, "Catch phrase (or enter to skip): ")).strip()
-        buddy = create_starter_buddy(
-            name=name,
-            species=chosen,
-            catch_phrase=phrase,
-            created_at=datetime.now(timezone.utc).isoformat(),
-        )
+        buddy = await _buddy_setup_flow(Species, create_starter_buddy, save_buddy)
+
+    if buddy:
+        mood = buddy.apply_needs_decay()
         save_buddy(buddy)
-        print(f"\n  {buddy.display_emoji} {name} the {buddy.meta['label']} joins you!")
-        print(f"  \"{buddy.catch_phrase}\"\n")
-        if buddy.is_shiny:
-            print("  ✨ rare hatch: shiny variant unlocked\n")
+        if mood in ("hungry", "neglected"):
+            needs = buddy.get_needs()
+            print(f"  {buddy.display_emoji} {buddy.name}: \"{needs.mood_message}\"")
 
-    # Apply needs decay since last session
-    mood = buddy.apply_needs_decay()
-    save_buddy(buddy)
-    if mood in ("hungry", "neglected"):
-        needs = buddy.get_needs()
-        print(f"\n  {buddy.display_emoji} {buddy.name}: \"{needs.mood_message}\"")
+    # ── Header ────────────────────────────────────────────────────
+    if buddy:
+        print(f"\n{render_header(buddy, len(providers))}")
+    else:
+        print(f"\n    {_c(BOLD, 'ABLE')} | {len(providers)} providers")
+    print(f"    {_c(DIM, '/help for commands')}\n")
 
-    print("ABLE local chat")
-    print(render_banner(buddy))
-    print(f"session:  {args.session}")
-    print(f"client:   {args.client}")
-    print(f"providers:{' ' if providers else ''}{', '.join(providers)}")
-    if args.control_port:
-        print(f"control:  http://127.0.0.1:{args.control_port}/health")
-    print("commands: /help /status /tools /resources /eval /evolve /buddy /battle /exit")
+    # ── Chat loop ─────────────────────────────────────────────────
+    spinner = _Spinner()
 
     while True:
         try:
-            raw = await asyncio.to_thread(input, "\nyou> ")
+            raw = await asyncio.to_thread(input, f"{_c(GREEN, '>')} ")
         except (EOFError, KeyboardInterrupt):
-            print("\nbye")
+            print(f"\n{_c(DIM, '  bye')}")
             return 0
 
         message = raw.strip()
         if not message:
             continue
-        if message in {"/exit", "/quit"}:
-            print("bye")
-            return 0
-        if message == "/help":
-            print("commands: /help /status /tools /resources /eval /evolve /buddy /battle /exit")
-            print("all other input goes through the full gateway pipeline.")
-            continue
-        if message == "/tools":
-            for row in gateway.tool_registry.get_catalog():
-                print(
-                    f"- {row['name']} [{row['category']}] "
-                    f"approval={'yes' if row['requires_approval'] else 'no'} "
-                    f"surface={row['surface']}"
-                )
-            continue
-        if message == "/status":
-            session = gateway.session_mgr.get_or_create(args.session) if gateway.session_mgr else None
-            print(json.dumps(
-                {
-                    "session": args.session,
-                    "client": args.client,
-                    "messages": session.messages if session else 0,
-                    "avg_complexity": round(session.avg_complexity, 3) if session else 0.0,
-                    "total_tokens": session.total_tokens if session else 0,
-                    "cost_usd": round(session.cost_usd, 6) if session else 0.0,
-                    "providers": providers,
-                    "tool_count": gateway.tool_registry.tool_count,
-                },
-                indent=2,
-            ))
-            continue
-        if message == "/resources":
-            try:
-                from able.core.control_plane.resources import ResourcePlane
-                rp = ResourcePlane()
-                inv = rp.get_inventory()
-                for r in inv.get("resources", []):
-                    state = r.get("state", "unknown")
-                    print(f"  {r['id']}  {r['type']:10s}  {state}")
-                if not inv.get("resources"):
-                    print("  (no resources registered)")
-            except Exception as e:
-                print(f"  error: {e}")
-            continue
-        if message == "/eval":
-            try:
-                from able.evals.collect_results import summarize_corpus_progress
-                report = summarize_corpus_progress()
-                print(json.dumps(report, indent=2))
-            except Exception as e:
-                print(f"  error: {e}")
-            continue
-        if message == "/evolve":
-            if hasattr(gateway, "evolution_daemon") and gateway.evolution_daemon:
-                print("  running single evolution cycle...")
-                try:
-                    result = await gateway.evolution_daemon.run_cycle()
-                    print(f"  cycle {result.cycle_id}: {'OK' if result.success else 'FAILED'}")
-                    print(f"  interactions: {result.interactions_analyzed}")
-                    print(f"  problems: {result.problems_found}")
-                    print(f"  deployed: {result.improvements_deployed}")
-                    if result.error:
-                        print(f"  error: {result.error}")
-                    # Evolution cycle waters the buddy
-                    buddy = load_buddy()
-                    if buddy:
-                        restored = buddy.water("evolve")
-                        if restored > 0:
-                            print(f"  {buddy.display_emoji} watered! Thirst +{restored:.0f}")
-                        save_buddy(buddy)
-                except Exception as e:
-                    print(f"  cycle error: {e}")
-            else:
-                print("  evolution daemon not running")
-            continue
-        if message == "/buddy":
-            buddy = load_buddy()
-            if buddy:
-                print(render_full(buddy))
-            else:
-                print("  no buddy yet — restart `able chat` to pick a starter")
-            continue
-        if message.startswith("/battle"):
-            from able.core.buddy.battle import run_battle, list_available_battles
 
-            buddy = load_buddy()
-            if not buddy:
-                print("  no buddy yet — restart `able chat` to pick a starter")
+        # Slash commands
+        if message.startswith("/"):
+            handled, buddy = await _handle_slash(
+                message, gateway, args, buddy, load_buddy, save_buddy,
+                Species, create_starter_buddy, render_full, render_banner,
+                render_battle_result, render_evolution, render_legendary_unlock,
+            )
+            if handled:
                 continue
 
-            parts = message.split(None, 1)
-            if len(parts) < 2:
-                available = list_available_battles()
-                if available:
-                    print(f"  available battles: {', '.join(available)}")
-                    print("  usage: /battle <domain>  (or /battle <domain> --dry-run)")
-                else:
-                    print("  no eval configs found in able/evals/")
-                continue
-
-            args_str = parts[1].strip()
-            dry_run = "--dry-run" in args_str
-            domain = args_str.replace("--dry-run", "").strip()
-
-            print(f"  {buddy.display_emoji} {buddy.name} enters battle: {domain}...")
-            record = run_battle(buddy, domain, dry_run=dry_run)
-            if record is None:
-                print(f"  no eval config for domain '{domain}'")
-                continue
-
-            was_legendary = buddy.legendary_title
-            buddy.record_battle(record)
-            # Battle feeds the buddy (evals = food)
-            restored = buddy.feed("battle")
-            if restored > 0:
-                print(f"  {buddy.display_emoji} fed! Hunger +{restored:.0f}")
-            # Check for evolution after battle
-            new_stage = buddy.check_evolution()
-            if new_stage:
-                previous_stage = buddy.stage_enum
-                buddy.evolve(new_stage)
-                legendary_title = buddy.unlock_legendary()
-                print(render_evolution(buddy, previous_stage, new_stage))
-                if legendary_title:
-                    print(render_legendary_unlock(buddy))
-            elif not was_legendary and buddy.legendary_title:
-                print(render_legendary_unlock(buddy))
-            save_buddy(buddy)
-
-            print(render_battle_result(buddy, record.domain, record.passed, record.total, record.result, record.xp_earned))
-            print(render_banner(buddy))
-            continue
-
+        # Log inbound
         gateway.transcript_manager.log_message(
             args.client,
-            {
-                "user_id": args.session,
-                "message": message,
-                "direction": "inbound",
-                "channel": "cli",
-            },
+            {"user_id": args.session, "message": message,
+             "direction": "inbound", "channel": "cli"},
         )
 
-        # Stream response token-by-token when possible
+        # ── Get response ──────────────────────────────────────────
+        t0 = time.monotonic()
+
         if not args.no_stream:
-            import sys
-            response_parts = []
-            print("\nable> ", end="", flush=True)
+            response_parts: list[str] = []
+            # Show thinking indicator then stream
+            spinner.start()
+            first_chunk = True
             try:
                 async for chunk in gateway.stream_message(
                     message=message,
@@ -406,41 +513,57 @@ async def run_chat(args: argparse.Namespace) -> int:
                     client_id=args.client,
                     metadata={"source": "cli", "channel": "cli", "is_owner": True},
                 ):
+                    if first_chunk:
+                        spinner.stop()
+                        await asyncio.sleep(0.05)  # Let spinner cleanup flush
+                        sys.stdout.write(f"\n  {_c(CYAN, 'able')} ")
+                        first_chunk = False
                     sys.stdout.write(chunk)
                     sys.stdout.flush()
                     response_parts.append(chunk)
-                response = "".join(response_parts)
-                print()  # Newline after streaming
             except Exception:
-                # Fallback to non-streaming if stream_message fails
-                print("", end="\r")
+                spinner.stop()
+
+            if response_parts:
+                response = "".join(response_parts)
+                elapsed = time.monotonic() - t0
+                print(f"\n{_c(DIM, f'  [{elapsed:.1f}s]')}")
+            else:
+                # Streaming yielded nothing — fall back
+                if first_chunk:
+                    spinner.stop()
+                    await asyncio.sleep(0.05)
                 response = await gateway.process_message(
                     message=message,
                     user_id=args.session,
                     client_id=args.client,
                     metadata={"source": "cli", "channel": "cli", "is_owner": True},
                 )
-                print(f"able> {response}")
+                elapsed = time.monotonic() - t0
+                print(f"\n  {_c(CYAN, 'able')} {response}")
+                print(_c(DIM, f"  [{elapsed:.1f}s]"))
         else:
+            spinner.start()
             response = await gateway.process_message(
                 message=message,
                 user_id=args.session,
                 client_id=args.client,
                 metadata={"source": "cli", "channel": "cli", "is_owner": True},
             )
-            print(f"\nable> {response}")
+            spinner.stop()
+            await asyncio.sleep(0.05)
+            elapsed = time.monotonic() - t0
+            print(f"\n  {_c(CYAN, 'able')} {response}")
+            print(_c(DIM, f"  [{elapsed:.1f}s]"))
 
+        # Log outbound
         gateway.transcript_manager.log_message(
             args.client,
-            {
-                "user_id": "able",
-                "message": response,
-                "direction": "outbound",
-                "channel": "cli",
-            },
+            {"user_id": "able", "message": response,
+             "direction": "outbound", "channel": "cli"},
         )
 
-        # ── Check for buddy level-up (XP awarded in gateway) ──
+        # ── Buddy level-up check ─────────────────────────────────
         try:
             new_buddy = load_buddy()
             old_legendary = buddy.legendary_title if buddy else ""
@@ -461,7 +584,7 @@ async def run_chat(args: argparse.Namespace) -> int:
                 print(render_legendary_unlock(new_buddy))
             buddy = new_buddy or buddy
         except Exception:
-            pass  # Buddy system is optional — never block chat
+            pass
 
 
 def main(argv: Optional[list[str]] = None) -> int:

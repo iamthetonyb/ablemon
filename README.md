@@ -19,50 +19,69 @@ ABLE is the local/operator-controlled runtime for the Autonomous Business & Lear
 - `.github/workflows/`: deploy automation
 - `deploy-to-server.sh`: manual packaged deploy helper
 
-## Local Runtime
+## Quick Start
 
 ```bash
 git clone https://github.com/iamthetonyb/ABLE.git
 cd ABLE
-
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r able/requirements.txt
-pip install -e .
-
-python scripts/able-auth.py
-able chat
+bash install.sh
 ```
 
-`able chat` is the local operator interface. It runs the same gateway pipeline used by the service, keeps a persistent session id, prompts in-terminal for write approvals, and streams AI responses token-by-token. Exposes the local control API on `http://127.0.0.1:8080` unless you pass `--control-port 0`.
-
-Useful local commands:
+That's it. The installer checks for Python 3.11+ (installs it if missing), creates a virtual environment, installs all dependencies, and puts `able` on your PATH. After install, open a **new terminal** and type:
 
 ```bash
-able chat                                       # Default — streaming enabled
-able chat --session showcase --client master
-able chat --no-stream                           # Disable streaming (wait for full response)
-able chat --control-port 0
-able serve
+able              # opens chat (interactive terminal)
+able chat         # same thing, explicit
+able serve        # start the background gateway service
 ```
 
-Inside `able chat`, these local commands are handled without going through the model:
+### Commands
 
-- `/help`
-- `/status`
-- `/tools`
-- `/resources` — control plane resource inventory
-- `/eval` — distillation corpus progress and pair counts
-- `/evolve` — trigger a single evolution cycle (waters your buddy)
-- `/buddy` — show your buddy's stats, needs, and mood
-- `/battle <domain>` — run an eval-based battle (feeds your buddy)
-- `/exit`
+```bash
+able                                            # Chat (default in interactive terminal)
+able chat                                       # Explicit chat
+able chat --session showcase --client master     # Custom session/client
+able chat --no-stream                           # Wait for full response
+able chat --verbose                             # Show full startup logs
+able chat --auto-approve                        # Skip approval prompts
+able serve                                      # Background gateway service
+```
 
-`able` with no subcommand still starts the packaged service path. `able serve` is the explicit version of that same behavior.
+### Chat Commands
 
-Environment is read from your shell or `/home/able/.able/.env` in the systemd deployment. `ABLE_SERVICE_TOKEN` is used to protect the control-plane API when set.
+Inside the chat, these are handled locally (no model call):
 
-If you want a pure local/offline lane, bring up Ollama first and create the pinned models from `config/ollama/`.
+| Command | What it does |
+|---------|-------------|
+| `/help` | Show available commands |
+| `/status` | Session stats (messages, tokens, cost) |
+| `/tools` | List available tools |
+| `/resources` | Control plane resource inventory |
+| `/eval` | Distillation corpus progress |
+| `/evolve` | Run a single evolution cycle |
+| `/buddy` | Your buddy's stats, needs, and mood |
+| `/battle <domain>` | Eval-based battle (security, code, etc.) |
+| `/exit` | Quit |
+
+### Auth Setup (Optional)
+
+For OpenAI T1/T2 routing via your ChatGPT subscription:
+
+```bash
+python scripts/able-auth.py
+```
+
+### Offline Mode
+
+For pure local/offline usage with Ollama:
+
+```bash
+ollama serve
+ollama create qwen3.5-27b-ud -f config/ollama/Modelfile.27b
+able
+```
+
+Environment is read from your shell or `/home/able/.able/.env` in the systemd deployment. `ABLE_SERVICE_TOKEN` protects the control-plane API when set.
 
 ```bash
 ollama serve

@@ -15,6 +15,7 @@ def test_chat_parser_defaults():
     assert args.client == "master"
     assert args.control_port == 8080
     assert args.auto_approve is False
+    assert args.verbose is False
 
 
 def test_terminal_approval_can_auto_approve():
@@ -46,6 +47,15 @@ def test_chat_parser_no_stream_flag():
 
     args = parser.parse_args([])
     assert args.no_stream is False
+
+
+def test_chat_parser_verbose_flag():
+    parser = build_parser()
+    args = parser.parse_args(["--verbose"])
+    assert args.verbose is True
+
+    args = parser.parse_args([])
+    assert args.verbose is False
 
 
 def test_gateway_has_stream_message():

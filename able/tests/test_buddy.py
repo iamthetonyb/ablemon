@@ -22,6 +22,7 @@ from able.core.buddy.model import (
 )
 from able.core.buddy.renderer import (
     render_banner,
+    render_header,
     render_full,
     render_evolution,
     render_legendary_unlock,
@@ -201,6 +202,17 @@ def test_render_banner_contains_name_and_level():
     assert "Ember" in banner
     assert "Lv." in banner
     assert "W:2" in banner
+
+
+def test_render_header_shows_buddy_art_and_stats():
+    buddy = BuddyState(name="Ember", species="blaze", xp=500, battles_won=2)
+    header = render_header(buddy, provider_count=8)
+    assert "Ember" in header
+    assert "ABLE" in header
+    assert "8 providers" in header
+    assert "Lv." in header
+    # Should contain ASCII art characters from blaze stage 1
+    assert "\u25c9" in header or "\u256d" in header or "\u2502" in header
 
 
 def test_render_full_contains_all_sections():

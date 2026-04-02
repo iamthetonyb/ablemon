@@ -55,6 +55,54 @@ def render_banner(buddy: BuddyState) -> str:
     )
 
 
+def render_header(buddy: BuddyState, provider_count: int) -> str:
+    """Claude Code-style startup header — ASCII art left, stats right.
+
+    Designed to be the first thing the user sees when running ``able chat``.
+    Non-technical, clean layout that mirrors Claude Code's mascot header.
+    """
+    meta = buddy.meta
+    art_key = f"art_stage{buddy.stage}"
+    art_lines = list(meta.get(art_key, meta["art_stage1"]))
+
+    needs = buddy.get_needs()
+    mood_icon = {
+        "thriving": "\u2728",
+        "content": "\u2714\ufe0f",
+        "hungry": "\u26a0\ufe0f",
+        "neglected": "\u2757",
+    }.get(needs.mood, "\u2022")
+    stage_name = STAGE_NAMES[buddy.stage_enum]
+    xp_bar = _progress_bar(buddy.xp_progress_pct, 10)
+    rarity = f" \u00b7 {buddy.rarity_label}" if buddy.rarity_label != "Standard" else ""
+
+    # Info lines placed to the right of the ASCII art
+    info = [
+        f"ABLE",
+        f"{buddy.display_emoji} {buddy.name} the {meta['label']}  Lv.{buddy.level}  {xp_bar}{rarity}",
+        f"{stage_name} \u00b7 {mood_icon} {needs.mood.title()} \u00b7 {provider_count} providers",
+        f"\u2764\ufe0f {needs.hunger:.0f}  \U0001f4a7 {needs.thirst:.0f}  \u26a1 {needs.energy:.0f}  \u00b7  W{buddy.battles_won} D{buddy.battles_drawn} L{buddy.battles_lost}",
+    ]
+
+    # Pad art to consistent width
+    art_width = max((len(line) for line in art_lines), default=0)
+    while len(art_lines) < len(info):
+        art_lines.append("")
+    while len(info) < len(art_lines):
+        info.append("")
+
+    gap = "        "
+    lines = []
+    for art_line, info_line in zip(art_lines, info):
+        lines.append(f"    {art_line:<{art_width}}{gap}{info_line}")
+
+    # Catch phrase below
+    if buddy.catch_phrase:
+        lines.append(f"    {' ' * art_width}{gap}\"{buddy.catch_phrase}\"")
+
+    return "\n".join(lines)
+
+
 def render_full(buddy: BuddyState, stats: BuddyStats | None = None) -> str:
     """Full buddy display for /buddy command."""
     meta = buddy.meta

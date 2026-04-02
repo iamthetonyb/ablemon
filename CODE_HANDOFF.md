@@ -234,6 +234,26 @@ Training lanes:
     - Git operations on the DigitalOcean host now run as the `able` user in both `.github/workflows/deploy.yml` and `deploy-to-server.sh`
     - Existing `/opt/able/ABLE` working trees are re-owned by `able` before clone/fetch/checkout
     - This fixes Git's `detected dubious ownership in repository at '/opt/able/ABLE'` failure without weakening `safe.directory`
+13. **Clean terminal experience for `able chat`**:
+    - **Log suppression**: all logging set to ERROR by default on startup — eliminates ~40 lines of provider/ollama/enricher noise. `--verbose` flag restores full logging.
+    - **Claude Code-style header**: `render_header()` places buddy ASCII art mascot on the left with name, level, XP bar, stage, mood, needs, and battle record on the right — mirrors Claude Code's robot mascot layout.
+    - **Optional buddy**: first-run buddy selection is now a single skippable prompt ("Enter to skip"). Users can set up later via `/buddy` which now supports mid-session creation.
+    - **Graceful no-buddy**: all buddy code paths handle `buddy is None` without blocking or crashing.
+    - 52 tests passing (6 CLI chat + 46 buddy).
+14. **One-command installer and global `able` command**:
+    - `install.sh`: checks Python 3.11+ (auto-installs via brew/apt/dnf if missing), creates `.venv`, installs deps + package, places `able` wrapper in `~/.local/bin/`, adds to PATH if needed, runs `able-setup.sh` for workspace init.
+    - `able` wrapper at `~/.local/bin/able` delegates to the venv — no activation needed, works from any terminal.
+    - Bare `able` in an interactive terminal now defaults to `chat` (not `serve`). Non-interactive (systemd/cron) still defaults to `serve`.
+    - README rewritten with "Quick Start" section: `git clone`, `cd ABLE`, `bash install.sh` — then `able` works.
+15. **Terminal UX overhaul**:
+    - **Phoenix skipped in CLI**: gateway accepts `skip_phoenix=True`, CLI passes it — eliminates Phoenix/gRPC/OTel startup spam entirely (was ~20 lines of print output).
+    - **Warnings suppressed**: `warnings.filterwarnings("ignore")` + stderr redirect during gateway init catches SAWarning, DeprecationWarning, and any remaining print() noise.
+    - **Double response bug fixed**: streaming fallback now only fires if zero chunks were received. Previously, a mid-stream error triggered a full `process_message()` re-fetch, printing the response twice.
+    - **Thinking spinner**: animated braille dots while waiting for first token — clears when streaming starts.
+    - **ANSI color**: green `>` prompt, cyan `able` prefix on responses, dim timestamps and help text. Respects `NO_COLOR` env var.
+    - **Response timing**: `[1.2s]` shown after each response.
+    - **Cleaner prompt**: `> ` instead of `you> `, slash commands get formatted help table.
+    - **Slash command shortcuts**: `/q` for quit, `/h` for help, `/?` for help.
 
 ## Next-Run Objectives
 
@@ -267,13 +287,14 @@ The harvester and prompt bank are improved but the corpus still needs more pairs
 ## Validation Commands
 
 ```bash
-python3 -m able chat --help
+able --help                                     # Verify global command works
+able chat --help                                # Verify chat subcommand
 python3 -m pytest able/tests/test_cli_chat.py -x
 python3 -m pytest able/tests/test_buddy.py -q
 python3 -m pytest able/tests/test_control_plane.py able/tests/test_resource_tools.py able/tests/test_learning_loops.py able/tests/test_collect_results.py able/tests/test_evolution_cycle.py -x
 python3 -m pytest able/tests/ -x --ignore=able/tests/test_routing.py --ignore=able/tests/test_gateway.py -q
 bash -n deploy-to-server.sh
-python3 -m py_compile scripts/able-auth.py
+bash -n install.sh
 ```
 
 For targeted runs:

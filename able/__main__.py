@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import sys
 
 from able.cli.chat import configure_parser as configure_chat_parser, run_chat
 from able.start import main as async_main
@@ -12,30 +13,41 @@ from able.start import main as async_main
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="able",
-        description="ABLE runtime entrypoints.",
+        description="ABLE — Autonomous Business & Learning Engine.",
     )
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("serve", help="Run the packaged gateway service.")
     chat_parser = subparsers.add_parser(
         "chat",
-        help="Run the local terminal operator chat.",
+        help="Start the local terminal chat.",
     )
     configure_chat_parser(chat_parser)
     return parser
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Console-script entrypoint."""
+    """Console-script entrypoint.
+
+    Running bare ``able`` in an interactive terminal defaults to chat.
+    Running ``able`` non-interactively (systemd, cron) defaults to serve.
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.command in (None, "serve"):
+    if args.command is None:
+        # Interactive terminal → chat, background → serve
+        if sys.stdin.isatty():
+            args = parser.parse_args(["chat"] + (argv or []))
+        else:
+            asyncio.run(async_main())
+            return
+
+    if args.command == "serve":
         asyncio.run(async_main())
         return
 
     if args.command == "chat":
-        asyncio.run(run_chat(args))
-        return
+        raise SystemExit(asyncio.run(run_chat(args)))
 
     parser.error(f"unknown command: {args.command}")
 
