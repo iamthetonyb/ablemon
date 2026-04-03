@@ -39,7 +39,7 @@ T1 and T2 route through your ChatGPT subscription at $0/token. T5 runs locally. 
 Every ABLE instance has a companion tied to it — kinda like the Pokemon games. Your buddy levels up from real work + interactions, not fake metrics.
 This essentially is a gamified way to show a visual representation on how your system distills are going + overall evolution of its self improving nature based off how you use it.
 
-**5 starters**, each with a domain bonus:
+**5 species**, each with a domain bonus:
 
 | Starter | Domain | Best For |
 |---------|--------|----------|
@@ -55,7 +55,8 @@ Buddies evolve through three stages tied to real system milestones:
 - **Trained** — 50+ interactions, 5+ eval passes, level 10+
 - **Evolved** — 100+ distillation pairs, 3+ evolution deploys, level 25+
 
-Buddies have mood, needs, + battle records (all tied around your business needs/goals etc.) Plus ASCII art that changes with each evolution stage. (There's some hidden features for completionists)
+Buddies have mood, needs, + battle records all tied around your business needs/goals etc. Plus ASCII art that changes with each evolution stage. 
+Try to catch 'em all! (There's some hidden features for completionists)
 Use `/buddy` in chat to check on yours, `/battle <domain>` to test your system in eval-driven battles.
 
 ### Self-Distillation Pipeline
