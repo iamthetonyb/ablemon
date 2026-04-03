@@ -216,6 +216,12 @@ jobs:
               systemctl disable able 2>/dev/null || true
             fi
 
+            # Kill anything on port 8080 (old containers, orphaned processes)
+            fuser -k 8080/tcp 2>/dev/null || true
+            docker stop able-gateway 2>/dev/null || true
+            docker rm able-gateway 2>/dev/null || true
+            sleep 2
+
             # Pull and deploy
             cd /opt/able
             echo "Pulling ${IMAGE}..."
