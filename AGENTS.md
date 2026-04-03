@@ -57,6 +57,11 @@ User (Telegram) → Gateway → TrustGate → Scanner → Enricher → Complexit
 3. **All stale ATLAS/AIDE/able-v2 references purged** — Zero remaining across entire codebase.
 4. **Env vars renamed** — `ATLAS_OWNER_TELEGRAM_ID` → `ABLE_OWNER_TELEGRAM_ID`, `ATLAS_TIMEZONE` → `ABLE_TIMEZONE`
 5. **Deploy workflow fixed** — Uses /health polling instead of unreliable `docker compose ps` grep. Kills port 8080 before starting. Both workflows green.
+6. **Slim runtime OAuth fix** — `requests` is back in `requirements-core.txt`, so Docker can import the OpenAI OAuth provider in the default runtime path.
+7. **Container config fix** — Docker builds now use the repo root as build context and copy the shared `config/` tree into the image, so the gateway uses `config/routing_config.yaml` instead of silently falling back to the legacy provider chain.
+8. **OAuth token visibility fix** — Deploy scripts mount `auth.json` into `/home/able/.able/auth.json` and set host ownership to `1000:1000`, matching the container's `able` user. Without that, the token was present but unreadable.
+9. **Buddy dispatch regression test** — Added a Telegram-path integration test that drives `process_message(..., update=...)` and verifies `buddy_status` dispatches instead of `tenant_status`.
+10. **CI gateway smoke** — Added `.github/workflows/gateway-health-smoke.yml` to build the image, start the gateway, check `/health`, and assert the routing config exists in the container.
 
 ### New infrastructure
 1. **Docker multi-stage Dockerfile** with slim/full profiles
@@ -77,7 +82,7 @@ Run these to verify everything is solid:
 
 ```bash
 # 1. Docker builds successfully
-cd /path/to/ablemon
+cd /path/to/ABLE
 docker compose build
 
 # 2. Container starts and health passes
@@ -85,9 +90,9 @@ docker compose up -d
 sleep 10
 curl http://localhost:8080/health
 
-# 3. Python imports are clean (no missing deps in slim)
+# 3. Python imports are clean and the default registry boots
 docker compose exec able python -c "
-from able.start import ABLEGateway
+from able.core.gateway.gateway import ABLEGateway, ABLE_SYSTEM_PROMPT
 from able.core.gateway.tool_registry import ToolRegistry, build_default_registry
 from able.core.gateway.tool_defs import buddy_tools, tenant_tools, github_tools
 from able.scheduler.cron import CronScheduler, register_default_jobs
@@ -95,7 +100,9 @@ from able.core.buddy.model import load_buddy
 from able.memory.embeddings.vector_store import VectorStore
 print('All imports OK')
 reg = build_default_registry()
-print(f'Tools registered: {len(reg.list_tools())}')
+print(f'Tools registered: {reg.tool_count}')
+assert 'buddy_status' in ABLE_SYSTEM_PROMPT
+assert 'buddy_feed' in ABLE_SYSTEM_PROMPT
 "
 
 # 4. Tool count is 23 (20 original + 3 buddy tools)
@@ -115,19 +122,11 @@ emb = vs.compute_embedding('test query')
 print(f'Embedding dim: {len(emb)}, non-zero: {sum(1 for x in emb if x != 0.0)}')
 "
 
-# 7. Gateway system prompt mentions buddy tools
-docker compose exec able python -c "
-from able.core.gateway.gateway import ABLE_SYSTEM_PROMPT
-assert 'buddy_status' in ABLE_SYSTEM_PROMPT
-assert 'buddy_feed' in ABLE_SYSTEM_PROMPT
-print('System prompt includes buddy tools')
-"
-
-# 8. Cron jobs all registered
+# 7. Cron jobs all registered
 docker compose exec able python -c "
 from able.scheduler.cron import CronScheduler, register_default_jobs
 sched = CronScheduler()
-register_default_jobs(sched, gateway=None)
+register_default_jobs(sched)
 print(f'Cron jobs registered: {len(sched.jobs)}')
 for name, job in sched.jobs.items():
     print(f'  {name}: {job.schedule}')
@@ -138,14 +137,14 @@ for name, job in sched.jobs.items():
 
 ### P0 — Verify in production
 - [ ] Telegram bot responds to "How's Groot?" with buddy status (not tenant error)
-- [ ] Bot uses GPT 5.4 Mini (OAuth) as primary model, not Nemotron
+- [ ] Live server confirms GPT 5.4 Mini (OAuth) is the primary model when the deployed auth token is present
 - [ ] Cron jobs are running (check `cron_executions.db` after 24h)
 - [ ] Health endpoint returns 200
 
 ### P1 — Robustness
 - [ ] Run pentest scanner again (`python -m able.security.pentest`) — verify ABLE_ env vars detected
-- [ ] Add integration test for buddy tool dispatch (mock Telegram update → verify buddy_status called)
-- [ ] Add smoke test to CI that starts gateway briefly and checks /health
+- [x] Add integration test for buddy tool dispatch (mock Telegram update → verify buddy_status called)
+- [x] Add smoke test to CI that starts gateway briefly and checks /health
 
 ### P2 — Features
 - [ ] Buddy evolution triggers (battle system, stage progression)

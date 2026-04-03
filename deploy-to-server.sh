@@ -48,6 +48,15 @@ if [ -f "able/.env" ]; then
   ssh_run 'chmod 600 /opt/able/.env'
 fi
 
+AUTH_VOLUME_LINE=""
+if [ -f "$HOME/.able/auth.json" ]; then
+  echo -e "${YELLOW}Uploading OAuth token...${NC}"
+  ssh_run 'mkdir -p /opt/able/auth'
+  scp -i "$SSH_KEY" -o StrictHostKeyChecking=no "$HOME/.able/auth.json" "root@$SERVER_IP:/opt/able/auth/auth.json"
+  ssh_run 'chown 1000:1000 /opt/able/auth/auth.json && chmod 600 /opt/able/auth/auth.json'
+  AUTH_VOLUME_LINE='      - /opt/able/auth/auth.json:/home/able/.able/auth.json:ro'
+fi
+
 echo -e "${YELLOW}[3/4] Writing docker-compose.yml...${NC}"
 ssh_run "cat > /opt/able/docker-compose.yml" <<COMPOSE
 services:
@@ -65,6 +74,7 @@ services:
     volumes:
       - able_data:/home/able/.able
       - able_db:/home/able/app/able/data
+${AUTH_VOLUME_LINE}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s

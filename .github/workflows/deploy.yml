@@ -64,7 +64,7 @@ jobs:
         id: build
         uses: docker/build-push-action@v6
         with:
-          context: ./able
+          context: .
           file: ./able/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -166,11 +166,15 @@ jobs:
             chmod 600 /opt/able/.env
             echo "✓ .env written"
 
+            AUTH_VOLUME_LINE=""
+
             # Write OAuth token if available
             if [ -n "${OPENAI_OAUTH_AUTH_JSON:-}" ]; then
               mkdir -p /opt/able/auth
               echo "$OPENAI_OAUTH_AUTH_JSON" > /opt/able/auth/auth.json
+              chown 1000:1000 /opt/able/auth/auth.json
               chmod 600 /opt/able/auth/auth.json
+              AUTH_VOLUME_LINE='      - /opt/able/auth/auth.json:/home/able/.able/auth.json:ro'
               echo "✓ OAuth token deployed"
             fi
 
@@ -191,6 +195,7 @@ jobs:
                 volumes:
                   - able_data:/home/able/.able
                   - able_db:/home/able/app/able/data
+            ${AUTH_VOLUME_LINE}
                 healthcheck:
                   test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
                   interval: 30s

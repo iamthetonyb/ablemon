@@ -9,7 +9,6 @@ python-telegram-bot[rate-limiter]>=21.0
 # Web scraping
 beautifulsoup4>=4.13.0
 lxml>=5.3.0
-requests>=2.32.0
 
 # Billing
 stripe>=11.0.0

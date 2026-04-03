@@ -78,6 +78,10 @@ All four learning feedback loops are closed and tested:
 - Git operations on the DigitalOcean host now run as the `able` user
 - Existing `/opt/able/ABLE` working trees are re-owned by `able` before fetch/checkout
 - This fixes Git's `dubious ownership` failure during deploy without weakening `safe.directory`
+- Slim runtime now includes `requests`, so Docker can import the OpenAI OAuth provider instead of disabling OAuth in the primary path
+- Docker images now build from the repo root and copy the shared `config/` tree into the container, so runtime routing uses the registry config instead of the legacy fallback chain
+- Deploy scripts now mount `auth.json` into `/home/able/.able/auth.json` with UID/GID `1000:1000`, so the non-root container process can actually read the OAuth token
+- CI now includes `gateway-health-smoke.yml`, which builds the image, starts the gateway, checks `/health`, and asserts `config/routing_config.yaml` exists in-container
 
 **Runtime-first boundary cleanup**:
 - `docs/RUNTIME_REFACTOR_AUDIT.md` classifies the repo into `Core`, `Optional but kept`, `Seed / template assets`, and `Dead / accidental`
@@ -175,6 +179,7 @@ All four learning feedback loops are closed and tested:
 
 **Test suite**:
 - Repo-wide documented suite pass: 712 tests, 0 deprecation warnings (`able/tests/`, excluding `test_routing.py` and `test_gateway.py`)
+- Added targeted tests for tier-1 primary provider selection (`test_provider_registry_primary.py`) and Telegram buddy tool dispatch (`test_telegram_buddy_dispatch.py`)
 - 40 federation tests (identity, models, PII scrubbing, ingestion, sync, store since, Unsloth exporter)
 - 70 harvester tests (scaffolding, entry types, harvesters, session writers, corpus scrubber)
 - 11 security tests (injection, command guard, binary hijack, cd+git, dangerous paths, subcommand cap)
@@ -197,6 +202,7 @@ Advance ABLE's scaffolding and operator usefulness. Prefer work that makes ABLE 
 
 Good work usually looks like:
 - grow the distillation corpus toward 100+ pairs for H100 fine-tuning
+- verify the live production Telegram + OAuth path after deploy changes
 - cut live startup and first-response latency further
 - harden runtime seams (deploy, gateway, approval, control plane)
 - add Studio dashboard integration for buddy, roster, operator profile, and routing metrics
@@ -229,6 +235,7 @@ At minimum, rerun the CLI smoke test:
 ```bash
 python3 -m able chat --help
 python3 -m pytest able/tests/test_cli_chat.py -x
+python3 -m pytest able/tests/test_provider_registry_primary.py able/tests/test_telegram_buddy_dispatch.py -x
 python3 -m pytest able/tests/test_package_layout.py able/tests/test_runtime_boundaries.py -x
 cd /tmp && ~/.local/bin/able chat --help
 cd /tmp && printf '/q\n' | ~/.local/bin/able chat --control-port 0
@@ -237,6 +244,9 @@ cd /tmp && printf '/battle\n/q\n' | ~/.local/bin/able chat --control-port 0
 cd /tmp && printf '/compact\n/q\n' | ~/.local/bin/able chat --control-port 0
 python3 -m pytest able/tests/test_weekly_research.py -x
 cd able-studio && pnpm build
+docker compose build
+docker compose up -d
+curl http://localhost:8080/health
 ```
 
 Then run the full suite:

@@ -4,9 +4,9 @@
 #   SLIM (default): Gateway + Telegram + Cron + LLM routing (~200MB)
 #   FULL:           + ML embeddings, browser, billing (~2GB+)
 #
-# Build:
-#   docker build -t able .                          # slim (fast, <200MB)
-#   docker build -t able --build-arg PROFILE=full . # full (heavy, all features)
+# Build from the repo root:
+#   docker build -t able -f able/Dockerfile .                          # slim
+#   docker build -t able -f able/Dockerfile --build-arg PROFILE=full . # full
 #
 # Run:
 #   docker compose up -d
@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-COPY requirements-core.txt requirements-full.txt requirements.txt /tmp/
+COPY able/requirements-core.txt able/requirements-full.txt able/requirements.txt /tmp/
 
 # Install deps based on profile
 RUN pip install --no-cache-dir --upgrade pip && \
@@ -50,8 +50,9 @@ RUN useradd -m -s /bin/bash able
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy application code
-COPY --chown=able:able . /home/able/app/able
+# Copy application code + shared config from the repo root build context
+COPY --chown=able:able able /home/able/app/able
+COPY --chown=able:able config /home/able/app/able/config
 ENV PYTHONPATH="/home/able/app"
 
 # Create persistent directories

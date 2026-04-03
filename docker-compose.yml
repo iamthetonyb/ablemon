@@ -15,8 +15,8 @@
 services:
   able:
     build:
-      context: ./able
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: able/Dockerfile
       args:
         PROFILE: ${PROFILE:-slim}
     container_name: able-gateway

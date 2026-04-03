@@ -391,8 +391,23 @@ Training lanes:
     - `DistillationReadinessCheck` proactive engine + `InitiativeEngine` cron (5am daily): autonomous corpus monitoring + Telegram alert + auto-export training scripts when threshold reached
     - Ollama confirmed over LM Studio for T5 tier (headless, multi-model, Modelfile-native, lower overhead)
     - 756 tests passing total (54 federation/GPU/self-improvement + 702 existing)
+32. **P0/P1 gateway audit hardening**:
+    - Added `requests` to `able/requirements-core.txt` so the slim Docker/runtime path can actually import the OpenAI OAuth provider instead of silently disabling it.
+    - Docker builds now use the repo root as context and copy the shared root `config/` tree into the image, so containers load `config/routing_config.yaml` instead of falling back to the legacy provider chain.
+    - Deploy scripts now mount `auth.json` into `/home/able/.able/auth.json` and set host ownership to UID/GID `1000:1000`, matching the container's `able` user; without that, OAuth tokens were present but unreadable.
+    - Added `able/tests/test_provider_registry_primary.py` to assert `gpt-5.4-mini` is the primary tier-1 provider when OAuth is available.
+    - Added `able/tests/test_telegram_buddy_dispatch.py` to verify Telegram-path tool dispatch hits `buddy_status` rather than `tenant_status`.
+    - Added `.github/workflows/gateway-health-smoke.yml` to build the gateway image, start it, verify `/health`, and assert `config/routing_config.yaml` exists inside the container.
 
 ## Next-Run Objectives
+
+### Priority 0: Live production verification
+
+Run the now-hardened deploy path against production and verify the real operator path end-to-end:
+- confirm the deployed container sees `/home/able/.able/auth.json`
+- confirm tier 1 resolves to `gpt-5.4-mini` on the live server, not Nemotron
+- send a real Telegram buddy query (`How's <buddy>?`) and verify it dispatches the buddy tool path
+- confirm the new CI smoke stays green on PRs and main pushes
 
 ### Priority 1: Studio dashboard buddy integration
 
@@ -458,6 +473,7 @@ cd /tmp && printf '/resources\n/q\n' | ~/.local/bin/able chat --control-port 0
 cd /tmp && printf '/battle\n/q\n' | ~/.local/bin/able chat --control-port 0
 cd /tmp && printf '/compact\n/q\n' | ~/.local/bin/able chat --control-port 0
 python3 -m pytest able/tests/test_cli_chat.py -x
+python3 -m pytest able/tests/test_provider_registry_primary.py able/tests/test_telegram_buddy_dispatch.py -x
 python3 -m pytest able/tests/test_package_layout.py able/tests/test_runtime_boundaries.py -x
 python3 -m pytest able/tests/test_buddy.py -q
 python3 -m pytest able/tests/test_weekly_research.py -x
@@ -466,6 +482,9 @@ python3 -m pytest able/tests/ -x --ignore=able/tests/test_routing.py --ignore=ab
 cd able-studio && pnpm build
 bash -n deploy-to-server.sh
 bash -n install.sh
+docker compose build
+docker compose up -d
+curl http://localhost:8080/health
 ```
 
 For targeted runs:

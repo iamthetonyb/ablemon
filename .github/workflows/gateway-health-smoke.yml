@@ -1,0 +1,51 @@
+name: Gateway Health Smoke
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  gateway-health-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Seed smoke env
+        run: |
+          cat > able/.env <<'EOF'
+          TELEGRAM_BOT_TOKEN=smoke-test-token
+          ABLE_OWNER_TELEGRAM_ID=1
+          ABLE_OWNER_USERNAME=smoke
+          ABLE_TIMEZONE=America/Los_Angeles
+          EOF
+
+      - name: Build gateway image
+        run: docker compose build
+
+      - name: Start gateway
+        run: docker compose up -d
+
+      - name: Wait for /health
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/health > /tmp/able-health.json; then
+              cat /tmp/able-health.json
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Gateway did not become healthy in time"
+          docker compose logs --tail 200
+          exit 1
+
+      - name: Verify routing config present in container
+        run: docker compose exec able test -f config/routing_config.yaml
+
+      - name: Stop gateway
+        if: always()
+        run: docker compose down -v
