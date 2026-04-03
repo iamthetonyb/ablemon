@@ -231,20 +231,21 @@ jobs:
             docker compose down 2>/dev/null || true
             IMAGE="${IMAGE}" docker compose up -d
 
-            # Verify
-            sleep 8
-            if docker compose ps | grep -q "running"; then
-              echo "✅ ABLE gateway running"
-            else
-              echo "❌ Container failed to start"
-              docker compose logs --tail 40
-              exit 1
-            fi
+            # Verify — use /health as the real gate (not docker compose ps text)
+            echo "Waiting for /health..."
+            for i in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:8080/health >/dev/null 2>&1; then
+                echo "✅ Health endpoint OK"
+                break
+              fi
+              sleep 2
+            done
 
-            if curl -fsS http://127.0.0.1:8080/health >/dev/null 2>&1; then
-              echo "✅ Health endpoint OK"
-            else
-              echo "⚠ Health endpoint not responding yet (may need more startup time)"
+            if ! curl -fsS http://127.0.0.1:8080/health >/dev/null 2>&1; then
+              echo "❌ Health endpoint did not become ready"
+              docker compose ps
+              docker compose logs --tail 200
+              exit 1
             fi
 
             echo "=== Recent logs ==="
