@@ -13,7 +13,7 @@ set -e
 # Configuration
 SERVER_IP="${1:-your_server_ip}"
 SSH_KEY="${2:-~/.ssh/id_rsa}"
-REPO_URL="https://github.com/iamthetonyb/AIDE.git"
+REPO_URL="https://github.com/iamthetonyb/ablemon.git"
 BRANCH="${3:-main}"
 REMOTE_PATH="/opt/able"
 
@@ -71,63 +71,63 @@ REMOTE
 echo -e "${GREEN}[3/6] Updating repository...${NC}"
 ssh_cmd << REMOTE
 cd $REMOTE_PATH
-if [ -d "AIDE" ]; then
-    cd AIDE
+if [ -d "ablemon" ]; then
+    cd ablemon
     git fetch origin
     git checkout $BRANCH
     git pull origin $BRANCH
 else
     git clone --branch $BRANCH $REPO_URL
-    cd AIDE
+    cd ablemon
 fi
 REMOTE
 
 # Step 4: Check for .env file
 echo -e "${GREEN}[4/6] Checking environment configuration...${NC}"
 ssh_cmd << REMOTE
-cd $REMOTE_PATH/AIDE/able-v2
+cd $REMOTE_PATH/ablemon/able
 if [ ! -f ".env" ]; then
     echo "Creating .env from example..."
     cp .env.example .env
     echo ""
     echo "⚠️  IMPORTANT: You need to configure .env on the server!"
-    echo "Run: ssh root@$SERVER_IP 'nano $REMOTE_PATH/AIDE/able-v2/.env'"
+    echo "Run: ssh root@$SERVER_IP 'nano $REMOTE_PATH/ablemon/able/.env'"
 fi
 REMOTE
 
 # Step 5: Build and run
 echo -e "${GREEN}[5/6] Building and starting ABLE...${NC}"
 ssh_cmd << REMOTE
-cd $REMOTE_PATH/AIDE/able-v2
+cd $REMOTE_PATH/ablemon/able
 
 # Stop existing container if running
-docker stop able-v2 2>/dev/null || true
-docker rm able-v2 2>/dev/null || true
+docker stop able-gateway 2>/dev/null || true
+docker rm able-gateway 2>/dev/null || true
 
 # Build new image
-docker build -t able-v2 .
+docker build -t able-gateway .
 
 # Run container
 docker run -d \
-    --name able-v2 \
+    --name able-gateway \
     --restart unless-stopped \
     -p 8080:8080 \
     --env-file .env \
     -v $REMOTE_PATH/data:/home/able/.able \
     -v $REMOTE_PATH/secrets:/home/able/.able/.secrets:ro \
-    able-v2
+    able-gateway
 
 echo ""
 echo "Container started. Waiting for health check..."
 sleep 10
-docker ps | grep able-v2
+docker ps | grep able-gateway
 REMOTE
 
 # Step 6: Verify deployment
 echo -e "${GREEN}[6/6] Verifying deployment...${NC}"
 ssh_cmd << REMOTE
 echo "Container logs (last 20 lines):"
-docker logs able-v2 --tail 20
+docker logs able-gateway --tail 20
 
 echo ""
 echo "Health check:"
@@ -140,9 +140,9 @@ echo -e "${GREEN}           Deployment Complete!                                
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 echo ""
 echo "Next steps:"
-echo "1. Configure .env on server: ssh root@$SERVER_IP 'nano $REMOTE_PATH/AIDE/able-v2/.env'"
+echo "1. Configure .env on server: ssh root@$SERVER_IP 'nano $REMOTE_PATH/ablemon/able/.env'"
 echo "2. Add your API keys (TELEGRAM_BOT_TOKEN, OLLAMA_API_KEY, etc.)"
-echo "3. Restart: ssh root@$SERVER_IP 'docker restart able-v2'"
-echo "4. Check logs: ssh root@$SERVER_IP 'docker logs -f able-v2'"
+echo "3. Restart: ssh root@$SERVER_IP 'docker restart able-gateway'"
+echo "4. Check logs: ssh root@$SERVER_IP 'docker logs -f able-gateway'"
 echo ""
 echo "Your ABLE bot should be responding on Telegram within a few minutes."

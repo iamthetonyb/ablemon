@@ -1,0 +1,52 @@
+# ABLE — Docker Compose
+#
+# Quick start:
+#   1. cp able/.env.example able/.env && edit able/.env (add API keys)
+#   2. docker compose up -d           (slim: ~200MB, boots in seconds)
+#   3. docker compose logs -f         (watch startup)
+#
+# Full build (ML, browser, billing):
+#   PROFILE=full docker compose up -d --build
+#
+# OAuth (one-time, needs browser):
+#   python able/scripts/able-auth.py
+#   Then uncomment the auth.json volume below.
+
+services:
+  able:
+    build:
+      context: ./able
+      dockerfile: Dockerfile
+      args:
+        PROFILE: ${PROFILE:-slim}
+    container_name: able-gateway
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - ./able/.env
+    environment:
+      - ABLE_HOME=/home/able/.able
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Persistent state (buddy, memory, sessions, distillation corpus)
+      - able_data:/home/able/.able
+      # Persistent databases (interaction log, cron executions, sessions)
+      - able_db:/home/able/app/able/data
+      # OAuth token — uncomment after running able-auth.py locally:
+      # - ~/.able/auth.json:/home/able/.able/auth.json:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  able_data:
+  able_db:

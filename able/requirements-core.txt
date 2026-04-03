@@ -1,0 +1,27 @@
+# ABLE Core — minimum deps for gateway + telegram + cron + LLM routing
+# Target: <200MB Docker image on Alpine
+# Install: pip install --no-cache-dir -r requirements-core.txt
+
+# Telegram bot (rate-limiter extra adds aiolimiter, ~100KB)
+python-telegram-bot[rate-limiter]>=21.0
+
+# LLM providers (HTTP clients)
+httpx>=0.28.0
+openai>=1.76.0
+anthropic>=0.49.0
+
+# Config & serialization
+pyyaml>=6.0.2
+python-dotenv>=1.1.0
+
+# Health server
+aiohttp>=3.11.0
+
+# Auth encryption
+cryptography>=44.0.0
+
+# System monitoring (lightweight)
+psutil>=6.1.0
+
+# Async file I/O
+aiofiles>=24.1.0

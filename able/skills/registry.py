@@ -99,7 +99,7 @@ class SkillRegistry:
 
     Supports:
     - V1 skills from ~/.able/skills/
-    - V2 skills from able-v2/skills/
+    - V2 skills from able/skills/
     - Dynamically registered callables
     """
 

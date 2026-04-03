@@ -1,168 +1,245 @@
-name: Deploy ABLE to Digital Ocean
+name: Deploy ABLE Gateway
 
 on:
   push:
     branches: [main]
+    paths:
+      - 'able/**'
+      - 'docker-compose.yml'
+      - '.github/workflows/deploy.yml'
   workflow_dispatch:
     inputs:
-      ref:
-        description: "Git ref to deploy (main, branch, tag, or commit SHA)"
+      profile:
+        description: "Build profile"
         required: false
-        default: "main"
+        default: "slim"
+        type: choice
+        options:
+          - slim
+          - full
+      server_host:
+        description: "Server IP/hostname (blank = use default)"
+        required: false
+        default: ""
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/able-gateway
 
 jobs:
-  deploy:
+  build-and-push:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      TARGET_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || 'main' }}
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+      image_digest: ${{ steps.build.outputs.digest }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-        with:
-          ref: ${{ env.TARGET_REF }}
+      - uses: actions/checkout@v5
 
-      - name: Deploy to Digital Ocean
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ./able
+          file: ./able/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            PROFILE=${{ inputs.profile || 'slim' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Print image info
+        run: |
+          echo "Image: ${{ steps.meta.outputs.tags }}"
+          echo "Digest: ${{ steps.build.outputs.digest }}"
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Deploy to server
         uses: appleboy/ssh-action@v1.2.2
         env:
-          TARGET_REF: ${{ env.TARGET_REF }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          # All secrets passed as env vars → written to .env on server
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           ABLE_OWNER_TELEGRAM_ID: ${{ secrets.ABLE_OWNER_TELEGRAM_ID }}
           ABLE_OWNER_USERNAME: ${{ secrets.ABLE_OWNER_USERNAME }}
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
-          OLLAMA_BASE_URL: ${{ secrets.OLLAMA_BASE_URL || 'http://localhost:11434' }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_OAUTH_AUTH_JSON: ${{ secrets.OPENAI_OAUTH_AUTH_JSON }}
-          ABLE_TIMEZONE: ${{ secrets.ABLE_TIMEZONE || 'America/Los_Angeles' }}
-          GITHUB_WEBHOOK_SECRET: ${{ secrets.GITHUB_WEBHOOK_SECRET }}
-          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
-          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
-          GITHUB_TOKEN: ${{ secrets.ABLE_GITHUB_TOKEN }}
+          ABLE_TIMEZONE: ${{ secrets.ABLE_TIMEZONE || 'America/New_York' }}
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+          OLLAMA_BASE_URL: ${{ secrets.OLLAMA_BASE_URL || 'http://localhost:11434' }}
+          GITHUB_TOKEN_ABLE: ${{ secrets.ABLE_GITHUB_TOKEN }}
           DO_API_TOKEN: ${{ secrets.DO_API_TOKEN }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
           PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_API_KEY }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           ABLE_SERVICE_TOKEN: ${{ secrets.ABLE_SERVICE_TOKEN }}
+          GITHUB_WEBHOOK_SECRET: ${{ secrets.GITHUB_WEBHOOK_SECRET }}
         with:
-          host: 146.190.142.68
+          host: ${{ inputs.server_host || '146.190.142.68' }}
           username: root
           key: ${{ secrets.DO_SSH_KEY }}
-          envs: TARGET_REF,TELEGRAM_BOT_TOKEN,ABLE_OWNER_TELEGRAM_ID,ABLE_OWNER_USERNAME,NVIDIA_API_KEY,OPENROUTER_API_KEY,ANTHROPIC_API_KEY,OLLAMA_API_KEY,OLLAMA_BASE_URL,OPENAI_API_KEY,OPENAI_OAUTH_AUTH_JSON,ABLE_TIMEZONE,GITHUB_WEBHOOK_SECRET,NOTION_API_KEY,NOTION_DATABASE_ID,GITHUB_TOKEN,DO_API_TOKEN,VERCEL_TOKEN,BRAVE_SEARCH_API_KEY,PERPLEXITY_API_KEY,GEMINI_API_KEY,STRIPE_SECRET_KEY,STRIPE_WEBHOOK_SECRET,ABLE_SERVICE_TOKEN
+          envs: IMAGE,TELEGRAM_BOT_TOKEN,ABLE_OWNER_TELEGRAM_ID,ABLE_OWNER_USERNAME,NVIDIA_API_KEY,OPENROUTER_API_KEY,ANTHROPIC_API_KEY,OPENAI_API_KEY,OPENAI_OAUTH_AUTH_JSON,ABLE_TIMEZONE,OLLAMA_API_KEY,OLLAMA_BASE_URL,GITHUB_TOKEN_ABLE,DO_API_TOKEN,VERCEL_TOKEN,BRAVE_SEARCH_API_KEY,PERPLEXITY_API_KEY,GEMINI_API_KEY,NOTION_API_KEY,NOTION_DATABASE_ID,STRIPE_SECRET_KEY,STRIPE_WEBHOOK_SECRET,ABLE_SERVICE_TOKEN,GITHUB_WEBHOOK_SECRET
 
           script: |
             set -euo pipefail
 
-            run_as_able() {
-              runuser -u able -- "$@"
-            }
+            echo "=== ABLE Docker Deploy ==="
 
-            echo "=== Ensuring able system user exists ==="
-            if ! getent group able >/dev/null 2>&1; then
-              groupadd --system able
+            # Install Docker if missing (works on any Linux)
+            if ! command -v docker &>/dev/null; then
+              echo "Installing Docker..."
+              curl -fsSL https://get.docker.com | sh
+              systemctl enable --now docker
             fi
-            if ! id -u able >/dev/null 2>&1; then
-              useradd --system --gid able --create-home --home-dir /home/able --shell /bin/bash able
-            fi
-            install -d -o able -g able /opt/able /home/able/.able
 
-            echo "=== Pulling target ref ==="
-            if [ -d /opt/able/ABLE ]; then
-              chown -R able:able /opt/able/ABLE
-            else
-              install -d -o able -g able /opt/able/ABLE
-            fi
-            if [ ! -d /opt/able/ABLE/.git ]; then
-              run_as_able git clone https://github.com/iamthetonyb/ABLE.git /opt/able/ABLE
-            fi
-            cd /opt/able/ABLE
-            run_as_able git fetch --tags origin "${TARGET_REF}"
-            run_as_able git checkout -B deployed FETCH_HEAD
-            mkdir -p /opt/able/ABLE/data
-            chown -R able:able /opt/able/ABLE/data
-            echo "✓ Code updated to $(run_as_able git rev-parse --short HEAD) from ${TARGET_REF}"
+            # Create app directory
+            install -d -m 700 /opt/able
 
-            echo "=== Updating .env file ==="
-            mkdir -p /home/able/.able
-            cat <<EOF > /home/able/.able/.env
+            # Write .env (secrets from GitHub Actions)
+            cat > /opt/able/.env <<EOF
             TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
             ABLE_OWNER_TELEGRAM_ID=$ABLE_OWNER_TELEGRAM_ID
             ABLE_OWNER_USERNAME=$ABLE_OWNER_USERNAME
             NVIDIA_API_KEY=$NVIDIA_API_KEY
             OPENROUTER_API_KEY=$OPENROUTER_API_KEY
             ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
-            OLLAMA_API_KEY=$OLLAMA_API_KEY
-            OLLAMA_BASE_URL=$OLLAMA_BASE_URL
             OPENAI_API_KEY=$OPENAI_API_KEY
             ABLE_TIMEZONE=$ABLE_TIMEZONE
-            GITHUB_WEBHOOK_SECRET=$GITHUB_WEBHOOK_SECRET
-            NOTION_API_KEY=$NOTION_API_KEY
-            NOTION_DATABASE_ID=$NOTION_DATABASE_ID
-            GITHUB_TOKEN=$GITHUB_TOKEN
+            OLLAMA_API_KEY=$OLLAMA_API_KEY
+            OLLAMA_BASE_URL=$OLLAMA_BASE_URL
+            GITHUB_TOKEN=$GITHUB_TOKEN_ABLE
             DO_API_TOKEN=$DO_API_TOKEN
             VERCEL_TOKEN=$VERCEL_TOKEN
             BRAVE_SEARCH_API_KEY=$BRAVE_SEARCH_API_KEY
             PERPLEXITY_API_KEY=$PERPLEXITY_API_KEY
             GEMINI_API_KEY=$GEMINI_API_KEY
-            STRIPE_ENABLED=true
+            NOTION_API_KEY=$NOTION_API_KEY
+            NOTION_DATABASE_ID=$NOTION_DATABASE_ID
             STRIPE_SECRET_KEY=$STRIPE_SECRET_KEY
             STRIPE_WEBHOOK_SECRET=$STRIPE_WEBHOOK_SECRET
-            STRIPE_CREDITS_PER_USD=100
             ABLE_SERVICE_TOKEN=$ABLE_SERVICE_TOKEN
+            GITHUB_WEBHOOK_SECRET=$GITHUB_WEBHOOK_SECRET
             WEBHOOK_PORT=8080
             EOF
-            chown able:able /home/able/.able/.env
-            chmod 600 /home/able/.able/.env
-            echo "✓ .env file updated securely"
+            chmod 600 /opt/able/.env
+            echo "✓ .env written"
 
-            echo "=== Deploying OpenAI OAuth token ==="
-            if [ -n "$OPENAI_OAUTH_AUTH_JSON" ]; then
-              echo "$OPENAI_OAUTH_AUTH_JSON" > /home/able/.able/auth.json
-              chown able:able /home/able/.able/auth.json
-              chmod 600 /home/able/.able/auth.json
-              echo "✓ OAuth file written ($(wc -c < /home/able/.able/auth.json) bytes)"
-              echo "  First 80 chars: $(head -c 80 /home/able/.able/auth.json)"
+            # Write OAuth token if available
+            if [ -n "${OPENAI_OAUTH_AUTH_JSON:-}" ]; then
+              mkdir -p /opt/able/auth
+              echo "$OPENAI_OAUTH_AUTH_JSON" > /opt/able/auth/auth.json
+              chmod 600 /opt/able/auth/auth.json
+              echo "✓ OAuth token deployed"
+            fi
+
+            # Write docker-compose for server
+            cat > /opt/able/docker-compose.yml <<'COMPOSE'
+            services:
+              able:
+                image: ${IMAGE:-ghcr.io/iamthetonyb/able-gateway:latest}
+                container_name: able-gateway
+                restart: unless-stopped
+                ports:
+                  - "8080:8080"
+                env_file:
+                  - .env
+                environment:
+                  - ABLE_HOME=/home/able/.able
+                  - PYTHONUNBUFFERED=1
+                volumes:
+                  - able_data:/home/able/.able
+                  - able_db:/home/able/app/able/data
+                healthcheck:
+                  test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+                  interval: 30s
+                  timeout: 10s
+                  retries: 3
+                  start_period: 15s
+                logging:
+                  driver: "json-file"
+                  options:
+                    max-size: "10m"
+                    max-file: "5"
+
+            volumes:
+              able_data:
+              able_db:
+            COMPOSE
+            echo "✓ docker-compose.yml written"
+
+            # Stop old systemd service if it exists
+            if systemctl is-active --quiet able 2>/dev/null; then
+              echo "Stopping old systemd service..."
+              systemctl stop able
+              systemctl disable able 2>/dev/null || true
+            fi
+
+            # Pull and deploy
+            cd /opt/able
+            echo "Pulling ${IMAGE}..."
+            docker pull "${IMAGE}" 2>&1 | tail -3
+
+            echo "Starting container..."
+            docker compose down 2>/dev/null || true
+            IMAGE="${IMAGE}" docker compose up -d
+
+            # Verify
+            sleep 8
+            if docker compose ps | grep -q "running"; then
+              echo "✅ ABLE gateway running"
             else
-              echo "⚠ OPENAI_OAUTH_AUTH_JSON not set — T1/T2 will fall back to Nemotron/MiMo"
+              echo "❌ Container failed to start"
+              docker compose logs --tail 40
+              exit 1
             fi
 
-            echo "=== Ensuring python3-venv is installed ==="
-            apt-get update -qq && apt-get install -y -qq python3-venv python3-pip > /dev/null
-
-            echo "=== Setting up Python virtual environment ==="
-            if [ ! -d /home/able/.able/venv ]; then
-              python3 -m venv /home/able/.able/venv
-              chown -R able:able /home/able/.able/venv
+            if curl -fsS http://127.0.0.1:8080/health >/dev/null 2>&1; then
+              echo "✅ Health endpoint OK"
+            else
+              echo "⚠ Health endpoint not responding yet (may need more startup time)"
             fi
-            /home/able/.able/venv/bin/pip install -r /opt/able/ABLE/able/requirements.txt --quiet --upgrade
-            /home/able/.able/venv/bin/pip install -e "/opt/able/ABLE[observability]" --quiet --upgrade
-            chown -R able:able /home/able/.able/
 
-            echo "=== Updating systemd service ==="
-            cp /opt/able/ABLE/able/able.service /etc/systemd/system/able.service
-            systemctl daemon-reload
-
-            echo "=== Restarting ABLE ==="
-            systemctl restart able
-            sleep 5
-
-            echo "=== Verifying ==="
-            systemctl is-active --quiet able \
-              && echo "✅ ABLE is running" \
-              || { echo "❌ ABLE failed to start"; journalctl -u able -n 40 --no-pager; exit 1; }
-
-            curl -fsS http://127.0.0.1:8080/health >/dev/null \
-              && echo "✅ Health endpoint responding" \
-              || { echo "❌ Health endpoint failed"; journalctl -u able -n 40 --no-pager; exit 1; }
-
-            echo "=== Startup logs (last 80 lines) ==="
-            journalctl -u able -n 80 --no-pager
-
-            echo "=== OAuth provider diagnostic ==="
-            sudo -u able /home/able/.able/venv/bin/python3 /opt/able/ABLE/scripts/oauth-diagnostic.py 2>&1 || echo "⚠ OAuth diagnostic failed (see output above)"
+            echo "=== Recent logs ==="
+            docker compose logs --tail 30

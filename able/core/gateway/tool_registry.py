@@ -269,12 +269,13 @@ def build_default_registry() -> ToolRegistry:
     """Build the canonical runtime registry used by gateway + control plane."""
     registry = ToolRegistry()
 
-    from able.core.gateway.tool_defs import github_tools, infra_tools, tenant_tools, web_tools
+    from able.core.gateway.tool_defs import github_tools, infra_tools, tenant_tools, web_tools, buddy_tools
 
     registry.register_module(github_tools)
     registry.register_module(infra_tools)
     registry.register_module(web_tools)
     registry.register_module(tenant_tools)
+    registry.register_module(buddy_tools)
 
     try:
         from able.core.gateway.tool_defs import resource_tools

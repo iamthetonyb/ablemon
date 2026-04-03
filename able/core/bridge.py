@@ -1,6 +1,6 @@
 """
-ABLE v1/v2 Bridge
-Synchronizes state between v1 (~/.able) and v2 (able-v2/) systems.
+ABLE Bridge
+Synchronizes state between v1 (~/.able) and the main ABLE system.
 """
 
 import os

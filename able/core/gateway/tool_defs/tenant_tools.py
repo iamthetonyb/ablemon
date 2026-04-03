@@ -67,9 +67,11 @@ TENANT_STATUS = {
     "function": {
         "name": "tenant_status",
         "description": (
-            "Get detailed status for a tenant including corpus stats, "
-            "training readiness, and quality metrics. Use when asked "
-            "'how is client X doing' or 'status of X'."
+            "Get detailed status for a TENANT (client distillation pipeline) including "
+            "corpus stats, training readiness, and quality metrics. Use when asked "
+            "about a tenant/client's distillation status (e.g. 'how is the 0wav tenant', "
+            "'tenant status for acme'). "
+            "Do NOT use this for buddy/companion queries — use buddy_status instead."
         ),
         "parameters": {
             "type": "object",

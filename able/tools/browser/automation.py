@@ -87,8 +87,8 @@ class BrowserAutomation:
         except Exception:
             return False
 
-    async def _ensure_browser(self):
-        """Ensure browser is launched"""
+    async def _ensure_browser(self) -> bool:
+        """Ensure browser is launched. Returns False if playwright unavailable."""
         if self._browser is None:
             try:
                 from playwright.async_api import async_playwright
@@ -101,9 +101,10 @@ class BrowserAutomation:
                     user_agent=random.choice(self.USER_AGENTS)
                 )
             except ImportError:
-                raise RuntimeError(
-                    "Playwright not installed. Run: pip install playwright && playwright install chromium"
-                )
+                return False
+            except Exception:
+                return False
+        return True
 
     async def browse(
         self,
@@ -121,7 +122,11 @@ class BrowserAutomation:
             )
 
         try:
-            await self._ensure_browser()
+            if not await self._ensure_browser():
+                return BrowseResult(
+                    url=url, title="", content="",
+                    error="Playwright not installed. Run: pip install playwright && playwright install chromium"
+                )
             page = await self._context.new_page()
 
             start_time = time.time()
@@ -183,7 +188,8 @@ class BrowserAutomation:
         results = []
 
         try:
-            await self._ensure_browser()
+            if not await self._ensure_browser():
+                return results
             page = await self._context.new_page()
 
             # Use DuckDuckGo (no CAPTCHA issues)

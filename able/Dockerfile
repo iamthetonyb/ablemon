@@ -1,51 +1,77 @@
-# ABLE v2 - Secure Multi-Tenant AI Agent System
-# Build: docker build -t able-v2 .
-# Run: docker run -d --env-file .env -p 8080:8080 able-v2
+# ABLE — Autonomous Business & Learning Engine
+#
+# Two build profiles:
+#   SLIM (default): Gateway + Telegram + Cron + LLM routing (~200MB)
+#   FULL:           + ML embeddings, browser, billing (~2GB+)
+#
+# Build:
+#   docker build -t able .                          # slim (fast, <200MB)
+#   docker build -t able --build-arg PROFILE=full . # full (heavy, all features)
+#
+# Run:
+#   docker compose up -d
 
-FROM python:3.14-slim
+ARG PYTHON_VERSION=3.14
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    git \
-    curl \
-    build-essential \
+# ── Stage 1: Builder ──────────────────────────────────────────
+FROM python:${PYTHON_VERSION}-slim AS builder
+
+ARG PROFILE=slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential git \
     && rm -rf /var/lib/apt/lists/*
 
-# Create able user (non-root for security)
-RUN useradd -m -s /bin/bash able
-USER able
-WORKDIR /home/able
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
-# Set up virtual environment
-RUN python -m venv /home/able/venv
-ENV PATH="/home/able/venv/bin:$PATH"
+COPY requirements-core.txt requirements-full.txt requirements.txt /tmp/
 
-# Install Python dependencies
-COPY --chown=able:able requirements.txt .
+# Install deps based on profile
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    if [ "$PROFILE" = "full" ]; then \
+        pip install --no-cache-dir -r /tmp/requirements-full.txt; \
+    else \
+        pip install --no-cache-dir -r /tmp/requirements-core.txt; \
+    fi
+
+# ── Stage 2: Runtime ─────────────────────────────────────────
+FROM python:${PYTHON_VERSION}-slim AS runtime
+
+# Minimal runtime deps only
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Non-root user
+RUN useradd -m -s /bin/bash able
+
+# Copy venv from builder (no build tools, compilers, etc.)
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy application code
-COPY --chown=able:able . /home/able/able-v2
+COPY --chown=able:able . /home/able/app/able
+ENV PYTHONPATH="/home/able/app"
 
-# Create data directories
-RUN mkdir -p /home/able/.able/memory \
-    /home/able/.able/logs \
+# Create persistent directories
+USER able
+RUN mkdir -p /home/able/.able/memory/daily \
+    /home/able/.able/sessions \
+    /home/able/.able/distillation \
     /home/able/.able/.secrets \
-    /home/able/.able/billing
+    /home/able/app/able/data \
+    /home/able/app/able/logs \
+    /home/able/app/able/audit/logs
 
-WORKDIR /home/able/able-v2
+WORKDIR /home/able/app/able
 
-# Expose port for health checks
 EXPOSE 8080
 
-# Environment variables (override at runtime)
-ENV ABLE_HOME=/home/able/.able
-ENV PYTHONUNBUFFERED=1
+ENV ABLE_HOME=/home/able/.able \
+    PYTHONUNBUFFERED=1
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
-# Default command - run via start.py (validates config before launching gateway)
 CMD ["python", "start.py"]

@@ -1,109 +1,107 @@
 #!/bin/bash
-# Deploy the packaged ABLE runtime to the DigitalOcean server.
-# Usage: bash deploy-to-server.sh [git-ref]
+# Deploy ABLE gateway to any server via Docker.
+#
+# Usage:
+#   ./deploy-to-server.sh <server_ip> [ssh_key]
+#
+# Prerequisites on server: SSH access as root. Docker will be auto-installed.
+# The script pulls a pre-built image from GHCR — no building on the server.
+#
+# For secrets: copy able/.env to the server, or set them in GitHub Actions.
 
 set -euo pipefail
 
-SERVER_IP="146.190.142.68"
-SSH_KEY="${ABLE_SSH_KEY:-$HOME/.ssh/id_ed25519}"
-REPO_URL="https://github.com/iamthetonyb/ABLE.git"
-REPO_PATH="/opt/able/ABLE"
-RUNTIME_HOME="/home/able/.able"
-APP_USER="able"
-APP_GROUP="able"
-TARGET_REF="${1:-main}"
+SERVER_IP="${1:?Usage: ./deploy-to-server.sh <server_ip> [ssh_key]}"
+SSH_KEY="${2:-${ABLE_SSH_KEY:-$HOME/.ssh/id_ed25519}}"
+IMAGE="${ABLE_IMAGE:-ghcr.io/iamthetonyb/able-gateway:latest}"
 
-RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
 NC='\033[0m'
 
-echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}                  ABLE Server Deploy                          ${NC}"
-echo -e "${CYAN}  Host: ${SERVER_IP} | Ref: ${TARGET_REF}                        ${NC}"
-echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
-echo ""
+echo -e "${GREEN}═══════════════════════════════════════${NC}"
+echo -e "${GREEN}  ABLE Gateway Deploy (Docker)         ${NC}"
+echo -e "${GREEN}  Server: ${SERVER_IP}                 ${NC}"
+echo -e "${GREEN}  Image:  ${IMAGE}                     ${NC}"
+echo -e "${GREEN}═══════════════════════════════════════${NC}"
 
 ssh_run() {
-  ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no root@"$SERVER_IP" "$@"
+  ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "root@$SERVER_IP" "$@"
 }
 
-echo -e "${YELLOW}Checking SSH connectivity...${NC}"
-ssh_run "echo connected >/dev/null"
-echo -e "${GREEN}SSH ready${NC}"
-echo ""
+echo -e "${YELLOW}[1/4] Ensuring Docker...${NC}"
+ssh_run '
+  if ! command -v docker &>/dev/null; then
+    curl -fsSL https://get.docker.com | sh
+    systemctl enable --now docker
+  fi
+  docker --version
+'
 
-echo -e "${GREEN}[1/6] Ensuring runtime user...${NC}"
-ssh_run "
-set -euo pipefail
-if ! getent group ${APP_GROUP} >/dev/null 2>&1; then
-  groupadd --system ${APP_GROUP}
+echo -e "${YELLOW}[2/4] Setting up /opt/able...${NC}"
+ssh_run 'install -d -m 700 /opt/able'
+
+# Upload .env if it exists locally
+if [ -f "able/.env" ]; then
+  echo -e "${YELLOW}Uploading .env...${NC}"
+  scp -i "$SSH_KEY" -o StrictHostKeyChecking=no able/.env "root@$SERVER_IP:/opt/able/.env"
+  ssh_run 'chmod 600 /opt/able/.env'
 fi
-if ! id -u ${APP_USER} >/dev/null 2>&1; then
-  useradd --system --gid ${APP_GROUP} --create-home --home-dir /home/${APP_USER} --shell /bin/bash ${APP_USER}
-fi
-install -d -o ${APP_USER} -g ${APP_GROUP} /opt/able ${RUNTIME_HOME}
-"
 
-echo -e "${GREEN}[2/6] Syncing repository...${NC}"
-ssh_run "
-set -euo pipefail
-run_as_able() {
-  runuser -u ${APP_USER} -- \"\$@\"
-}
-mkdir -p /opt/able
-if [ -d ${REPO_PATH} ]; then
-  chown -R ${APP_USER}:${APP_GROUP} ${REPO_PATH}
-else
-  install -d -o ${APP_USER} -g ${APP_GROUP} ${REPO_PATH}
-fi
-if [ ! -d ${REPO_PATH}/.git ]; then
-  run_as_able git clone ${REPO_URL} ${REPO_PATH}
-fi
-cd ${REPO_PATH}
-run_as_able git fetch --tags origin ${TARGET_REF}
-run_as_able git checkout -B deployed FETCH_HEAD
-"
+echo -e "${YELLOW}[3/4] Writing docker-compose.yml...${NC}"
+ssh_run "cat > /opt/able/docker-compose.yml" <<COMPOSE
+services:
+  able:
+    image: ${IMAGE}
+    container_name: able-gateway
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      - ABLE_HOME=/home/able/.able
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - able_data:/home/able/.able
+      - able_db:/home/able/app/able/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
 
-echo -e "${GREEN}[3/6] Preparing runtime directories...${NC}"
-ssh_run "
-set -euo pipefail
-mkdir -p ${RUNTIME_HOME}
-mkdir -p ${REPO_PATH}/data
-chown -R ${APP_USER}:${APP_GROUP} ${RUNTIME_HOME} ${REPO_PATH}/data
-"
+volumes:
+  able_data:
+  able_db:
+COMPOSE
 
-echo -e "${GREEN}[4/6] Installing Python environment...${NC}"
+echo -e "${YELLOW}[4/4] Pulling and starting...${NC}"
 ssh_run "
-set -euo pipefail
-apt-get update -qq >/dev/null
-apt-get install -y -qq python3-venv python3-pip >/dev/null
-if [ ! -d ${RUNTIME_HOME}/venv ]; then
-  python3 -m venv ${RUNTIME_HOME}/venv
-fi
-${RUNTIME_HOME}/venv/bin/pip install --quiet --upgrade pip
-${RUNTIME_HOME}/venv/bin/pip install --quiet --upgrade -r ${REPO_PATH}/able/requirements.txt
-${RUNTIME_HOME}/venv/bin/pip install --quiet --upgrade -e "${REPO_PATH}[observability]"
-"
+  # Stop old systemd service if running
+  systemctl stop able 2>/dev/null || true
+  systemctl disable able 2>/dev/null || true
 
-echo -e "${GREEN}[5/6] Installing systemd unit...${NC}"
-ssh_run "
-set -euo pipefail
-cp ${REPO_PATH}/able/able.service /etc/systemd/system/able.service
-systemctl daemon-reload
-systemctl restart able
-"
-
-echo -e "${GREEN}[6/6] Verifying service...${NC}"
-ssh_run "
-set -euo pipefail
-systemctl is-active --quiet able
-curl -fsS http://127.0.0.1:8080/health >/dev/null
-journalctl -u able -n 40 --no-pager
+  cd /opt/able
+  docker pull '${IMAGE}' 2>&1 | tail -3
+  docker compose down 2>/dev/null || true
+  docker compose up -d
+  sleep 8
+  docker compose ps
+  echo ''
+  curl -fsS http://127.0.0.1:8080/health && echo '✅ Health OK' || echo '⚠ Health not ready yet'
+  echo ''
+  docker compose logs --tail 20
 "
 
 echo ""
 echo -e "${GREEN}Deploy complete.${NC}"
-echo "Service status: ssh root@${SERVER_IP} 'systemctl status able'"
-echo "Health check:   ssh root@${SERVER_IP} 'curl http://127.0.0.1:8080/health'"
+echo "Logs:    ssh root@${SERVER_IP} 'cd /opt/able && docker compose logs -f'"
+echo "Status:  ssh root@${SERVER_IP} 'cd /opt/able && docker compose ps'"
+echo "Restart: ssh root@${SERVER_IP} 'cd /opt/able && docker compose restart'"
