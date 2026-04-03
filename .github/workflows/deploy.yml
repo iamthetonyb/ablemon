@@ -166,52 +166,51 @@ jobs:
             chmod 600 /opt/able/.env
             echo "✓ .env written"
 
-            AUTH_VOLUME_LINE=""
-
             # Write OAuth token if available
+            AUTH_VOLUME=""
             if [ -n "${OPENAI_OAUTH_AUTH_JSON:-}" ]; then
               mkdir -p /opt/able/auth
               echo "$OPENAI_OAUTH_AUTH_JSON" > /opt/able/auth/auth.json
               chown 1000:1000 /opt/able/auth/auth.json
               chmod 600 /opt/able/auth/auth.json
-              AUTH_VOLUME_LINE='      - /opt/able/auth/auth.json:/home/able/.able/auth.json:ro'
+              AUTH_VOLUME="      - /opt/able/auth/auth.json:/home/able/.able/auth.json:ro"
               echo "✓ OAuth token deployed"
             fi
 
-            # Write docker-compose for server
-            cat > /opt/able/docker-compose.yml <<'COMPOSE'
-            services:
-              able:
-                image: ${IMAGE:-ghcr.io/iamthetonyb/able-gateway:latest}
-                container_name: able-gateway
-                restart: unless-stopped
-                ports:
-                  - "8080:8080"
-                env_file:
-                  - .env
-                environment:
-                  - ABLE_HOME=/home/able/.able
-                  - PYTHONUNBUFFERED=1
-                volumes:
-                  - able_data:/home/able/.able
-                  - able_db:/home/able/app/able/data
-            ${AUTH_VOLUME_LINE}
-                healthcheck:
-                  test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-                  interval: 30s
-                  timeout: 10s
-                  retries: 3
-                  start_period: 15s
-                logging:
-                  driver: "json-file"
-                  options:
-                    max-size: "10m"
-                    max-file: "5"
+            # Write docker-compose for server (unquoted heredoc for variable expansion)
+            cat > /opt/able/docker-compose.yml <<COMPOSE
+services:
+  able:
+    image: ${IMAGE:-ghcr.io/iamthetonyb/able-gateway:latest}
+    container_name: able-gateway
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      - ABLE_HOME=/home/able/.able
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - able_data:/home/able/.able
+      - able_db:/home/able/app/able/data
+${AUTH_VOLUME}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
 
-            volumes:
-              able_data:
-              able_db:
-            COMPOSE
+volumes:
+  able_data:
+  able_db:
+COMPOSE
             echo "✓ docker-compose.yml written"
 
             # Stop old systemd service if it exists

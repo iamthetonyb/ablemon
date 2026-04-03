@@ -2313,8 +2313,12 @@ class ABLEGateway:
         # Start queue
         await self.queue.start()
 
-        # Start master bot
-        await self.start_master_bot()
+        # Start master bot (non-fatal — health server stays up even if token is invalid)
+        try:
+            await self.start_master_bot()
+        except Exception as e:
+            print(f"⚠ Telegram bot failed to start: {e}")
+            print("  Health server still running. Fix TELEGRAM_BOT_TOKEN and restart.")
 
         # Start all registered client bots
         for client_id in self.client_registry.clients:
