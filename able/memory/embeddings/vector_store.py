@@ -28,7 +28,7 @@ class VectorStore:
         self,
         storage_path: Path,
         embedding_dim: int = 384,  # Default for small models
-        embedding_provider: str = "simple"  # "simple", "openai", "local"
+        embedding_provider: str = "auto"  # "auto", "openai", "ollama", "local", "simple"
     ):
         self.storage_path = Path(storage_path)
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
@@ -89,16 +89,32 @@ class VectorStore:
     def compute_embedding(self, text: str) -> Optional[List[float]]:
         """
         Compute embedding for text.
-        Uses simple hash-based embedding by default (fast but not semantic).
-        Can be upgraded to use OpenAI or local models.
+        Provider priority: openai > ollama > local (sentence-transformers) > simple (hash).
+        "auto" tries each in order until one succeeds.
         """
-        if self.embedding_provider == "simple":
+        if self.embedding_provider == "auto":
+            return self._auto_embedding(text)
+        elif self.embedding_provider == "simple":
             return self._simple_embedding(text)
         elif self.embedding_provider == "openai":
             return self._openai_embedding(text)
+        elif self.embedding_provider == "ollama":
+            return self._ollama_embedding(text)
         elif self.embedding_provider == "local":
             return self._local_embedding(text)
         return None
+
+    def _auto_embedding(self, text: str) -> List[float]:
+        """Try providers in order: openai → ollama → local → hash fallback."""
+        import os
+        if os.environ.get("OPENAI_API_KEY") or (Path.home() / ".able" / ".secrets" / "OPENAI_API_KEY").exists():
+            result = self._openai_embedding(text)
+            if result and result != self._simple_embedding(text):
+                return result
+        result = self._ollama_embedding(text)
+        if result and result != self._simple_embedding(text):
+            return result
+        return self._local_embedding(text)
 
     def _simple_embedding(self, text: str) -> List[float]:
         """
@@ -151,10 +167,34 @@ class VectorStore:
             print(f"OpenAI embedding error: {e}")
             return self._simple_embedding(text)
 
+    def _ollama_embedding(self, text: str) -> Optional[List[float]]:
+        """Get embedding from local Ollama (free, no heavy deps)."""
+        try:
+            import os
+            import urllib.request
+            base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+            data = json.dumps({"model": "nomic-embed-text", "prompt": text[:8000]}).encode()
+            req = urllib.request.Request(
+                f"{base_url}/api/embeddings",
+                data=data,
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                result = json.loads(resp.read())
+                embedding = result.get("embedding", [])
+                if embedding:
+                    # Pad/truncate to expected dim
+                    if len(embedding) < self.embedding_dim:
+                        embedding += [0.0] * (self.embedding_dim - len(embedding))
+                    return embedding[:self.embedding_dim]
+        except Exception:
+            pass
+        return self._simple_embedding(text)
+
     _st_model = None  # Class-level cache for SentenceTransformer
 
     def _local_embedding(self, text: str) -> Optional[List[float]]:
-        """Get embedding from local model (e.g., sentence-transformers)"""
+        """Get embedding from local model (e.g., sentence-transformers)."""
         try:
             if VectorStore._st_model is None:
                 from sentence_transformers import SentenceTransformer

@@ -85,7 +85,7 @@ class SqliteVecStore:
         self.embedding_dim = embedding_dim or self.EMBEDDING_DIM
 
         self._conn: Optional[sqlite3.Connection] = None
-        self._model: Optional[SentenceTransformer] = None
+        self._model = None  # Optional[SentenceTransformer] when available
         self._initialized = False
 
     async def initialize(self):
@@ -172,23 +172,49 @@ class SqliteVecStore:
         self._conn.commit()
 
     def _compute_embedding(self, text: str) -> List[float]:
-        """Compute embedding for text"""
+        """Compute embedding for text. Tries: sentence-transformers → Ollama → hash."""
         if self._model is not None:
-            # Use sentence-transformers (semantic)
             embedding = self._model.encode(text, convert_to_numpy=True)
             return embedding.tolist()
-        else:
-            # Fallback: deterministic hash-based (NOT semantic, but consistent)
-            import hashlib
-            embedding = []
-            text_lower = text.lower().strip()
-            for i in range(self.embedding_dim):
-                hash_input = f"{text_lower}:{i}"
-                hash_value = int(hashlib.md5(hash_input.encode()).hexdigest()[:8], 16)
-                # Normalize to [-1, 1] range
-                value = (hash_value / 0xFFFFFFFF) * 2 - 1
-                embedding.append(value)
-            return embedding
+
+        # Try Ollama embeddings (free, local, no heavy deps)
+        ollama_result = self._ollama_embedding(text)
+        if ollama_result is not None:
+            return ollama_result
+
+        # Hash-based fallback (NOT semantic, but consistent)
+        import hashlib
+        embedding = []
+        text_lower = text.lower().strip()
+        for i in range(self.embedding_dim):
+            hash_input = f"{text_lower}:{i}"
+            hash_value = int(hashlib.md5(hash_input.encode()).hexdigest()[:8], 16)
+            value = (hash_value / 0xFFFFFFFF) * 2 - 1
+            embedding.append(value)
+        return embedding
+
+    def _ollama_embedding(self, text: str) -> Optional[List[float]]:
+        """Get embedding from local Ollama instance."""
+        try:
+            import os
+            import urllib.request
+            base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+            data = json.dumps({"model": "nomic-embed-text", "prompt": text[:8000]}).encode()
+            req = urllib.request.Request(
+                f"{base_url}/api/embeddings",
+                data=data,
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                result = json.loads(resp.read())
+                embedding = result.get("embedding", [])
+                if embedding:
+                    if len(embedding) < self.embedding_dim:
+                        embedding += [0.0] * (self.embedding_dim - len(embedding))
+                    return embedding[:self.embedding_dim]
+        except Exception:
+            pass
+        return None
 
     def _serialize_embedding(self, embedding: List[float]) -> bytes:
         """Serialize embedding to bytes for storage"""

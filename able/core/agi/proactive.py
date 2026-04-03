@@ -15,6 +15,7 @@ It's the difference between a reactive tool and an AGI assistant.
 
 import asyncio
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, date
@@ -308,11 +309,27 @@ class SystemHealthCheck(ProactiveCheck):
         actions = []
 
         try:
-            import psutil
-            cpu_pct = psutil.cpu_percent(interval=1)
-            mem = psutil.virtual_memory()
+            cpu_pct, mem_pct, mem_avail_mb = None, None, None
 
-            if cpu_pct > 90:
+            # Try /proc first (Linux/Docker — zero deps)
+            try:
+                with open('/proc/meminfo') as f:
+                    meminfo = {}
+                    for line in f:
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            meminfo[parts[0].rstrip(':')] = int(parts[1])
+                    total = meminfo.get('MemTotal', 1)
+                    avail = meminfo.get('MemAvailable', total)
+                    mem_pct = 100.0 * (1 - avail / total)
+                    mem_avail_mb = avail // 1024
+                load1, _, _ = os.getloadavg()
+                cpu_count = os.cpu_count() or 1
+                cpu_pct = min(100.0, (load1 / cpu_count) * 100)
+            except (OSError, AttributeError):
+                pass  # Not Linux — skip system health
+
+            if cpu_pct is not None and cpu_pct > 90:
                 actions.append(ProactiveAction(
                     action_type=ProactiveActionType.ALERT,
                     title="🔴 High CPU Usage",
@@ -322,18 +339,16 @@ class SystemHealthCheck(ProactiveCheck):
                     data={"cpu_percent": cpu_pct}
                 ))
 
-            if mem.percent > 85:
+            if mem_pct is not None and mem_pct > 85:
                 actions.append(ProactiveAction(
                     action_type=ProactiveActionType.ALERT,
                     title="🔴 Low Memory",
-                    description=f"RAM at {mem.percent:.0f}% ({mem.available // 1024**2}MB free).",
+                    description=f"RAM at {mem_pct:.0f}% ({mem_avail_mb}MB free).",
                     urgency=8,
                     requires_human=True,
-                    data={"memory_percent": mem.percent}
+                    data={"memory_percent": mem_pct}
                 ))
 
-        except ImportError:
-            pass  # psutil not installed
         except Exception as e:
             logger.warning(f"System health check failed: {e}")
 

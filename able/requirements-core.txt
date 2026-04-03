@@ -20,8 +20,5 @@ aiohttp>=3.11.0
 # Auth encryption
 cryptography>=44.0.0
 
-# System monitoring (lightweight)
-psutil>=6.1.0
-
 # Async file I/O
 aiofiles>=24.1.0
