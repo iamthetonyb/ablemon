@@ -1,8 +1,8 @@
 # ABLE
 
-**Autonomous Business & Learning Engine** — an AI agent runtime that routes across 5 model tiers, learns from every interaction, trains its own local models, and grows a companion buddy that evolves alongside the system.
+**Autonomous Business & Learning Engine** — an AI agent runtime that routes across 5 model tiers, learns from every interaction, trains its own local models, & grows Ablémon that evolves alongside the system.
 
-One install. One command. Full autonomy.
+One install. One command. True autonomy. 
 
 ```bash
 git clone https://github.com/iamthetonyb/ABLE.git && cd ABLE && bash install.sh
@@ -36,7 +36,8 @@ T1 and T2 route through your ChatGPT subscription at $0/token. T5 runs locally. 
 
 ### Buddy System
 
-Every ABLE instance has a companion — part Tamagotchi, part Pokemon. Your buddy levels up from real work, not fake metrics.
+Every ABLE instance has a companion tied to it — kinda like the Pokemon games. Your buddy levels up from real work + interactions, not fake metrics.
+This essentially is a gamified way to show a visual representation on how your system distills are going + overall evolution of its self improving nature based off how you use it.
 
 **5 starters**, each with a domain bonus:
 
@@ -54,7 +55,8 @@ Buddies evolve through three stages tied to real system milestones:
 - **Trained** — 50+ interactions, 5+ eval passes, level 10+
 - **Evolved** — 100+ distillation pairs, 3+ evolution deploys, level 25+
 
-Buddies have mood, needs, battle records, and ASCII art that changes with each evolution stage. There's a hidden 6th species for completionists. Use `/buddy` in chat to check on yours, `/battle <domain>` to test your system in eval-driven battles.
+Buddies have mood, needs, + battle records (all tied around your business needs/goals etc.) Plus ASCII art that changes with each evolution stage. (There's some hidden features for completionists)
+Use `/buddy` in chat to check on yours, `/battle <domain>` to test your system in eval-driven battles.
 
 ### Self-Distillation Pipeline
 
@@ -151,7 +153,7 @@ able
 
 ### On Apple Silicon (free, local)
 
-MLX LoRA training — zero cloud, zero cost. 9B fits on 32GB Macs, 27B on 64GB+:
+MLX LoRA training — zero cloud, zero cost. 9B fits on 16GB Macs, 27B on 32GB+:
 
 ```bash
 python3 -c "
