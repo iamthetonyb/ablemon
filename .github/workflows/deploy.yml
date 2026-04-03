@@ -94,8 +94,8 @@ jobs:
           IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           # All secrets passed as env vars → written to .env on server
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          ABLE_OWNER_TELEGRAM_ID: ${{ secrets.ABLE_OWNER_TELEGRAM_ID }}
-          ABLE_OWNER_USERNAME: ${{ secrets.ABLE_OWNER_USERNAME }}
+          ABLE_OWNER_TELEGRAM_ID: ${{ secrets.ATLAS_OWNER_TELEGRAM_ID }}
+          ABLE_OWNER_USERNAME: ${{ secrets.ATLAS_OWNER_USERNAME }}
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -104,7 +104,7 @@ jobs:
           ABLE_TIMEZONE: ${{ secrets.ABLE_TIMEZONE || 'America/New_York' }}
           OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
           OLLAMA_BASE_URL: ${{ secrets.OLLAMA_BASE_URL || 'http://localhost:11434' }}
-          GITHUB_TOKEN_ABLE: ${{ secrets.ABLE_GITHUB_TOKEN }}
+          GITHUB_TOKEN_ABLE: ${{ secrets.ATLAS_GITHUB_TOKEN }}
           DO_API_TOKEN: ${{ secrets.DO_API_TOKEN }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
@@ -167,50 +167,55 @@ jobs:
             echo "✓ .env written"
 
             # Write OAuth token if available
-            AUTH_VOLUME=""
             if [ -n "${OPENAI_OAUTH_AUTH_JSON:-}" ]; then
               mkdir -p /opt/able/auth
               echo "$OPENAI_OAUTH_AUTH_JSON" > /opt/able/auth/auth.json
               chown 1000:1000 /opt/able/auth/auth.json
               chmod 600 /opt/able/auth/auth.json
-              AUTH_VOLUME="      - /opt/able/auth/auth.json:/home/able/.able/auth.json:ro"
               echo "✓ OAuth token deployed"
             fi
 
-            # Write docker-compose for server (unquoted heredoc for variable expansion)
-            cat > /opt/able/docker-compose.yml <<COMPOSE
-services:
-  able:
-    image: ${IMAGE:-ghcr.io/iamthetonyb/able-gateway:latest}
-    container_name: able-gateway
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    env_file:
-      - .env
-    environment:
-      - ABLE_HOME=/home/able/.able
-      - PYTHONUNBUFFERED=1
-    volumes:
-      - able_data:/home/able/.able
-      - able_db:/home/able/app/able/data
-${AUTH_VOLUME}
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "5"
+            # Write docker-compose for server
+            cat > /opt/able/docker-compose.yml <<'DCOMPOSE'
+            services:
+              able:
+                image: ${IMAGE:-ghcr.io/iamthetonyb/able-gateway:latest}
+                container_name: able-gateway
+                restart: unless-stopped
+                ports:
+                  - "8080:8080"
+                env_file:
+                  - .env
+                environment:
+                  - ABLE_HOME=/home/able/.able
+                  - PYTHONUNBUFFERED=1
+                volumes:
+                  - able_data:/home/able/.able
+                  - able_db:/home/able/app/able/data
+                healthcheck:
+                  test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+                  interval: 30s
+                  timeout: 10s
+                  retries: 3
+                  start_period: 15s
+                logging:
+                  driver: "json-file"
+                  options:
+                    max-size: "10m"
+                    max-file: "5"
 
-volumes:
-  able_data:
-  able_db:
-COMPOSE
+            volumes:
+              able_data:
+              able_db:
+            DCOMPOSE
+            # Strip leading whitespace from heredoc (GitHub Actions indentation)
+            sed -i 's/^            //' /opt/able/docker-compose.yml
+            # Inject auth volume mount if OAuth token exists
+            if [ -f /opt/able/auth/auth.json ]; then
+              sed -i '/able_db:\/home\/able\/app\/able\/data/a\      - /opt/able/auth/auth.json:/home/able/.able/auth.json:ro' /opt/able/docker-compose.yml
+            fi
+            # Replace IMAGE placeholder with actual image
+            sed -i "s|\${IMAGE:-ghcr.io/iamthetonyb/able-gateway:latest}|${IMAGE}|" /opt/able/docker-compose.yml
             echo "✓ docker-compose.yml written"
 
             # Stop old systemd service if it exists
