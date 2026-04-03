@@ -1,5 +1,5 @@
 #!/bin/bash
-# ABLE v2 Deployment Script
+# ABLE Legacy Deployment Script (prefer deploy-to-server.sh or Docker)
 # Usage: ./deploy.sh [server_ip] [ssh_key_path]
 #
 # This script:
@@ -24,7 +24,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}           ABLE v2 Deployment Script                          ${NC}"
+echo -e "${GREEN}           ABLE Deployment Script                              ${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
 echo ""
 
