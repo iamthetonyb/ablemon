@@ -315,3 +315,21 @@ JSON endpoints for routing observability:
 | `OPENROUTER_API_KEY` | MiMo (Tier 2 fallback), M2.7 (Tier 3 evolution) |
 | `NVIDIA_API_KEY` | Nemotron 120B (Tier 1 fallback, free NIM) |
 | `ANTHROPIC_API_KEY` | Claude Opus 4.6 (Tier 4) |
+
+## Future: T5 Prefix Cache-Aware Routing
+
+When ABLE manages multiple local Ollama instances (T5 tier), a performance
+enhancement to consider is **prefix cache-aware routing** — steering each
+request to whichever backend instance already has the prompt prefix cached in
+GPU/VRAM, cutting time-to-first-token significantly.
+
+This is distinct from ABLE's current complexity scorer (which picks a tier by
+task difficulty). It would layer on top at the T5 level: once `selected_tier=5`,
+a secondary signal picks among Ollama replicas by KV cache hit vs. queue depth.
+
+Reference implementation pattern: llm-d (github.com/llm-d/llm-d) — Kubernetes
+inference scheduler with prefix cache-aware and KV-pressure-aware routing via
+pluggable scoring plugins. Directly applicable when T5 scales beyond a single
+local instance.
+
+Not needed until T5 runs multiple replicas. Track in T5 scaling work.

@@ -8,25 +8,38 @@ Phoenix provides end-to-end observability for every request that flows through A
 
 ## Setup
 
-### Self-Hosted (Docker)
+### docker-compose (recommended)
 
-Phoenix runs as a self-hosted instance on `localhost:6006`:
+Phoenix is included in the root `docker-compose.yml` under the `observability` profile:
+
+```bash
+# Start ABLE + Phoenix together
+docker compose --profile observability up -d
+
+# Phoenix only (if ABLE is already running)
+docker compose --profile observability up -d phoenix
+```
+
+Access the dashboard at **http://localhost:6006**.
+
+The `able` container automatically points at the `phoenix` container via the
+`PHOENIX_COLLECTOR_ENDPOINT` env var (`http://phoenix:6006/v1/traces`).
+
+### Standalone Docker (manual)
 
 ```bash
 docker run -d \
     --name able-phoenix \
     -p 6006:6006 \
-    -v able-phoenix-data:/data \
+    -v able-phoenix-data:/phoenix \
+    -e PHOENIX_WORKING_DIR=/phoenix \
     arizephoenix/phoenix:latest
 ```
 
-Access the dashboard at `http://localhost:6006`.
-
-### Environment
+Then set the endpoint for ABLE:
 
 ```bash
-export PHOENIX_COLLECTOR_ENDPOINT="http://localhost:6006"
-export PHOENIX_PROJECT_NAME="able-default"
+export PHOENIX_COLLECTOR_ENDPOINT="http://localhost:6006/v1/traces"
 ```
 
 ### Fallback: JSONL Mode
