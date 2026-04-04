@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from able.core.routing.interaction_log import DEFAULT_DB_PATH, InteractionLogger
+from able.core.distillation.conversation_evaluator import ConversationChainEvaluator
 
 logger = logging.getLogger(__name__)
 
@@ -359,4 +360,70 @@ class DPOBuilder:
                 written += 1
 
         logger.info("DPO export: wrote %d pairs to %s", written, output_path)
+        return written
+
+    # ── Conversation-chain pairs ──────────────────────────────────────────
+
+    def build_conversation_pairs(self, since_hours: int = 24) -> List[Dict[str, Any]]:
+        """Build multi-turn conversation DPO pairs using ConversationChainEvaluator.
+
+        Unlike single-turn pairs, these encode the full dialogue history as the
+        prompt — capturing how earlier turns influence the quality of later ones.
+        Returns a list of pair dicts in the same format as build_pairs() but with
+        extra fields: session_id, chosen_thinking, rejected_thinking,
+        guidance_correction, chosen_turn_depth, rejected_turn_depth.
+        """
+        evaluator = ConversationChainEvaluator(self._db_path)
+        results = evaluator.evaluate_recent(since_hours=since_hours)
+        pairs_obj = evaluator.build_conversation_dpo_pairs(results)
+
+        pairs: List[Dict[str, Any]] = []
+        for p in pairs_obj:
+            pairs.append({
+                "prompt":                p.prompt_history,
+                "chosen":                p.chosen_response,
+                "chosen_thinking":       p.chosen_thinking,
+                "rejected":              p.rejected_response,
+                "rejected_thinking":     p.rejected_thinking,
+                "guidance_correction":   p.guidance_correction,
+                "source":                "conversation_chain",
+                "domain":                p.domain,
+                "session_id":            p.session_id,
+                "session_quality":       round(p.session_quality, 4),
+                "audit_score_rejected":  0.0,   # session-level, not per-turn
+                "audit_score_chosen":    round(p.session_quality * 5.0, 3),
+                "chosen_turn_depth":     p.chosen_turn_depth,
+                "rejected_turn_depth":   p.rejected_turn_depth,
+            })
+
+        logger.info(
+            "Conversation DPO build: %d multi-turn pairs from %d sessions (last %dh)",
+            len(pairs), len(results), since_hours,
+        )
+        return pairs
+
+    def export_conversation_jsonl(
+        self,
+        output_path: str = "data/distillation_conv_dpo.jsonl",
+        since_hours: int = 24,
+    ) -> int:
+        """Build conversation pairs and append them to a JSONL file.
+
+        Returns the number of pairs written.
+        """
+        pairs = self.build_conversation_pairs(since_hours=since_hours)
+        if not pairs:
+            logger.info("Conversation DPO export: no pairs to write")
+            return 0
+
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+
+        written = 0
+        with out.open("a", encoding="utf-8") as fh:
+            for pair in pairs:
+                fh.write(json.dumps(pair, ensure_ascii=False) + "\n")
+                written += 1
+
+        logger.info("Conversation DPO export: wrote %d pairs to %s", written, output_path)
         return written

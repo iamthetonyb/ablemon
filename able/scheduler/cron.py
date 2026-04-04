@@ -1144,3 +1144,32 @@ def register_default_jobs(
         timeout=180.0,
         max_retries=2,
     )
+
+    # ── Conversation-chain evaluator — every 4 hours, offset +2h from interaction-audit
+    async def run_conversation_eval():
+        from able.core.distillation.dpo_builder import DPOBuilder
+
+        builder = DPOBuilder()
+        written = await asyncio.to_thread(builder.export_conversation_jsonl, since_hours=24)
+        logger.info(
+            "Conversation eval: wrote %d multi-turn DPO pairs to distillation_conv_dpo.jsonl",
+            written,
+        )
+        if written > 0:
+            try:
+                from able.core.buddy.xp import award_distillation_xp
+                xp = award_distillation_xp(new_pairs=written)
+                if xp:
+                    logger.info("Buddy gained %d XP from conversation eval", xp)
+            except Exception as bxp_err:
+                logger.debug("Buddy XP skip (conversation-eval): %s", bxp_err)
+        return {"pairs_written": written}
+
+    scheduler.add_job(
+        "conversation-eval",
+        "0 2,6,10,14,18,22 * * *",
+        run_conversation_eval,
+        description="Evaluate full conversation chains, build multi-turn DPO pairs",
+        timeout=240.0,
+        max_retries=2,
+    )

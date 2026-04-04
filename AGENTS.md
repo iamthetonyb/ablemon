@@ -49,6 +49,89 @@ User (Telegram) → Gateway → TrustGate → Scanner → Enricher → Complexit
 - `config/scorer_weights.yaml` — Complexity scoring weights (M2.7-tunable)
 - `able/.env` / `able/.env.example` — All env vars (API keys, tokens)
 
+## What Was Just Shipped (2026-04-04) — RLHF + Distillation Pipeline
+
+### Conversation-Chain Evaluation + Full-Signal RLHF
+
+**Goal**: Capture the entire reasoning + prompt + response loop as training data — including when the user had to guide the model, why, and wins where the AI nailed it first try.
+
+#### New files
+- `able/core/distillation/conversation_evaluator.py` — `ConversationChainEvaluator`
+  - Groups interaction_log turns by `session_id` into full conversations
+  - Metrics per session: `win_rate`, `guidance_ratio`, `reasoning_depth`, `coherence_score`, `session_quality`
+  - Builds multi-turn DPO pairs in ChatML format: first guidance moment = rejected, best win = chosen, prior turns = prompt context
+  - Output: `data/distillation_conv_dpo.jsonl` with `chosen_thinking`, `rejected_thinking`, `guidance_correction`
+
+#### Updated files
+- `able/core/routing/interaction_log.py` — 3 new schema columns + 3 new methods
+  - New columns: `guidance_needed REAL` (0.0=win, 0.5=partial, 1.0=full correction), `tools_called TEXT` (JSON, real executed tools only), `conversation_depth INTEGER`
+  - New methods: `set_guidance_signal()`, `get_session_turns()`, `get_recent_sessions()`
+  - `update_result()` now accepts `tools_called` and `conversation_depth`
+
+- `able/core/gateway/gateway.py` — Populates real tool signals in interaction log
+  - `tools_called`: derived from `_tool_calls_log` (gateway execution loop — **actual tools that ran**, not model declarations)
+  - `conversation_depth`: count of prior outbound turns from transcript history
+  - **Claude and models emit synthetic tool_call declarations that never execute** — gateway's `_tool_calls_log` is the authoritative real-execution source
+
+- `able/core/distillation/dpo_builder.py` — Two new methods
+  - `build_conversation_pairs(since_hours)` — calls `ConversationChainEvaluator`, returns multi-turn pairs
+  - `export_conversation_jsonl(output_path, since_hours)` — writes to JSONL
+  - Import: `ConversationChainEvaluator` added at top
+
+- `able/core/distillation/interaction_auditor.py` — deepeval-inspired GEval metrics
+  - `_routing_accuracy_score(row)` — was the right tier selected? (complexity_score vs tier vs audit_score)
+  - `_tool_correctness_score(row)` — did real executed tools match domain? (uses tools_called, NOT synthetic declarations)
+  - Both added to `audit_notes` JSON + Phoenix span attributes
+  - **Stack roles preserved**: Phoenix=observability, promptfoo=regression evals, unsloth=training, GEval=per-interaction scoring dimensions
+
+- `able/scheduler/cron.py` — New cron job
+  - `conversation-eval` at `0 2,6,10,14,18,22 * * *` (every 4h offset from `interaction-audit` at `0 */4`)
+  - Calls `DPOBuilder().export_conversation_jsonl()`, awards buddy XP per pair
+
+### Verification checklist
+
+```bash
+# 1. New schema columns applied
+python -c "
+import sqlite3
+conn = sqlite3.connect('data/interaction_log.db')
+cols = [r[1] for r in conn.execute(\"PRAGMA table_info(interaction_log)\")]
+assert 'guidance_needed' in cols, 'missing guidance_needed'
+assert 'tools_called' in cols, 'missing tools_called'
+assert 'conversation_depth' in cols, 'missing conversation_depth'
+print('Schema OK:', [c for c in cols if c in ['guidance_needed','tools_called','conversation_depth']])
+"
+
+# 2. Conversation evaluator imports clean
+python -c "
+from able.core.distillation.conversation_evaluator import ConversationChainEvaluator
+from able.core.distillation.dpo_builder import DPOBuilder
+e = ConversationChainEvaluator()
+b = DPOBuilder()
+print('ConversationChainEvaluator OK')
+print('DPOBuilder.build_conversation_pairs:', hasattr(b, 'build_conversation_pairs'))
+"
+
+# 3. Cron job registered
+python -c "
+from able.scheduler.cron import CronScheduler, register_default_jobs
+sched = CronScheduler()
+register_default_jobs(sched)
+assert 'conversation-eval' in sched.jobs, 'missing conversation-eval job'
+print('conversation-eval job at:', sched.jobs['conversation-eval'].schedule)
+"
+
+# 4. GEval metrics compute without error
+python -c "
+from able.core.distillation.interaction_auditor import _routing_accuracy_score, _tool_correctness_score
+row = {'complexity_score': 0.6, 'selected_tier': 2, 'audit_score': 4.2, 'domain': 'coding', 'tools_called': '[\"bash\",\"read_file\"]'}
+print('routing_accuracy:', _routing_accuracy_score(row))
+print('tool_correctness:', _tool_correctness_score(row))
+"
+```
+
+---
+
 ## What Was Just Shipped (2026-04-03)
 
 ### Fixes

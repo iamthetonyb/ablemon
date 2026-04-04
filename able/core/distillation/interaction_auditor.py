@@ -263,6 +263,110 @@ def _compute_avg_judge_score(parsed: Dict[str, Any]) -> float:
     return round(max(0.0, min(5.0, avg)), 3)
 
 
+# ── deepeval-inspired GEval metrics ──────────────────────────────────────────
+#
+# These are ABLE-native implementations of deepeval's GEval concept — custom
+# prompt-free, rule-based metrics that feed into audit_notes alongside the
+# existing formatter + LLM judge pipeline.
+#
+# Placement in the stack:
+#   Phoenix  → observability/tracing (OTel spans per interaction)
+#   promptfoo → regression evals against fixed test suites
+#   unsloth  → training on the corpus these metrics help filter
+#   deepeval (this block) → per-interaction quality dimensions for audit_notes
+#
+# IMPORTANT: These metrics always use real execution signals:
+#   - tools_called comes from the gateway's execution loop (NOT model declarations)
+#   - guidance_needed from the guidance signal API
+#   Claude and some models emit synthetic tool_call declarations that never run;
+#   the gateway's _tool_calls_log is the authoritative source.
+
+_TOOL_EXPECTATION: Dict[str, List[str]] = {
+    "coding":   ["bash", "read_file", "write_file", "edit_file", "glob", "grep"],
+    "security": ["bash", "grep", "glob", "read_file"],
+    "research": ["web_search", "web_fetch"],
+    "planning": [],   # planning is reasoning-heavy, few tools expected
+    "creative": [],
+    "default":  [],
+}
+
+
+def _routing_accuracy_score(row: Dict[str, Any]) -> float:
+    """
+    GEval metric: was the correct tier selected for this complexity?
+
+    Uses the interaction's complexity_score vs selected_tier to detect
+    over-routing (T4 for trivial tasks) and under-routing (T1 for complex tasks).
+    Returns 0.0–1.0 where 1.0 = perfect tier assignment.
+
+    This metric helps the evolution daemon identify systematic routing errors
+    without needing a separate LLM judge call.
+    """
+    score = float(row.get("complexity_score") or 0.0)
+    tier = int(row.get("selected_tier") or 1)
+    audit = float(row.get("audit_score") or 0.0)   # may be 0 if not yet scored
+
+    # Define ideal tier based on complexity score thresholds
+    if score < 0.4:
+        ideal_tier = 1
+    elif score < 0.7:
+        ideal_tier = 2
+    else:
+        ideal_tier = 4
+
+    tier_distance = abs(tier - ideal_tier)
+    base = 1.0 - (tier_distance * 0.25)  # each tier off = 0.25 penalty
+
+    # Bonus: if audit_score is high AND tier is low → under-routing penalty
+    if audit >= 4.0 and tier <= 1 and score >= 0.5:
+        base -= 0.15  # model did well despite under-routing — routing was risky
+
+    # If audit_score is low AND tier is high → over-routing wasn't worth it
+    if audit > 0 and audit < 3.0 and tier >= 4:
+        base -= 0.15
+
+    return round(max(0.0, min(1.0, base)), 3)
+
+
+def _tool_correctness_score(row: Dict[str, Any]) -> float:
+    """
+    GEval metric: did the REAL executed tools match domain expectations?
+
+    Uses tools_called (JSON from gateway execution loop, real tools only) and
+    the interaction domain to assess whether tool usage was appropriate.
+    Returns 0.0–1.0 where 1.0 = tools matched domain expectations.
+
+    Synthetic tool declarations from model responses are NOT used — only tools
+    that physically executed in the gateway's agentic loop are scored.
+    """
+    tools_json: Optional[str] = row.get("tools_called")
+    domain: str = row.get("domain") or "default"
+
+    if not tools_json:
+        # No tools called — check if domain expected tools
+        expected = _TOOL_EXPECTATION.get(domain, [])
+        return 0.7 if not expected else 0.4  # mild penalty if tools were expected
+
+    try:
+        real_tools: List[str] = json.loads(tools_json)
+    except (json.JSONDecodeError, TypeError):
+        return 0.5  # can't parse, neutral score
+
+    if not real_tools:
+        expected = _TOOL_EXPECTATION.get(domain, [])
+        return 0.7 if not expected else 0.4
+
+    expected = _TOOL_EXPECTATION.get(domain, _TOOL_EXPECTATION["default"])
+    if not expected:
+        # Domain doesn't expect tools — penalize unnecessary tool use
+        return max(0.3, 1.0 - len(real_tools) * 0.1)
+
+    # Count how many expected tools were actually used
+    matches = sum(1 for t in real_tools if t in expected)
+    recall = matches / len(expected) if expected else 1.0
+    return round(min(1.0, 0.5 + recall * 0.5), 3)
+
+
 # ── Main auditor class ────────────────────────────────────────────────────────
 
 class InteractionAuditor:
@@ -441,10 +545,19 @@ class InteractionAuditor:
             # ── Step 3: Blend into final audit_score ──────────────────────
             audit_score = self._blend_scores(fmt_score_01, judge_score_05)
 
-            # ── Step 4: Build audit_notes ──────────────────────────────────
+            # ── Step 4: GEval metrics (deepeval-inspired, rule-based) ──────
+            # These use real execution signals — routing tier vs complexity,
+            # and real executed tools (NOT model-declared synthetic tool calls).
+            _routing_acc = _routing_accuracy_score(row)
+            _tool_correct = _tool_correctness_score(row)
+
+            # ── Step 5: Build audit_notes ──────────────────────────────────
             notes: Dict[str, Any] = {
                 "formatter_score": fmt_score_01,
                 "source": "formatter" if judge_detail is None else "formatter+judge",
+                # GEval metrics — deepeval-inspired, no LLM call
+                "routing_accuracy": _routing_acc,
+                "tool_correctness": _tool_correct,
             }
             if judge_detail is not None:
                 notes.update({
@@ -457,7 +570,7 @@ class InteractionAuditor:
                 })
             audit_notes = json.dumps(notes, ensure_ascii=False)
 
-            # ── Step 5: Persist ────────────────────────────────────────────
+            # ── Step 6: Persist ────────────────────────────────────────────
             try:
                 self._logger.update_result(
                     row_id,
@@ -473,7 +586,9 @@ class InteractionAuditor:
                 skipped += 1
                 continue
 
-            # ── Step 6: Phoenix/JSONL observability span ───────────────────
+            # ── Step 7: Phoenix/JSONL observability span ───────────────────
+            # Phoenix handles tracing; deepeval GEval metrics are added as
+            # span attributes so they appear in the Phoenix UI.
             try:
                 _emit_phoenix_span(
                     row,
@@ -483,10 +598,22 @@ class InteractionAuditor:
                     judge_score=judge_score_05,
                     tracer_provider=self._tracer_provider,
                 )
+                # Enrich span with GEval metrics if tracer is active
+                if self._tracer_provider is not None:
+                    try:
+                        from opentelemetry import trace as _trace
+                        _current = _trace.get_current_span()
+                        if _current and _current.is_recording():
+                            _current.set_attribute("geval.routing_accuracy", _routing_acc)
+                            _current.set_attribute("geval.tool_correctness", _tool_correct)
+                            _current.set_attribute("audit.tools_called", row.get("tools_called") or "")
+                            _current.set_attribute("audit.guidance_needed", row.get("guidance_needed") or 0.0)
+                    except Exception:
+                        pass
             except Exception as span_exc:
                 logger.debug("Span emission failed (non-fatal): %s", span_exc)
 
-            # ── Step 7: Teaching moment detection ─────────────────────────
+            # ── Step 8: Teaching moment detection ─────────────────────────
             if self._is_teaching_moment(row, audit_score):
                 logger.warning(
                     "TEACHING MOMENT [id=%s domain=%s score=%.2f correction=%s feedback=%s] — "

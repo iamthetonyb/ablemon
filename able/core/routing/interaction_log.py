@@ -78,6 +78,22 @@ class InteractionRecord:
     feedback_text: Optional[str] = None     # user's corrected / better version
     correction_detected: bool = False       # implicit (user rephrased after bad answer)
 
+    # ── Guidance richness (2026-04-04) ────────────────────────
+    # How much user guidance was needed for this turn:
+    #   0.0 = AI nailed it first try (win, no guidance)
+    #   0.5 = partial: user nudged / clarified but AI mostly got it
+    #   1.0 = full correction: AI was wrong, user rewrote the answer
+    # Set by gateway when feedback arrives; also inferred by auditor.
+    guidance_needed: float = 0.0
+
+    # Which tools the AI called during this response (JSON list of names).
+    # e.g. '["web_search","bash","read_file"]'  — enables tool-selection training.
+    tools_called: Optional[str] = None
+
+    # Turn index within the session (0-indexed).  Enables the conversation-chain
+    # evaluator to reconstruct full sessions without scanning all rows.
+    conversation_depth: int = 0
+
     # ── Audit (filled by InteractionAuditor background job) ───
     audit_score: Optional[float] = None     # 0.0–5.0 judge LLM quality score
     audit_notes: Optional[str] = None       # JSON: {accuracy, relevance, improvements}
@@ -146,6 +162,13 @@ class InteractionLogger:
         ("correction_detected", "INTEGER DEFAULT 0"),
         ("audit_score", "REAL"),
         ("audit_notes", "TEXT"),
+        # Rich conversation signal columns (2026-04-04)
+        # guidance_needed: 0.0=win, 0.5=partial, 1.0=full correction
+        ("guidance_needed", "REAL DEFAULT 0.0"),
+        # tools_called: JSON list of tool names fired during response
+        ("tools_called", "TEXT"),
+        # conversation_depth: 0-indexed turn position within session
+        ("conversation_depth", "INTEGER DEFAULT 0"),
     ]
 
     def __init__(self, db_path: str = DEFAULT_DB_PATH):
@@ -288,12 +311,23 @@ class InteractionLogger:
         correction_detected: Optional[bool] = None,
         audit_score: Optional[float] = None,
         audit_notes: Optional[str] = None,
+        tools_called: Optional[str] = None,       # JSON list of real executed tool names
+        conversation_depth: Optional[int] = None, # 0-indexed turn position in session
     ):
         """
         Update execution results after a provider responds.
 
         Allows logging the routing decision at dispatch time and
         filling in results asynchronously.
+
+        tools_called: JSON-serialised list of tool names that *actually executed*
+            during this response (e.g. '["bash","web_search"]').  This is derived
+            from the gateway's tool-execution loop, NOT from the model's declared
+            tool_calls — Claude and other models sometimes emit synthetic/fake tool
+            signals that never run.  Always use the gateway's _tool_calls_log.
+
+        conversation_depth: 0-indexed turn counter within the session.  Used by
+            ConversationChainEvaluator to reconstruct sessions without a full scan.
         """
         updates = []
         values = []
@@ -321,6 +355,8 @@ class InteractionLogger:
             ("correction_detected", int(correction_detected) if correction_detected is not None else None),
             ("audit_score", audit_score),
             ("audit_notes", audit_notes),
+            ("tools_called", tools_called),
+            ("conversation_depth", conversation_depth),
         ]:
             if val is not None:
                 updates.append(f"{col} = ?")
@@ -407,6 +443,74 @@ class InteractionLogger:
                 (record_id,),
             )
             conn.commit()
+        finally:
+            conn.close()
+
+    def set_guidance_signal(
+        self,
+        record_id: str,
+        guidance_needed: float,
+        tools_called: Optional[List[str]] = None,
+    ) -> None:
+        """Record how much guidance the user had to provide for this turn.
+
+        guidance_needed:
+            0.0 — AI nailed it first try (win)
+            0.5 — partial: user nudged or clarified
+            1.0 — full correction: AI was wrong, user rewrote
+
+        tools_called: list of tool names that fired during the response.
+        """
+        import json as _json
+        tools_json = _json.dumps(tools_called) if tools_called is not None else None
+        conn = self._connect()
+        try:
+            conn.execute(
+                "UPDATE interaction_log SET guidance_needed = ?"
+                + (", tools_called = ?" if tools_json is not None else "")
+                + " WHERE id = ?",
+                ([guidance_needed, tools_json, record_id] if tools_json is not None
+                 else [guidance_needed, record_id]),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_session_turns(
+        self, session_id: str, limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """Return all turns for a session, ordered chronologically.
+
+        Used by ConversationChainEvaluator to reconstruct full sessions.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM interaction_log WHERE session_id = ? "
+                "ORDER BY conversation_depth ASC, timestamp ASC LIMIT ?",
+                (session_id, limit),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_recent_sessions(
+        self, since_iso: str, min_turns: int = 2
+    ) -> List[str]:
+        """Return session IDs with at least min_turns since since_iso.
+
+        Used by the conversation evaluator to find sessions worth evaluating.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT session_id, COUNT(*) as turns FROM interaction_log "
+                "WHERE timestamp >= ? AND session_id != '' "
+                "GROUP BY session_id HAVING turns >= ? "
+                "ORDER BY MAX(timestamp) DESC",
+                (since_iso, min_turns),
+            ).fetchall()
+            return [r["session_id"] for r in rows]
         finally:
             conn.close()
 

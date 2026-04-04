@@ -1263,6 +1263,17 @@ class ABLEGateway:
                     try:
                         _usage = result.usage if hasattr(result, 'usage') else None
                         _raw_input = text_content if isinstance(text_content, str) else str(text_content)
+                        # Real executed tools — derived from gateway's execution loop (msgs),
+                        # NOT from the model's declared tool_calls. Claude and other models
+                        # can emit synthetic tool signals that never actually run; only
+                        # _tool_calls_log contains tools that physically executed.
+                        import json as _json2
+                        _real_tool_names = [t["name"] for t in _tool_calls_log] if _tool_calls_log else []
+                        _tools_called_json = _json2.dumps(_real_tool_names) if _real_tool_names else None
+                        # conversation_depth = number of prior assistant turns in this session
+                        _conv_depth = sum(
+                            1 for m in history if m.get("direction") == "outbound"
+                        ) if history else 0
                         self.interaction_logger.update_result(
                             interaction_id,
                             actual_provider=result.provider if hasattr(result, 'provider') else "",
@@ -1282,6 +1293,9 @@ class ABLEGateway:
                             thinking_content=_thinking_content[:8000] if _thinking_content else None,
                             corpus_eligible=_quality_scores.get("eligible", True) if _quality_scores else True,
                             quality_score=_quality_scores.get("average", 0.0) if _quality_scores else None,
+                            # Conversation chain fields (real signals, not synthetic)
+                            tools_called=_tools_called_json,
+                            conversation_depth=_conv_depth,
                         )
                     except Exception as log_e:
                         logger.warning(f"Failed to update interaction log: {log_e}")
