@@ -113,6 +113,35 @@ From @SOUL.md — internalize these:
 2. Load identity, objectives, today's daily file, pending queue, recent learnings
 3. Produce status report, then process queue or await instructions
 
+## Distillation Pipeline (Current State — 2026-04-04)
+
+Full end-to-end training data pipeline is live. Key files:
+
+| File | Role |
+|------|------|
+| `able/core/distillation/confidence_scorer.py` | Response confidence 0–1 (real logprobs for Ollama, proxy for others) |
+| `able/core/distillation/conversation_evaluator.py` | Session-level eval + multi-turn DPO pairs |
+| `able/core/distillation/interaction_auditor.py` | Per-interaction scoring (formatter + judge + GEval metrics) |
+| `able/core/distillation/dpo_builder.py` | Turn-level + conversation-chain DPO pair export |
+| `able/core/routing/interaction_log.py` | Schema: `guidance_needed`, `tools_called`, `conversation_depth`, `response_confidence` |
+| `able/core/buddy/xp.py` | `seed_buddy_level_from_harvest()` — first-install XP from existing AI history |
+| `able/core/federation/contributor.py` | Includes `response_confidence` in network contributions |
+
+**Cron schedule:**
+- `interaction-audit` every 4h at `0 */4` — scores interactions, backfills confidence
+- `conversation-eval` every 4h at `0 2,6,10,14,18,22` — multi-turn DPO pairs
+- `nightly-distillation` at 2am — full harvest from all sources
+- `dpo-builder` at 2:30am — turn-level pairs
+- `federation-sync` at 3:30am — share + ingest network pairs
+
+**Tool call reality**: `tools_called` in interaction_log is ALWAYS from the gateway's
+`_tool_calls_log` (physical execution loop), NEVER from model-declared tool_calls.
+Claude and other models emit synthetic declarations that never run — those are ignored.
+
+**Confidence signal sources:**
+- Ollama: real token logprobs via `/api/generate?logprobs=true`
+- All others: calibrated proxy (reasoning depth + response calibration + audit signal + guidance)
+
 ## Skill routing
 
 When the user's request matches an available skill, ALWAYS invoke it using the Skill

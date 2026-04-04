@@ -359,3 +359,120 @@ def award_gstack_sprint_xp(
         )
 
     return xp
+
+
+# ── First-install level seeding ───────────────────────────────────────────────
+
+def seed_buddy_level_from_harvest(since_hours: int = 168) -> Optional[dict]:
+    """Seed a new buddy's starting level from the user's existing interaction history.
+
+    Called ONCE when the buddy is first created (total_interactions == 0 after init).
+    Scans all harvesters to build a domain-confidence profile of the user's existing
+    AI interactions — across ABLE CLI, Claude Code, Codex, ChatGPT, and any external
+    tools — then awards starter XP so the buddy starts at a level reflecting the
+    user's actual domain expertise.
+
+    A security researcher gets a different starting experience than someone asking
+    simple questions. The buddy level, species affinity, and domain badges all
+    benefit from this one-time seeding.
+
+    Returns a summary dict, or None if buddy doesn't exist / already seeded.
+    """
+    buddy = load_buddy()
+    if buddy is None:
+        return None
+
+    # Only seed once — check the seeding flag in metadata
+    if buddy.meta.get("level_seeded"):
+        logger.debug("Buddy level already seeded — skipping")
+        return None
+
+    try:
+        import sqlite3 as _sqlite3
+        from pathlib import Path as _Path
+        from able.core.routing.interaction_log import DEFAULT_DB_PATH
+        from able.core.distillation.confidence_scorer import build_domain_confidence_profile
+        from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+        cutoff_iso = (_dt.now(_tz.utc) - _td(hours=since_hours)).isoformat()
+        db_path = _Path(DEFAULT_DB_PATH)
+        rows = []
+
+        if db_path.exists():
+            conn = _sqlite3.connect(str(db_path))
+            conn.row_factory = _sqlite3.Row
+            try:
+                cursor = conn.execute(
+                    """
+                    SELECT domain, complexity_score, thinking_content, raw_input, raw_output,
+                           guidance_needed, audit_score, actual_provider, selected_provider
+                    FROM interaction_log
+                    WHERE success = 1
+                      AND raw_input IS NOT NULL
+                      AND raw_output IS NOT NULL
+                      AND timestamp >= ?
+                    ORDER BY timestamp DESC
+                    LIMIT 200
+                    """,
+                    (cutoff_iso,),
+                )
+                rows = [dict(r) for r in cursor.fetchall()]
+            finally:
+                conn.close()
+
+        if not rows:
+            logger.info("Buddy seeding: no interaction history found — starting fresh")
+            buddy.meta["level_seeded"] = True
+            save_buddy(buddy)
+            return {"starter_xp": 0, "primary_domains": [], "rows_analyzed": 0}
+
+        profile = build_domain_confidence_profile(rows)
+        starter_xp = profile["starter_xp"]
+
+        if starter_xp > 0:
+            old_level = buddy.level
+            buddy.award_xp(starter_xp)
+
+            # Record primary domains as bonus_domains (species gets bonus XP in these)
+            if profile["primary_domains"]:
+                buddy.meta.setdefault("bonus_domains", [])
+                for d in profile["primary_domains"]:
+                    if d not in buddy.meta["bonus_domains"]:
+                        buddy.meta["bonus_domains"].append(d)
+
+            new_stage = buddy.check_evolution()
+            legendary_title = buddy.unlock_legendary()
+
+            if new_stage:
+                buddy.evolve(new_stage)
+
+            logger.info(
+                "Buddy %s seeded: +%d XP from %d interactions → level %d (primary: %s)",
+                buddy.name, starter_xp, len(rows), buddy.level,
+                ", ".join(profile["primary_domains"]),
+            )
+            if buddy.level > old_level:
+                logger.info("Buddy %s leveled up to %d from seeding!", buddy.name, buddy.level)
+            if legendary_title:
+                logger.info("Buddy %s unlocked legendary form from seeding: %s", buddy.name, legendary_title)
+
+        buddy.meta["level_seeded"] = True
+        buddy.meta["seed_profile"] = {
+            "rows_analyzed": len(rows),
+            "starter_xp": starter_xp,
+            "primary_domains": profile["primary_domains"],
+            "avg_confidence": profile["avg_confidence"],
+        }
+        save_buddy(buddy)
+
+        return {
+            "starter_xp": starter_xp,
+            "primary_domains": profile["primary_domains"],
+            "avg_confidence": profile["avg_confidence"],
+            "rows_analyzed": len(rows),
+            "final_level": buddy.level,
+        }
+
+    except Exception as exc:
+        logger.warning("Buddy level seeding failed (non-fatal): %s", exc)
+        return None

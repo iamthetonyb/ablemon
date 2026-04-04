@@ -570,12 +570,23 @@ class InteractionAuditor:
                 })
             audit_notes = json.dumps(notes, ensure_ascii=False)
 
-            # ── Step 6: Persist ────────────────────────────────────────────
+            # ── Step 6: Persist (audit score + confidence backfill) ────────
+            # Recompute confidence now that we have the audit score — the
+            # auditor run is when we first have audit_score available.
+            _conf_row_with_audit = dict(row)
+            _conf_row_with_audit["audit_score"] = audit_score
+            try:
+                from able.core.distillation.confidence_scorer import score_response_confidence as _sconf
+                _backfilled_confidence = _sconf(_conf_row_with_audit)
+            except Exception:
+                _backfilled_confidence = None
+
             try:
                 self._logger.update_result(
                     row_id,
                     audit_score=audit_score,
                     audit_notes=audit_notes,
+                    response_confidence=_backfilled_confidence,
                 )
                 score_sum += audit_score
                 audited += 1

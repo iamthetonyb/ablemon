@@ -96,10 +96,10 @@ python -c "
 import sqlite3
 conn = sqlite3.connect('data/interaction_log.db')
 cols = [r[1] for r in conn.execute(\"PRAGMA table_info(interaction_log)\")]
-assert 'guidance_needed' in cols, 'missing guidance_needed'
-assert 'tools_called' in cols, 'missing tools_called'
-assert 'conversation_depth' in cols, 'missing conversation_depth'
-print('Schema OK:', [c for c in cols if c in ['guidance_needed','tools_called','conversation_depth']])
+expected = ['guidance_needed','tools_called','conversation_depth','response_confidence']
+for c in expected:
+    assert c in cols, f'missing {c}'
+print('Schema OK:', [c for c in cols if c in expected])
 "
 
 # 2. Conversation evaluator imports clean
@@ -127,6 +127,30 @@ from able.core.distillation.interaction_auditor import _routing_accuracy_score, 
 row = {'complexity_score': 0.6, 'selected_tier': 2, 'audit_score': 4.2, 'domain': 'coding', 'tools_called': '[\"bash\",\"read_file\"]'}
 print('routing_accuracy:', _routing_accuracy_score(row))
 print('tool_correctness:', _tool_correctness_score(row))
+"
+
+# 5. Confidence scorer works across provider types
+python -c "
+from able.core.distillation.confidence_scorer import score_response_confidence, build_domain_confidence_profile
+# GPT proxy
+row_gpt = {'actual_provider': 'gpt-5.4-mini', 'raw_input': 'how do i write a for loop in python?', 'raw_output': 'Here is a for loop example...' * 10, 'thinking_content': 'The user wants a simple example. Let me consider the best approach...', 'complexity_score': 0.3, 'guidance_needed': 0.0, 'audit_score': 4.5}
+print('GPT confidence:', score_response_confidence(row_gpt))
+# Ollama real logprobs
+from able.core.distillation.confidence_scorer import extract_ollama_logprob_confidence
+import math
+fake_logprobs = [math.log(0.95), math.log(0.88), math.log(0.72), math.log(0.91)]
+print('Ollama logprob confidence:', extract_ollama_logprob_confidence(fake_logprobs))
+# Domain profile
+rows = [{'domain': 'security', 'complexity_score': 0.8, 'thinking_content': 'I need to carefully analyze...', 'raw_input': 'audit this', 'raw_output': 'analysis result' * 50, 'guidance_needed': 0.0, 'audit_score': 4.8, 'actual_provider': 'claude'}]
+profile = build_domain_confidence_profile(rows)
+print('Domain profile:', profile)
+"
+
+# 6. Buddy level seeding (dry run with no DB — should not crash)
+python -c "
+from able.core.buddy.xp import seed_buddy_level_from_harvest
+result = seed_buddy_level_from_harvest()
+print('Seed result (None if no buddy):', result)
 "
 ```
 

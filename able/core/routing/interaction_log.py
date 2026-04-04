@@ -169,6 +169,9 @@ class InteractionLogger:
         ("tools_called", "TEXT"),
         # conversation_depth: 0-indexed turn position within session
         ("conversation_depth", "INTEGER DEFAULT 0"),
+        # response_confidence: 0.0–1.0 confidence proxy (real logprobs for Ollama,
+        # calibrated proxy for GPT/WHAM/Claude). Used for DPO pair filtering + federation.
+        ("response_confidence", "REAL DEFAULT NULL"),
     ]
 
     def __init__(self, db_path: str = DEFAULT_DB_PATH):
@@ -311,8 +314,9 @@ class InteractionLogger:
         correction_detected: Optional[bool] = None,
         audit_score: Optional[float] = None,
         audit_notes: Optional[str] = None,
-        tools_called: Optional[str] = None,       # JSON list of real executed tool names
-        conversation_depth: Optional[int] = None, # 0-indexed turn position in session
+        tools_called: Optional[str] = None,           # JSON list of real executed tool names
+        conversation_depth: Optional[int] = None,     # 0-indexed turn position in session
+        response_confidence: Optional[float] = None,  # 0.0–1.0 confidence (logprob proxy)
     ):
         """
         Update execution results after a provider responds.
@@ -357,6 +361,7 @@ class InteractionLogger:
             ("audit_notes", audit_notes),
             ("tools_called", tools_called),
             ("conversation_depth", conversation_depth),
+            ("response_confidence", response_confidence),
         ]:
             if val is not None:
                 updates.append(f"{col} = ?")

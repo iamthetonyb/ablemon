@@ -60,6 +60,7 @@ def scrub_for_network(
     quality_score: float,
     content_hash: str,
     tags: list[str],
+    response_confidence: Optional[float] = None,
 ) -> Optional[dict]:
     """Scrub a pair for network sharing. Returns None if pair becomes empty."""
     from able.core.distillation.harvesters.base import BaseHarvester
@@ -76,7 +77,7 @@ def scrub_for_network(
     if len(prompt.strip()) < 20 or len(response.strip()) < 50:
         return None
 
-    return {
+    record: dict = {
         "prompt": prompt.strip(),
         "response": response.strip(),
         "domain": domain,
@@ -85,6 +86,12 @@ def scrub_for_network(
         "tags": [t for t in tags if t not in ("tenant_specific",)],
         "contributed_at": datetime.now(timezone.utc).isoformat(),
     }
+    # Include confidence when available — lets receiving instances filter by
+    # data quality.  Real logprob-derived (Ollama) vs proxy (GPT/Claude) is
+    # transparent to recipients via the value distribution.
+    if response_confidence is not None:
+        record["response_confidence"] = round(response_confidence, 4)
+    return record
 
 
 def export_contribution(

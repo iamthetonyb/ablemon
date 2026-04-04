@@ -1263,6 +1263,24 @@ class ABLEGateway:
                     try:
                         _usage = result.usage if hasattr(result, 'usage') else None
                         _raw_input = text_content if isinstance(text_content, str) else str(text_content)
+                        # Confidence proxy — real logprobs for Ollama, calibrated proxy otherwise.
+                        # Must be computed before update_result (uses raw_input/output/thinking).
+                        _response_confidence: Optional[float] = None
+                        try:
+                            from able.core.distillation.confidence_scorer import score_response_confidence
+                            _raw_input_for_conf = _raw_input if isinstance(_raw_input, str) else ""
+                            _conf_row = {
+                                "actual_provider": result.provider if hasattr(result, "provider") else "",
+                                "raw_input": _raw_input_for_conf[:5000],
+                                "raw_output": (_raw_output_for_log or "")[:5000],
+                                "thinking_content": _thinking_content[:3000] if _thinking_content else None,
+                                "complexity_score": scoring_result.score if scoring_result else 0.3,
+                                "guidance_needed": None,   # not yet known at response time
+                                "audit_score": None,       # not yet scored
+                            }
+                            _response_confidence = score_response_confidence(_conf_row)
+                        except Exception:
+                            pass
                         # Real executed tools — derived from gateway's execution loop (msgs),
                         # NOT from the model's declared tool_calls. Claude and other models
                         # can emit synthetic tool signals that never actually run; only
@@ -1296,6 +1314,8 @@ class ABLEGateway:
                             # Conversation chain fields (real signals, not synthetic)
                             tools_called=_tools_called_json,
                             conversation_depth=_conv_depth,
+                            # Response confidence: real logprobs for Ollama, proxy for others
+                            response_confidence=_response_confidence,
                         )
                     except Exception as log_e:
                         logger.warning(f"Failed to update interaction log: {log_e}")
