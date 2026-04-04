@@ -29,13 +29,28 @@ from .model import (
 
 # ── Color support ─────────────────────────────────────────────────────────────
 
-def _check_colors() -> bool:
-    if os.environ.get("NO_COLOR"):
-        return False
-    return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+class _ColorFlag:
+    """Lazy color detection — re-evaluates on every bool() check.
+
+    Module-level detection is unreliable: the module might be imported during
+    async startup, a background thread, or a non-TTY subprocess before the
+    interactive terminal is fully attached.  This class always reflects the
+    *current* state of sys.stdout so colors work correctly wherever the render
+    functions are actually called from.
+    """
+
+    def __bool__(self) -> bool:
+        return (
+            not os.environ.get("NO_COLOR")
+            and hasattr(sys.stdout, "isatty")
+            and bool(sys.stdout.isatty())
+        )
+
+    def __repr__(self) -> str:
+        return f"_ColorFlag(active={bool(self)})"
 
 
-_COLORS_ON: bool = _check_colors()
+_COLORS_ON = _ColorFlag()
 
 _RESET = "\033[0m"
 _BOLD  = "\033[1m"
