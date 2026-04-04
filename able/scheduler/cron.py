@@ -952,3 +952,141 @@ def register_default_jobs(
         timeout=30.0,
         max_retries=1,
     )
+
+    # ── gstack learnings harvest — every 4 hours ─────────────────
+    async def harvest_gstack_learnings():
+        """Harvest gstack sprint learnings and award buddy XP.
+
+        Respects ABLE_GSTACK_HARVEST env var — when unset, only awards XP
+        without reading private analytics to avoid leaking skill names.
+        """
+        import json
+        import hashlib
+
+        gstack_home = Path.home() / ".gstack"
+        if not gstack_home.exists():
+            return {"skipped": True, "reason": "gstack not installed"}
+
+        # Gate: don't read private analytics unless explicitly opted in
+        if not os.environ.get("ABLE_GSTACK_HARVEST", "").lower() in ("1", "true", "yes"):
+            return {"skipped": True, "reason": "ABLE_GSTACK_HARVEST not set"}
+
+        # ── Read file + parse in a thread to avoid blocking the event loop ──
+        def _read_new_sessions():
+            analytics_file = gstack_home / "analytics" / "skill-usage.jsonl"
+            cursor_file = gstack_home / ".able-harvest-cursor"
+
+            # Load persisted cursor (last processed timestamp + seen hashes)
+            cutoff = None
+            seen_hashes: set[str] = set()
+            if cursor_file.exists():
+                try:
+                    raw = cursor_file.read_text().strip()
+                    lines = raw.splitlines()
+                    cutoff = datetime.fromisoformat(lines[0].replace("Z", "+00:00"))
+                    if cutoff.tzinfo is None:
+                        cutoff = cutoff.replace(tzinfo=timezone.utc)
+                    # Lines 1+ are hashes of entries at the cursor timestamp
+                    seen_hashes = set(lines[1:])
+                except (ValueError, OSError, IndexError):
+                    cutoff = None
+
+            # First run: fall back to 4h window
+            if cutoff is None:
+                cutoff = datetime.now(timezone.utc) - timedelta(hours=4)
+
+            sessions: list[dict] = []
+            latest_ts: datetime | None = None
+            latest_hashes: list[str] = []
+
+            if analytics_file.exists():
+                for line in analytics_file.read_text(errors="replace").splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                        ts_str = entry.get("ts", "")
+                        ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                        if ts.tzinfo is None:
+                            ts = ts.replace(tzinfo=timezone.utc)
+                        if ts < cutoff:
+                            continue
+                        # Dedup entries at the cursor timestamp using content hash
+                        entry_hash = hashlib.md5(line.encode()).hexdigest()[:12]
+                        if ts == cutoff and entry_hash in seen_hashes:
+                            continue
+                        sessions.append(entry)
+                        if latest_ts is None or ts > latest_ts:
+                            latest_ts = ts
+                            latest_hashes = [entry_hash]
+                        elif ts == latest_ts:
+                            latest_hashes.append(entry_hash)
+                    except (json.JSONDecodeError, ValueError, TypeError):
+                        continue
+
+            return sessions, latest_ts, latest_hashes, cursor_file
+
+        new_sessions, latest_ts, latest_hashes, cursor_file = await asyncio.to_thread(_read_new_sessions)
+
+        # Award buddy XP in a thread to avoid blocking on YAML I/O
+        def _award_xp(sessions_to_process):
+            from able.core.buddy.xp import award_gstack_sprint_xp
+            total = 0
+            skills = []
+            for session in sessions_to_process:
+                skill = session.get("skill", "unknown")
+                outcome = session.get("outcome", "unknown")
+                if outcome in ("success", "failure", "partial"):
+                    xp = award_gstack_sprint_xp(skill=skill, outcome=outcome)
+                    if xp:
+                        total += xp
+                        skills.append(skill)
+            return total, skills
+
+        total_xp = 0
+        skills_processed = []
+        if new_sessions:
+            try:
+                total_xp, skills_processed = await asyncio.to_thread(
+                    _award_xp, new_sessions
+                )
+            except Exception as e:
+                logger.debug(f"gstack buddy XP skip: {e}")
+
+        # Persist cursor with seen hashes at the latest timestamp
+        if latest_ts is not None:
+            try:
+                cursor_data = latest_ts.isoformat() + "\n" + "\n".join(latest_hashes)
+                cursor_file.write_text(cursor_data)
+            except OSError as e:
+                logger.debug(f"Failed to write harvest cursor: {e}")
+
+        if total_xp > 0:
+            logger.info(
+                "gstack harvest: %d XP from %d sprint skills (%s)",
+                total_xp, len(skills_processed), ", ".join(skills_processed),
+            )
+            if send_telegram:
+                try:
+                    await send_telegram(
+                        f"⚡ Buddy gained {total_xp} XP from gstack sprints: "
+                        f"{', '.join(f'/{s}' for s in skills_processed)}"
+                    )
+                except Exception:
+                    pass
+
+        return {
+            "new_sessions": len(new_sessions),
+            "skills_processed": skills_processed,
+            "total_xp": total_xp,
+        }
+
+    scheduler.add_job(
+        "gstack-harvest",
+        "0 */4 * * *",
+        harvest_gstack_learnings,
+        description="Harvest gstack sprint learnings, award buddy XP for completed skills",
+        timeout=60.0,
+        max_retries=1,
+    )

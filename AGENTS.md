@@ -147,6 +147,7 @@ for name, job in sched.jobs.items():
 - [x] Add smoke test to CI that starts gateway briefly and checks /health
 
 ### P2 — Features
+- [x] gstack integration — learnings harvester, buddy XP from sprint events, cron job
 - [ ] Buddy evolution triggers (battle system, stage progression)
 - [ ] Federation network for distillation (cross-instance corpus sharing)
 - [ ] ABLE Studio dashboard connected to live gateway

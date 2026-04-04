@@ -366,27 +366,32 @@ class _Spinner:
             self._task = None
 
 
-class _ReasoningPreview:
-    """Turn streamed <think> blocks into a short on-screen preview."""
+class _ReasoningCapture:
+    """Capture streamed <think> blocks for audit/distillation — hidden from user view.
 
-    def __init__(self, limit: int = 220):
+    Reasoning is never shown to the user. It is accumulated internally and written
+    to ~/.able/logs/reasoning.jsonl after each turn for distillation and debugging.
+    The spinner runs while the model is thinking; users see only the clean answer.
+    """
+
+    def __init__(self):
         self._in_think = False
-        self._shown_chars = 0
-        self._limit = limit
+        self._thinking_parts: list[str] = []
+        self.is_thinking = False  # True while inside a <think> block
 
     def consume(self, chunk: str) -> tuple[str, str]:
+        """Parse chunk. Returns ("", visible_text) — thinking is never returned for display."""
         data = chunk or ""
-        thought_parts: list[str] = []
         answer_parts: list[str] = []
 
         while data:
             if self._in_think:
                 end = data.find("</think>")
                 if end == -1:
-                    thought_parts.append(data)
+                    self._thinking_parts.append(data)
                     data = ""
                 else:
-                    thought_parts.append(data[:end])
+                    self._thinking_parts.append(data[:end])
                     data = data[end + len("</think>"):]
                     self._in_think = False
             else:
@@ -399,17 +404,40 @@ class _ReasoningPreview:
                     data = data[start + len("<think>"):]
                     self._in_think = True
 
-        thought = self._clip(" ".join(" ".join(thought_parts).split()))
+        self.is_thinking = self._in_think
         answer = "".join(answer_parts)
-        return thought, answer
+        return "", answer  # Never expose thinking to caller
 
-    def _clip(self, text: str) -> str:
-        if not text or self._shown_chars >= self._limit:
-            return ""
-        remaining = self._limit - self._shown_chars
-        clipped = text[:remaining]
-        self._shown_chars += len(clipped)
-        return clipped
+    @property
+    def captured_thinking(self) -> str:
+        """Full captured reasoning — for audit log and distillation."""
+        return " ".join(" ".join(self._thinking_parts).split())
+
+
+# Keep old name as alias for any external references
+_ReasoningPreview = _ReasoningCapture
+
+
+def _log_reasoning(thinking: str, *, session_id: str, message_hash: str) -> None:
+    """Append captured model reasoning to ~/.able/logs/reasoning.jsonl.
+
+    Written after every turn. Used by the distillation pipeline and for
+    debugging hallucinations — never displayed to the user.
+    """
+    log_dir = Path.home() / ".able" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    record = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "session": session_id,
+        "message_hash": message_hash,
+        "thinking": thinking,
+    }
+    log_file = log_dir / "reasoning.jsonl"
+    try:
+        with open(log_file, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record) + "\n")
+    except OSError:
+        pass
 
 
 # ── Buddy helper (inline setup) ──────────────────────────────────────────
@@ -1134,9 +1162,10 @@ async def run_chat(args: argparse.Namespace) -> int:
                 spinner.start()
                 first_chunk = True
                 started_output = False
-                started_thinking = False
                 started_answer = False
-                reasoning_preview = _ReasoningPreview()
+                reasoning_capture = _ReasoningCapture()
+                import hashlib as _hashlib
+                _msg_hash = _hashlib.md5(message.encode()).hexdigest()[:8]
                 try:
                     async for chunk in gateway.stream_message(
                         message=message,
@@ -1144,22 +1173,15 @@ async def run_chat(args: argparse.Namespace) -> int:
                         client_id=args.client,
                         metadata={"source": "cli", "channel": "cli", "is_owner": True},
                     ):
-                        thought_chunk, visible_chunk = reasoning_preview.consume(chunk)
-                        if first_chunk and (thought_chunk or visible_chunk):
+                        _, visible_chunk = reasoning_capture.consume(chunk)
+                        # Spinner runs through the thinking phase — stops on first visible text
+                        if first_chunk and visible_chunk:
                             spinner.stop()
-                            await asyncio.sleep(0.05)  # Let spinner cleanup flush
+                            await asyncio.sleep(0.05)
                             sys.stdout.write("\n")
                             first_chunk = False
                             started_output = True
-                        if thought_chunk:
-                            if not started_thinking:
-                                sys.stdout.write(f"  {_c(DIM, 'thinking')} ")
-                                started_thinking = True
-                            sys.stdout.write(_c(DIM, thought_chunk))
-                            sys.stdout.flush()
                         if visible_chunk:
-                            if started_thinking and not started_answer:
-                                sys.stdout.write("\n")
                             if not started_answer:
                                 if not started_output:
                                     spinner.stop()
@@ -1174,6 +1196,11 @@ async def run_chat(args: argparse.Namespace) -> int:
                             response_parts.append(visible_chunk)
                 except Exception:
                     spinner.stop()
+
+                # Log any captured reasoning to audit file (never shown to user)
+                _captured = reasoning_capture.captured_thinking
+                if _captured:
+                    _log_reasoning(_captured, session_id=args.session, message_hash=_msg_hash)
 
                 if response_parts:
                     response = "".join(response_parts)

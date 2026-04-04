@@ -30,6 +30,7 @@ SOURCE_PRIORITY: dict[str, int] = {
     "able_cli": 2,          # ABLE CLI sessions (same quality as able_interaction)
     "0wav_ml": 3,           # 0wav labeled behavioral profiles (domain-specific)
     "0wav_claude_code": 3,  # 0wav Claude Code sessions (domain-specific)
+    "gstack": 3,            # gstack sprint learnings (code review, QA, security insights)
     "codex": 4,             # OpenAI Codex CLI (bundled w/ GPT sub, clean transcripts)
     "chatgpt": 5,           # ChatGPT web (GPT sub, good reasoning)
     "antigravity": 6,       # Antigravity Pro sessions
@@ -125,6 +126,22 @@ def _get_harvesters(project_root: Path, tenant_id: str = "default") -> list:
             harvesters.append(("0wav_ml", OwavMLHarvester()))
         except Exception as e:
             logger.warning("0wav ML harvester unavailable: %s", e)
+
+    # Priority 3: gstack sprint learnings (~/.gstack/projects/*/learnings.jsonl)
+    # Opt-in only — gstack data may contain learnings from private/client repos
+    # that should not cross-contaminate the default corpus or leak via federation.
+    # Set ABLE_GSTACK_HARVEST=1 to enable.
+    import os as _os
+    if _os.environ.get("ABLE_GSTACK_HARVEST", "").lower() in ("1", "true", "yes"):
+        try:
+            from able.core.distillation.harvesters.gstack_harvester import GstackHarvester
+            gstack_home = Path.home() / ".gstack"
+            if gstack_home.exists():
+                harvesters.append(("gstack", GstackHarvester(gstack_home=gstack_home)))
+        except Exception as e:
+            logger.warning("gstack harvester unavailable: %s", e)
+    else:
+        logger.debug("gstack harvester disabled (set ABLE_GSTACK_HARVEST=1 to enable)")
 
     # Priority 4-5: OpenCLI adapters (Codex, ChatGPT, Cowork, Grok)
     try:

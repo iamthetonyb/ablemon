@@ -190,6 +190,10 @@ class TrainingFormatter:
         response = filtered[assistant_index]["content"]
         return prompt, response
 
+    # Model name fragments that indicate high-quality teacher models
+    _PREMIUM_MODELS = ("opus", "claude-3-opus", "claude-opus", "gpt-4o", "gpt-5", "gpt-4-turbo")
+    _MID_MODELS = ("sonnet", "claude-3-sonnet", "claude-sonnet", "gpt-4", "codex")
+
     def _score_conversation(
         self,
         conversation: HarvestedConversation,
@@ -198,7 +202,15 @@ class TrainingFormatter:
         response: str,
         thinking: str | None,
     ) -> float:
-        """Assign a heuristic score so production paths never emit placeholder quality."""
+        """Assign a heuristic quality score for corpus filtering.
+
+        Scoring signals (all rule-based, <1ms):
+        - Source quality bonus (Claude Code > inbox)
+        - Content depth (substantive turns, response length gradient)
+        - Teacher model tier (Opus > Sonnet > Mini)
+        - Reasoning traces, tool use, domain presence
+        - Penalties for terse responses, missing content, scaffolding leaks
+        """
         score = 0.45
         score += self._SOURCE_QUALITY_BONUS.get(conversation.source, 0.05)
 
@@ -217,6 +229,28 @@ class TrainingFormatter:
             score += 0.10
         if thinking:
             score += 0.08
+
+        # Response depth gradient — longer responses teach more
+        resp_len = len(response.strip()) if response else 0
+        if resp_len >= 500:
+            score += 0.06
+        elif resp_len >= 200:
+            score += 0.03
+        elif resp_len < 20:
+            score -= 0.15  # Terse responses are poor training data
+
+        # Teacher model tier — premium model outputs are more valuable.
+        # Exclude mini/nano/haiku — they're student-tier, not teacher-tier.
+        model = (conversation.model or "").lower()
+        is_small = any(s in model for s in ("mini", "nano", "haiku", "flash"))
+        if not is_small and any(t in model for t in self._PREMIUM_MODELS):
+            score += 0.08
+        elif not is_small and any(t in model for t in self._MID_MODELS):
+            score += 0.04
+
+        # Scaffolding leak penalty — unstripped thinking tokens reduce quality
+        if response and ("<think>" in response or "</think>" in response):
+            score -= 0.10
 
         if not prompt or not response:
             score -= 0.20

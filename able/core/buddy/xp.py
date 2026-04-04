@@ -243,3 +243,119 @@ def award_distillation_xp(new_pairs: int = 0) -> Optional[int]:
     if legendary_title:
         logger.info("Buddy %s unlocked legendary form: %s", buddy.name, legendary_title)
     return xp
+
+
+# ── gstack sprint skill XP ────────────────────────────────────────
+
+# XP awarded per gstack skill completion, mapped by engineering value
+_GSTACK_SKILL_XP: dict[str, int] = {
+    "review": 20,           # Code review — high value, catches bugs
+    "qa": 20,               # Quality assurance — direct reliability
+    "qa-only": 15,          # Report-only QA — still valuable
+    "cso": 25,              # Security audit — Phantom specialty, critical
+    "ship": 15,             # Ship workflow — deployment discipline
+    "land-and-deploy": 15,  # Merge + deploy + verify
+    "investigate": 20,      # Root-cause debugging — high skill
+    "autoplan": 10,         # Auto-review pipeline
+    "plan-design-review": 10,
+    "design-review": 10,
+    "plan-ceo-review": 10,
+    "plan-eng-review": 10,
+    "benchmark": 15,        # Performance regression detection
+    "canary": 10,           # Post-deploy monitoring
+    "retro": 10,            # Retrospective — learning from experience
+    "office-hours": 10,     # Startup diagnostic
+    "document-release": 5,  # Doc updates
+    "setup-deploy": 5,      # One-time config
+}
+
+# Map gstack skills to buddy-relevant domains for species bonuses
+_GSTACK_SKILL_DOMAIN: dict[str, str] = {
+    "review": "coding",
+    "qa": "coding",
+    "qa-only": "coding",
+    "cso": "security",
+    "ship": "deploy",
+    "land-and-deploy": "deploy",
+    "investigate": "coding",
+    "autoplan": "coding",
+    "benchmark": "coding",
+    "canary": "deploy",
+    "retro": "research",
+    "office-hours": "research",
+    "document-release": "content",
+}
+
+
+def award_gstack_sprint_xp(
+    skill: str,
+    outcome: str = "success",
+    learnings_count: int = 0,
+) -> Optional[int]:
+    """Award buddy XP for completing a gstack sprint skill.
+
+    Args:
+        skill: gstack skill name (e.g. "review", "qa", "cso")
+        outcome: "success", "failure", or "partial"
+        learnings_count: number of learnings captured during the session
+    """
+    buddy = load_buddy()
+    if buddy is None:
+        return None
+
+    base_xp = _GSTACK_SKILL_XP.get(skill, 8)
+
+    # Scale by outcome
+    if outcome == "failure":
+        base_xp = max(3, base_xp // 3)  # Still get some XP for trying
+    elif outcome == "partial":
+        base_xp = max(5, base_xp // 2)
+
+    # Bonus XP for capturing learnings (knowledge compounds)
+    learning_bonus = min(learnings_count * 3, 15)
+
+    xp = base_xp + learning_bonus
+
+    # Species domain bonus
+    domain = _GSTACK_SKILL_DOMAIN.get(skill, "coding")
+    xp += _species_specialty_bonus(
+        buddy,
+        complexity_score=0.6,  # Sprint skills are moderately complex
+        used_tools=True,
+        approval_granted=False,
+        domain=domain,
+        selected_tier=None,
+    )
+
+    old_level = buddy.level
+    buddy.award_xp(xp)
+    buddy.total_interactions += 1
+
+    # Sprint work feeds the buddy (keeps it healthy)
+    buddy.feed("gstack_sprint")
+    buddy.walk("tool_use", domain=domain)
+
+    new_stage = buddy.check_evolution()
+    legendary_title = buddy.unlock_legendary()
+
+    save_buddy(buddy)
+
+    if buddy.level > old_level:
+        logger.info(
+            "Buddy %s leveled up to %d from gstack /%s! (+%d XP)",
+            buddy.name, buddy.level, skill, xp,
+        )
+    if new_stage:
+        buddy.evolve(new_stage)
+        save_buddy(buddy)
+        logger.info(
+            "Buddy %s EVOLVED to stage %d from gstack sprint work!",
+            buddy.name, new_stage.value,
+        )
+    if legendary_title:
+        logger.info(
+            "Buddy %s unlocked legendary form from gstack sprint: %s",
+            buddy.name, legendary_title,
+        )
+
+    return xp

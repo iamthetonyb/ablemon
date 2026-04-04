@@ -411,8 +411,9 @@ NEED_DECAY_PER_HOUR = {
 # Restoration amounts per action:
 NEED_RESTORE = {
     "hunger": {
-        "battle": 30,      # Running an eval battle feeds it well
-        "eval_pass": 10,   # Each eval pass is a snack
+        "battle": 30,         # Running an eval battle feeds it well
+        "eval_pass": 10,      # Each eval pass is a snack
+        "gstack_sprint": 20,  # Completing a gstack sprint skill
     },
     "thirst": {
         "evolve": 40,      # Running evolution cycle = big drink

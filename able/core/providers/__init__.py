@@ -3,6 +3,10 @@ ABLE v2 Provider System
 
 PicoClaw-inspired modular LLM provider abstraction with fallback chain.
 Supports: NVIDIA NIM (free), OpenRouter, Anthropic, Local (Ollama)
+
+Provider-specific classes are lazy-loaded on first access to avoid
+importing heavy SDKs (~250ms for anthropic alone) during gateway startup.
+Import directly when needed: ``from able.core.providers.anthropic_provider import AnthropicProvider``
 """
 
 from .base import (
@@ -14,10 +18,6 @@ from .base import (
     Message,
     ToolCall,
 )
-from .nvidia_nim import NVIDIANIMProvider
-from .openrouter import OpenRouterProvider
-from .anthropic_provider import AnthropicProvider
-from .ollama import OllamaProvider
 
 __all__ = [
     'LLMProvider',
@@ -33,6 +33,25 @@ __all__ = [
     'OllamaProvider',
 ]
 
+# Lazy-load provider classes — SDK imports are deferred to first access
+_LAZY_PROVIDERS = {
+    'NVIDIANIMProvider': ('.nvidia_nim', 'NVIDIANIMProvider'),
+    'OpenRouterProvider': ('.openrouter', 'OpenRouterProvider'),
+    'AnthropicProvider': ('.anthropic_provider', 'AnthropicProvider'),
+    'OllamaProvider': ('.ollama', 'OllamaProvider'),
+}
+
+
+def __getattr__(name: str):
+    if name in _LAZY_PROVIDERS:
+        module_path, attr = _LAZY_PROVIDERS[name]
+        import importlib
+        mod = importlib.import_module(module_path, __package__)
+        cls = getattr(mod, attr)
+        globals()[name] = cls  # Cache for subsequent access
+        return cls
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 def create_default_chain(secrets_path: str = None) -> ProviderChain:
     """
@@ -43,6 +62,12 @@ def create_default_chain(secrets_path: str = None) -> ProviderChain:
     """
     import os
     from pathlib import Path
+    # Explicit imports — __getattr__ only resolves external attribute access,
+    # not bare names inside the same module.
+    from .nvidia_nim import NVIDIANIMProvider
+    from .openrouter import OpenRouterProvider
+    from .anthropic_provider import AnthropicProvider
+    from .ollama import OllamaProvider
 
     if secrets_path is None:
         secrets_path = Path.home() / '.able' / '.secrets'
