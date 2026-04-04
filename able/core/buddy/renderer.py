@@ -166,6 +166,35 @@ def _need_bar(value: float, width: int = 8) -> str:
     return f"{ch * filled}{'░' * empty}"
 
 
+# ── Text effects ─────────────────────────────────────────────────────────────
+
+def _shimmer_able(text: str = "ABLE") -> str:
+    """Per-character 256-color gold gradient shimmer.
+
+    Uses xterm-256 codes (\033[38;5;Nm) — supported by every modern terminal
+    that handles color at all.  Each letter steps through dark-amber → bright-gold
+    giving the left-to-right shimmer effect.
+    """
+    if not _COLORS_ON:
+        return text
+    # 256-color gold sweep: dark amber → orange-gold → gold → bright yellow
+    sweep = [
+        "\033[38;5;136m",   # dark amber-gold
+        "\033[38;5;178m",   # warm gold
+        "\033[38;5;220m",   # bright gold
+        "\033[38;5;226m",   # near-white gold
+        "\033[38;5;220m",   # bright gold (mirror back)
+        "\033[38;5;178m",   # warm gold
+        "\033[38;5;136m",   # dark amber-gold
+    ]
+    n = len(sweep)
+    result = _BOLD
+    for i, ch in enumerate(text):
+        result += f"{sweep[i % n]}{ch}"
+    result += _RESET
+    return result
+
+
 # ── Profile label helper ──────────────────────────────────────────────────────
 
 def _profile_label(value: str) -> str:
@@ -224,8 +253,8 @@ def render_header(buddy: BuddyState, provider_count: int) -> str:
     xp_bar     = _progress_bar(buddy.xp_progress_pct, 10)
     rarity     = f" · {buddy.rarity_label}" if buddy.rarity_label != "Standard" else ""
 
-    # Title
-    title = _c(_GOLD, "ABLE") if _COLORS_ON else "ABLE"
+    # Title: per-character shimmer gradient
+    title = _shimmer_able("ABLE")
 
     # Name colored by species
     name_str = _c(_species_art_color(buddy.species) + _BOLD, buddy.name) if _COLORS_ON else buddy.name
@@ -236,11 +265,12 @@ def render_header(buddy: BuddyState, provider_count: int) -> str:
     else:
         prov_str = _c(_DIM, "connecting…") if _COLORS_ON else "connecting…"
 
+    # Note: space after each emoji — they render 2 columns wide
     info = [
         title,
         f"{buddy.display_emoji} {name_str} the {meta['label']}  Lv.{buddy.level}  {xp_bar}{rarity}",
         f"{stage_name} · {mood_icon} {needs.mood.title()} · {prov_str}",
-        f"❤️{needs.hunger:.0f}  💧{needs.thirst:.0f}  ⚡{needs.energy:.0f}"
+        f"❤️ {needs.hunger:.0f}  💧 {needs.thirst:.0f}  ⚡ {needs.energy:.0f}"
         f"  ·  Wins {buddy.battles_won}  Draws {buddy.battles_drawn}  Losses {buddy.battles_lost}",
     ]
 
