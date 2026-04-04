@@ -12,7 +12,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from able.core.approval.workflow import ApprovalResult, ApprovalStatus, ApprovalWorkflow
 
@@ -1099,14 +1099,17 @@ async def run_chat(args: argparse.Namespace) -> int:
             needs = buddy.get_needs()
             print(f"  {buddy.display_emoji} {buddy.name}: \"{needs.mood_message}\"")
 
-    # Print animated boot header immediately at startup.
-    # provider_count=0 renders "connecting…" until gateway is ready.
+    # Infinite shimmer boot animation — runs in background thread.
+    # provider_count=0 renders "connecting…" while gateway init runs.
+    # _stop_anim() is called just before the first prompt so the cursor
+    # is clean when we print the help line and separator.
     print()
     if buddy:
-        animate_startup_header(buddy, 0)
+        _stop_anim: "Callable[[], None] | None" = animate_startup_header(buddy, 0)
     else:
         print(f"    {_c(BOLD, 'ABLE')} {_c(DIM, '· starting…')}")
-    print(f"    {_c(DIM, '/help for commands')}\n")
+        _stop_anim = None
+    # /help line is printed after animation stops (just before first prompt below)
 
     def _build_gateway() -> "ABLEGateway":  # noqa: F821
         import warnings, os as _os, sys as _sys
@@ -1185,6 +1188,12 @@ async def run_chat(args: argparse.Namespace) -> int:
     try:
         while True:
             try:
+                # Stop the shimmer animation before first prompt so cursor is clean
+                if _stop_anim is not None:
+                    _stop_anim()
+                    _stop_anim = None
+                    print(f"    {_c(DIM, '/help for commands')}\n")
+
                 # Thin separator to visually chunk conversations (nano-claude-code style)
                 print(_c(DIM, "  " + "─" * 46))
                 # Build prompt: [BuddyName L11 🌱] > (compact, nano-claude-code style)

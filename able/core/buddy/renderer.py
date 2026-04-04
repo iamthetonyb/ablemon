@@ -19,7 +19,9 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
+from typing import Callable
 
 from .model import (
     BuddyState,
@@ -209,6 +211,116 @@ def _shimmer_able(text: str = "ABLE", offset: int = 0) -> str:
     return result
 
 
+# ── Per-species animation pose library ───────────────────────────────────────
+#
+# Each species has a list of art frames per stage.  Frame 0 is the idle pose
+# (matches art_stage1 in model.py).  Subsequent frames suggest movement.
+# All frames for a given species/stage MUST have the same number of lines —
+# that keeps the cursor-up count constant during the animation loop.
+#
+# Design cues used per species:
+#   eye chars  : ◉ (default)  ◎ (alert/wide)  · (squint/scan)  ○ (open)  ✦ (power)
+#   body lean  : /  or  \  prepended to a line suggests arm-raise or sway
+#   element fx : ~~  ≈≈  ⚡  ≋  shifted/grown to suggest elemental activity
+
+_POSE_HOLD_FRAMES = 25   # frames before advancing to next pose (~1.25 s at 20 fps)
+
+_SPECIES_POSES: dict[str, dict[str, list[list[str]]]] = {
+    # ── BLAZE (fire / coder) ─────────────────────────────────────────────
+    "blaze": {
+        "stage1": [
+            # 0 — idle
+            ["  ╭──╮ ", "  │◉◉│ ", "  ╰┬┬╯ ", "  ╱╲╱╲ "],
+            # 1 — eyes widen (alert)
+            ["  ╭──╮ ", "  │◎◎│ ", "  ╰┬┬╯ ", "  ╱╲╱╲ "],
+            # 2 — glance right, arm raises
+            ["  ╭──╮ ", "  │·◉│ ", " /╰┬┬╯ ", "  ╱╲╱╲ "],
+            # 3 — charged up (body shifts left)
+            [" ╭──╮  ", "  │◉◉│ ", "  ╰┬┬╯ ", " ╱╲╱╲╱ "],
+        ],
+    },
+    # ── WAVE (water / researcher) ────────────────────────────────────────
+    "wave": {
+        "stage1": [
+            # 0 — idle, floating
+            ["  ~≈~  ", "  │○○│ ", "  ╰╮╭╯ ", "  ≈≈≈≈ "],
+            # 1 — bob left (wave drifts)
+            [" ~≈~   ", "  │○○│ ", "  ╰╮╭╯ ", " ≈≈≈≈  "],
+            # 2 — scanning (one eye focuses)
+            ["  ~≈~  ", "  │◎○│ ", "  ╰╮╭╯ ", "  ≈≈≈≈ "],
+            # 3 — bob right, deep focus
+            ["   ~≈~ ", "  │◎◎│ ", "  ╰╮╭╯ ", "  ≈≈≈≈ "],
+        ],
+    },
+    # ── ROOT (earth / operator) ─────────────────────────────────────────
+    "root": {
+        "stage1": [
+            # 0 — idle, grounded
+            ["  ╭▲╮  ", "  │··│  ", "  ╰┤├╯  ", "  ╱╲╱╲  "],
+            # 1 — sway left
+            [" ╭▲╮   ", " /│··│  ", "  ╰┤├╯  ", "  ╱╲╱╲  "],
+            # 2 — eyes light up (alert)
+            ["  ╭▲╮  ", "  │**│  ", "  ╰┤├╯  ", "  ╱╲╱╲  "],
+            # 3 — sway right, arm out
+            ["   ╭▲╮ ", "  │··│\\ ", "  ╰┤├╯  ", "  ╱╲╱╲  "],
+        ],
+    },
+    # ── SPARK (lightning / creative) ─────────────────────────────────────
+    "spark": {
+        "stage1": [
+            # 0 — idle
+            ["  ╭★╮  ", "  │@@│  ", "  ╰┬┬╯  ", "   ⚡   "],
+            # 1 — charging (bolt doubles)
+            ["  ╭★╮  ", "  │@@│  ", "  ╰┬┬╯  ", "  ⚡⚡   "],
+            # 2 — full burst
+            ["  ╭✦╮  ", "  │@@│  ", "  ╰┬┬╯  ", " ⚡⚡⚡  "],
+            # 3 — idea flash (one eye spark)
+            ["  ╭★╮  ", "  │✦@│  ", "  ╰┬┬╯  ", "   ⚡   "],
+        ],
+    },
+    # ── PHANTOM (shadow / security) ──────────────────────────────────────
+    "phantom": {
+        "stage1": [
+            # 0 — idle, hovering
+            ["  ╭~~╮  ", "  │°°│  ", "  ╰╮╭╯  ", "   ~~   "],
+            # 1 — glide left (body drifts)
+            [" ╭~~╮   ", "  │°°│  ", "  ╰╮╭╯  ", "  ~~    "],
+            # 2 — scanning (one eye activates)
+            ["  ╭~~╮  ", "  │◉°│  ", "  ╰╮╭╯  ", "   ~~   "],
+            # 3 — glide right
+            ["   ╭~~╮ ", "  │°°│  ", "  ╰╮╭╯  ", "    ~~  "],
+        ],
+    },
+    # ── AETHER (psychic / orchestrator) ──────────────────────────────────
+    "aether": {
+        "stage1": [
+            # 0 — idle
+            ["   ╭◇╮   ", "  ╭┤◉├╮  ", "   ╰┬┬╯   ", "  ≋╱╲≋  "],
+            # 1 — power pulse (diamond brightens)
+            ["   ╭✦╮   ", "  ╭┤◉├╮  ", "   ╰┬┬╯   ", "  ≋╱╲≋  "],
+            # 2 — wide scan (both eyes focus)
+            ["   ╭◇╮   ", "  ╭┤◎├╮  ", "   ╰┬┬╯   ", "  ≋╱╲≋  "],
+            # 3 — coordinating (arms spread)
+            ["   ╭◇╮   ", " /╭┤◉├╮\\ ", "   ╰┬┬╯   ", "  ≋╱╲≋  "],
+        ],
+    },
+}
+
+
+def _get_art_frame(meta: dict, stage: int, pose_idx: int, species: str = "") -> list[str]:
+    """Return the art lines for the given stage and animation pose index.
+
+    species should be the buddy's species string ("blaze", "wave", etc.).
+    Falls back to the static meta art when pose data is not available.
+    """
+    species_key = (species or meta.get("label", "")).lower()
+    stage_key = f"stage{stage}"
+    poses = _SPECIES_POSES.get(species_key, {}).get(stage_key)
+    if poses:
+        return list(poses[pose_idx % len(poses)])
+    return list(meta.get(f"art_stage{stage}", meta.get("art_stage1", [])))
+
+
 # ── Profile label helper ──────────────────────────────────────────────────────
 
 def _profile_label(value: str) -> str:
@@ -248,19 +360,23 @@ def render_banner(buddy: BuddyState) -> str:
     )
 
 
-def render_header(buddy: BuddyState, provider_count: int, _offset: int = 0) -> str:
+def render_header(
+    buddy: BuddyState,
+    provider_count: int,
+    _offset: int = 0,
+    _pose_idx: int = 0,
+) -> str:
     """Startup header — colored ASCII art left, buddy stats right.
 
     Uses standard 16-color ANSI for maximum terminal compatibility.
     provider_count=0 → shows 'connecting…' while gateway initialises.
-    _offset shifts the shimmer gradient phase — increment it each frame
-    to animate the gold sweep across the title and XP bar.
+    _offset  shifts the shimmer gradient phase (animate the gold sweep).
+    _pose_idx selects the animation frame from _SPECIES_POSES (buddy moves).
     """
     meta    = buddy.meta
-    art_key = f"art_stage{buddy.stage}"
 
     # Raw lines for width measurement; colored lines for display
-    raw_art: list[str] = list(meta.get(art_key, meta["art_stage1"]))
+    raw_art: list[str] = _get_art_frame(meta, buddy.stage, _pose_idx, buddy.species)
     col_art: list[str] = _color_art(raw_art, buddy.species)
 
     needs      = buddy.get_needs()
@@ -314,18 +430,21 @@ def render_header(buddy: BuddyState, provider_count: int, _offset: int = 0) -> s
 def animate_startup_header(
     buddy: BuddyState,
     provider_count: int,
-    frames: int = 20,
     fps: float = 20.0,
-) -> None:
-    """Boot animation — continuously shifts the shimmer offset to produce a
-    rolling gold sweep across the ABLE title letters and XP bar.
+) -> Callable[[], None]:
+    """Infinite shimmer boot animation — runs in a background thread.
 
-    Prints the first frame, then uses ANSI cursor-up to overwrite the same
-    screen region on every subsequent frame.  When colors are disabled the
-    header is printed once (no animation).
+    Shifts the gold gradient phase each frame to create a continuous rolling
+    glow across the ABLE title and XP bar.  The animation loops forever until
+    the caller invokes the returned ``stop()`` callable (e.g. just before
+    printing the first chat prompt).
 
-    After the function returns the cursor is positioned immediately below the
-    last frame so callers can print the '/help for commands' line normally.
+    Returns
+    -------
+    stop : Callable[[], None]
+        Call once to halt the animation.  Blocks at most ~150 ms for the
+        current frame to finish, then returns with the cursor positioned
+        immediately below the header block.  Safe to call multiple times.
     """
     first = render_header(buddy, provider_count, 0)
     n_lines = first.count("\n") + 1
@@ -334,18 +453,39 @@ def animate_startup_header(
     sys.stdout.flush()
 
     if not _COLORS_ON:
-        return
+        return lambda: None  # no-op stopper when colors are off
 
+    stop_event = threading.Event()
     frame_delay = 1.0 / fps
-    for frame in range(1, frames):
-        time.sleep(frame_delay)
-        offset = frame * 2          # advance 2 palette stops per frame
-        new_frame = render_header(buddy, provider_count, offset)
-        # Cursor up n_lines, then reprint
-        sys.stdout.write(f"\033[{n_lines}A\r")
-        sys.stdout.flush()
-        print(new_frame)
-        sys.stdout.flush()
+
+    def _run() -> None:
+        frame = 0
+        while True:
+            # wait() returns True immediately if stop_event is set,
+            # or after frame_delay if it times out — no busy-spin needed.
+            if stop_event.wait(timeout=frame_delay):
+                break
+            frame += 1
+            shimmer_offset = (frame * 2) % _N_STOPS
+            pose_idx       = frame // _POSE_HOLD_FRAMES
+            new_frame = render_header(buddy, provider_count, shimmer_offset, pose_idx)
+            # Cursor up to top of header, then overwrite in-place
+            sys.stdout.write(f"\033[{n_lines}A\r")
+            sys.stdout.flush()
+            print(new_frame)
+            sys.stdout.flush()
+        # Thread exits with cursor at bottom of header (after last print)
+
+    thread = threading.Thread(target=_run, daemon=True, name="able-shimmer")
+    thread.start()
+
+    def stop() -> None:
+        if stop_event.is_set():
+            return
+        stop_event.set()
+        thread.join(timeout=0.15)  # wait ≤150 ms for current frame to finish
+
+    return stop
 
 
 def render_full(buddy: BuddyState, stats: BuddyStats | None = None) -> str:
