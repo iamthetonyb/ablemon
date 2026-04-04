@@ -267,10 +267,13 @@ def render_header(buddy: BuddyState, provider_count: int) -> str:
         _c(_species_art_color(buddy.species) + _BOLD, buddy.name)
         if _COLORS_ON else buddy.name
     )
-    providers_label = (
-        _c(_DIM, f"{provider_count} AI providers ready")
-        if _COLORS_ON else f"{provider_count} AI providers ready"
-    )
+    if provider_count > 0:
+        providers_label = (
+            _c(_DIM, f"{provider_count} AI providers ready")
+            if _COLORS_ON else f"{provider_count} AI providers ready"
+        )
+    else:
+        providers_label = _c(_DIM, "connecting…") if _COLORS_ON else "connecting…"
 
     info = [
         title,

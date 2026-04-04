@@ -1095,8 +1095,13 @@ async def run_chat(args: argparse.Namespace) -> int:
             needs = buddy.get_needs()
             print(f"  {buddy.display_emoji} {buddy.name}: \"{needs.mood_message}\"")
 
-    # Minimal header before gateway is ready (provider count unknown yet)
-    print(f"\n    {_c(BOLD, 'ABLE')} {_c(DIM, '· starting…')}")
+    # Print full header immediately at startup.
+    # provider_count=0 renders "connecting…" until gateway is ready.
+    print()
+    if buddy:
+        print(render_header(buddy, 0))
+    else:
+        print(f"    {_c(BOLD, 'ABLE')} {_c(DIM, '· starting…')}")
     print(f"    {_c(DIM, '/help for commands')}\n")
 
     def _build_gateway() -> "ABLEGateway":  # noqa: F821
@@ -1143,14 +1148,8 @@ async def run_chat(args: argparse.Namespace) -> int:
             if not providers_list:
                 print(f"  {_c(RED, 'No providers configured.')} Set up API keys or Ollama first.")
                 return
-            # Reprint header now that we know provider count
-            sys.stdout.write(f"\033[2A\033[J")  # erase the 2-line placeholder header
-            sys.stdout.flush()
-            if buddy:
-                print(f"\n{render_header(buddy, len(providers_list))}")
-            else:
-                print(f"\n    {_c(BOLD, 'ABLE')} | {len(providers_list)} providers")
-            print(f"    {_c(DIM, '/help for commands')}\n")
+            # Print compact status — full header was already shown at startup
+            print(_c(DIM, f"  ⚡ {len(providers_list)} AI providers connected"))
 
     # ── Slash command context ────────────────────────────────────
     # gateway may still be None here (background init in progress).
