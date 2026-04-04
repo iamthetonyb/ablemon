@@ -49,6 +49,48 @@ User (Telegram) → Gateway → TrustGate → Scanner → Enricher → Complexit
 - `config/scorer_weights.yaml` — Complexity scoring weights (M2.7-tunable)
 - `able/.env` / `able/.env.example` — All env vars (API keys, tokens)
 
+## What Was Just Shipped (2026-04-04 session 2) — Gemma 4, Hermes patterns, Phoenix dashboard
+
+### Model Upgrades
+
+- **T5 primary**: Gemma 4 31B replaces Qwen 3.5 27B. Better on reasoning/coding, Apache 2.0, day-0 Ollama. `ollama pull gemma4:31b`. New Modelfile at `config/ollama/Modelfile.gemma4-31b` (Gemma 4 uses different chat template — `start_of_turn/end_of_turn`, not ChatML).
+- **T1 fallback**: Gemma 4 31B on NIM (free tier) replaces Nemotron 120B (was scoring 1/5). Run `able/evals/` to validate before treating as default.
+- **T2 fallback A**: Gemma 4 26B A4B on OpenRouter added ($0.13/$0.40/M — 8x cheaper than MiMo). MiMo retained as fallback B.
+- **Qwen 3.5 9B** stays as edge/multilingual T5 — Qwen wins on multilingual and is already fine-tuned.
+- **Qwen 3.6**: API-only, closed weights — do not adopt. Watch `QwenLM/Qwen3.6` HF org for open-weight release.
+
+### Phoenix Observability Dashboard
+
+- `docker-compose.yml`: Added `phoenix` service under `--profile observability` (`arizephoenix/phoenix:latest`, ports 6006/4317).
+- `phoenix_setup.py`: Now connects to external Phoenix server (env var `PHOENIX_COLLECTOR_ENDPOINT`) instead of trying to launch inline. Correct for Docker Compose peer-service pattern.
+- `interaction_auditor.py`: Hardcoded endpoint strings replaced with `_PHOENIX_ENDPOINT` constant (reads from env var).
+- `docs/PHOENIX.md`: Updated to `docker compose --profile observability up -d` setup.
+
+**To start**: `docker compose --profile observability up -d` → **http://localhost:6006**
+
+### Hermes Agent Patterns (NousResearch research)
+
+Four patterns from `NousResearch/hermes-agent` integrated:
+
+1. **Iteration budget pressure** (`gateway.py`): At ≥12/15 tool iterations (80%), injects `[⚠️ BUDGET: N remaining. Stop calling tools. Synthesize final answer NOW.]` into the tool result. Prevents runaway tool loops.
+2. **GOAP tool planning directive** (`gateway.py` system prompt): "Multi-Step Tool Planning" section — model plans goal + call sequence + stopping condition before first tool call.
+3. **Tool availability checks** (`tool_registry.py`): `ToolDef.availability_check: Optional[Callable[[], bool]]`. `get_definitions()` runs it per tool, silently excludes tools whose deps (env vars, services) aren't available. Prevents hallucinated calls.
+4. **Availability checks wired** to `github_tools.py` (`GITHUB_TOKEN`/`GH_TOKEN`) and `infra_tools.py` (`DO_API_KEY`, `VERCEL_TOKEN`).
+
+### Still To Do (Hermes — Medium Effort)
+
+- **Context compression middleware**: Port `ContextCompressor` from hermes-agent (~200 lines). 5-phase: prune old tool outputs → protect head/tail → summarize middle via cheap model → reassemble → sanitize orphaned tool pairs. Wire into provider base class. Needed for long Telegram sessions.
+- **Batch trajectory generator**: Run ABLE's own stack against a prompt dataset in parallel, capture ChatML trajectories → feed into DPO builder. Accelerates distillation corpus from ~20 → hundreds of pairs.
+- **Autonomous skill creation**: After 5+ tool-call tasks, trigger a post-task skill serialization step.
+
+### Root Character + UI fixes (session 1)
+
+- Root poses redesigned (`renderer.py`): `╲│╱` tree-branch arms, sway shifts whole design as unit
+- Shimmer minimum 2.5s display (`chat.py`): `asyncio.gather(sleep(2.5), gateway_task)`
+- Tagline double-quote fix (`renderer.py`): `catch_phrase.strip('"\'')` before wrapping
+
+---
+
 ## What Was Just Shipped (2026-04-04) — RLHF + Distillation Pipeline
 
 ### Conversation-Chain Evaluation + Full-Signal RLHF
