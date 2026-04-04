@@ -1061,8 +1061,11 @@ async def run_chat(args: argparse.Namespace) -> int:
     from able.core.buddy.renderer import (
         render_backpack, render_banner, render_header, render_full, render_starter_selection,
         render_battle_result, render_evolution, render_legendary_unlock,
-        play_level_up_sound,
+        play_level_up_sound, force_colors as _force_renderer_colors,
     )
+    # Explicitly sync renderer color mode with chat.py's reliable detection.
+    # This sidesteps any asyncio/import-timing issues with isatty() in renderer.
+    _force_renderer_colors(_COLOR)
 
     _enable_line_editing()
 
