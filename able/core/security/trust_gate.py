@@ -187,6 +187,24 @@ class TrustGate:
             flags.append("UNICODE:rtl_override_detected")
             max_threat = max(max_threat, ThreatLevel.MEDIUM, key=lambda t: t.value)
 
+        # Non-Latin script density check (CJK/Arabic injection evasion vector).
+        # Legitimate multilingual messages are fine; this flags unexpected high-density
+        # foreign-script content mixed into otherwise Latin conversations — the pattern
+        # that appeared in the 2026-04-04 lottery-spam injection incident.
+        if len(text) >= 20:
+            non_latin = sum(
+                1 for c in text
+                if '\u4e00' <= c <= '\u9fff'   # CJK Unified Ideographs
+                or '\u3400' <= c <= '\u4dbf'   # CJK Extension A
+                or '\u0600' <= c <= '\u06ff'   # Arabic
+                or '\u0900' <= c <= '\u097f'   # Devanagari
+            )
+            density = non_latin / len(text)
+            if non_latin >= 8 and density > 0.15:
+                flags.append(f"UNICODE:high_nonlatin_density({density:.0%})")
+                if max_threat.value < ThreatLevel.LOW.value:
+                    max_threat = ThreatLevel.LOW
+
         # Normalize unicode tricks before pattern matching
         normalized = self._normalize_unicode(text)
         text_lower = normalized.lower()
@@ -312,7 +330,7 @@ class TrustGate:
             threat_level=max_threat,
             trust_score=trust_score,
             flags=all_flags,
-            sanitized_input=sanitized if passed else None,
+            sanitized_input=sanitized,  # always provide; pipeline uses it even when passed
             blocked_reason=blocked_reason,
             audit_id=audit_id
         )

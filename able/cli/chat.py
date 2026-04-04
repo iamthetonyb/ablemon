@@ -337,14 +337,25 @@ def build_parser() -> argparse.ArgumentParser:
 # ── Thinking spinner ──────────────────────────────────────────────────────
 
 class _Spinner:
-    """Async thinking indicator — dots that animate while waiting."""
+    """Async thinking indicator with optional stage label.
+
+    Usage:
+        spinner.start()                    # plain dots
+        spinner.set_stage("T1 routing")    # update label mid-spin
+        spinner.stop()
+    """
 
     _FRAMES = ["\u2808", "\u2800\u2808", "\u2800\u2800\u2808", "\u2800\u2800\u2800\u2808"]
 
     def __init__(self):
         self._task: Optional[asyncio.Task] = None
+        self._stage: str = ""
 
-    def start(self):
+    def set_stage(self, label: str) -> None:
+        self._stage = label
+
+    def start(self, stage: str = "") -> None:
+        self._stage = stage
         self._task = asyncio.create_task(self._animate())
 
     async def _animate(self):
@@ -352,12 +363,14 @@ class _Spinner:
             i = 0
             while True:
                 frame = self._FRAMES[i % len(self._FRAMES)]
-                sys.stdout.write(f"\r  {_c(DIM, frame)} ")
+                stage_part = f" {_c(DIM, self._stage)}" if self._stage else ""
+                line = f"\r  {_c(DIM, frame)}{stage_part}  "
+                sys.stdout.write(line)
                 sys.stdout.flush()
                 i += 1
                 await asyncio.sleep(0.3)
         except asyncio.CancelledError:
-            sys.stdout.write("\r" + " " * 20 + "\r")
+            sys.stdout.write("\r" + " " * 40 + "\r")
             sys.stdout.flush()
 
     def stop(self):
@@ -418,19 +431,35 @@ class _ReasoningCapture:
 _ReasoningPreview = _ReasoningCapture
 
 
-def _log_reasoning(thinking: str, *, session_id: str, message_hash: str) -> None:
+def _log_reasoning(
+    thinking: str,
+    *,
+    session_id: str,
+    message_hash: str,
+    message: str = "",
+    response: str = "",
+    model: str = "unknown",
+    elapsed_s: float = 0.0,
+) -> None:
     """Append captured model reasoning to ~/.able/logs/reasoning.jsonl.
 
-    Written after every turn. Used by the distillation pipeline and for
-    debugging hallucinations — never displayed to the user.
+    The richer format stores prompt + response alongside the thinking so the
+    distillation pipeline can build (prompt, thinking, response) triples for
+    Qwen 3.5 fine-tuning, and can correlate where the model went wrong.
     """
     log_dir = Path.home() / ".able" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     record = {
         "ts": datetime.now(timezone.utc).isoformat(),
+        "source": "cli",
         "session": session_id,
         "message_hash": message_hash,
-        "thinking": thinking,
+        "model": model,
+        "elapsed_s": round(elapsed_s, 2),
+        # prompt + response stored truncated — full versions in session JSONL
+        "message_preview": message[:400],
+        "response_preview": response[:400],
+        "thinking": thinking[:8000],
     }
     log_file = log_dir / "reasoning.jsonl"
     try:
@@ -1053,40 +1082,10 @@ async def run_chat(args: argparse.Namespace) -> int:
 
     gateway = None
 
-    # ── Suppress ALL noise unless --verbose ──────────────────────
-    if not args.verbose:
-        import warnings
-        warnings.filterwarnings("ignore")
-        logging.getLogger().setLevel(logging.ERROR)
-        for name in ("able", "httpx", "httpcore", "openai", "anthropic",
-                      "ollama", "phoenix", "opentelemetry", "grpc", "urllib3",
-                      "uvicorn", "starlette", "fastapi"):
-            logging.getLogger(name).setLevel(logging.ERROR)
-        # Silence Phoenix print() spam by redirecting stderr during init
-        _real_stderr = sys.stderr
-        sys.stderr = open(os.devnull, "w")
-
-    try:
-        from able.core.gateway.gateway import ABLEGateway
-        gateway = ABLEGateway(require_telegram=False, skip_phoenix=True)
-    finally:
-        if not args.verbose:
-            sys.stderr.close()
-            sys.stderr = _real_stderr  # noqa: F821
-
-    gateway.approval_workflow = TerminalApprovalWorkflow(auto_approve=args.auto_approve)
-
-    if args.control_port:
-        try:
-            await gateway.start_health_server(port=args.control_port, quiet=not args.verbose)
-        except OSError:
-            pass
-
-    providers = [p.name for p in gateway.provider_chain.providers]
-    if not providers:
-        print(f"  {_c(RED, 'No providers configured.')} Set up API keys or Ollama first.")
-        await gateway.aclose()
-        return 1
+    # ── Show header immediately, init gateway in background ──────
+    # ABLEGateway.__init__ takes ~600ms (provider chains, DBs, memory).
+    # By running it in a thread we can display the prompt instantly;
+    # the init finishes while the user is typing their first message.
 
     if buddy:
         mood = buddy.apply_needs_decay()
@@ -1095,14 +1094,67 @@ async def run_chat(args: argparse.Namespace) -> int:
             needs = buddy.get_needs()
             print(f"  {buddy.display_emoji} {buddy.name}: \"{needs.mood_message}\"")
 
-    # ── Header ────────────────────────────────────────────────────
-    if buddy:
-        print(f"\n{render_header(buddy, len(providers))}")
-    else:
-        print(f"\n    {_c(BOLD, 'ABLE')} | {len(providers)} providers")
+    # Minimal header before gateway is ready (provider count unknown yet)
+    print(f"\n    {_c(BOLD, 'ABLE')} {_c(DIM, '· starting…')}")
     print(f"    {_c(DIM, '/help for commands')}\n")
 
+    def _build_gateway() -> "ABLEGateway":  # noqa: F821
+        import warnings, os as _os, sys as _sys
+        if not args.verbose:
+            warnings.filterwarnings("ignore")
+            logging.getLogger().setLevel(logging.ERROR)
+            for name in ("able", "httpx", "httpcore", "openai", "anthropic",
+                          "ollama", "phoenix", "opentelemetry", "grpc", "urllib3",
+                          "uvicorn", "starlette", "fastapi"):
+                logging.getLogger(name).setLevel(logging.ERROR)
+            _real_stderr = _sys.stderr
+            _sys.stderr = open(_os.devnull, "w")
+        try:
+            from able.core.gateway.gateway import ABLEGateway
+            return ABLEGateway(require_telegram=False, skip_phoenix=True)
+        finally:
+            if not args.verbose:
+                _sys.stderr.close()
+                _sys.stderr = _real_stderr  # type: ignore[assignment]
+
+    # Start gateway init concurrently with the first user prompt
+    _gateway_task = asyncio.create_task(asyncio.to_thread(_build_gateway))
+
+    # ── Control port (optional) — await gateway first ─────────��───
+    # Only start health server if explicitly requested (rare); otherwise
+    # the prompt appears before gateway finishes.
+    if args.control_port:
+        gateway = await _gateway_task
+        _gateway_task = None
+        try:
+            await gateway.start_health_server(port=args.control_port, quiet=not args.verbose)
+        except OSError:
+            pass
+
+    # Helper: ensure gateway is ready (called before first message send)
+    async def _ensure_gateway() -> None:
+        nonlocal gateway, _gateway_task
+        if gateway is None:
+            gateway = await _gateway_task
+            _gateway_task = None
+            gateway.approval_workflow = TerminalApprovalWorkflow(auto_approve=args.auto_approve)
+            providers_list = [p.name for p in gateway.provider_chain.providers]
+            if not providers_list:
+                print(f"  {_c(RED, 'No providers configured.')} Set up API keys or Ollama first.")
+                return
+            # Reprint header now that we know provider count
+            sys.stdout.write(f"\033[2A\033[J")  # erase the 2-line placeholder header
+            sys.stdout.flush()
+            if buddy:
+                print(f"\n{render_header(buddy, len(providers_list))}")
+            else:
+                print(f"\n    {_c(BOLD, 'ABLE')} | {len(providers_list)} providers")
+            print(f"    {_c(DIM, '/help for commands')}\n")
+
     # ── Slash command context ────────────────────────────────────
+    # gateway may still be None here (background init in progress).
+    # SlashCtx.gateway is read at dispatch time, not construction time,
+    # so gateway will be ready by then.
     slash_ctx = SlashCtx(
         gateway=gateway, args=args,
         load_buddy=load_buddy, save_buddy=save_buddy,
@@ -1125,6 +1177,7 @@ async def run_chat(args: argparse.Namespace) -> int:
 
     # ── Chat loop ─────────────────────────────────────────────────
     spinner = _Spinner()
+    _first_message = True
     try:
         while True:
             try:
@@ -1136,6 +1189,14 @@ async def run_chat(args: argparse.Namespace) -> int:
             message = raw.strip()
             if not message:
                 continue
+
+            # Ensure gateway is ready on first real message
+            if _first_message:
+                _first_message = False
+                await _ensure_gateway()
+                if gateway is None:
+                    return 1
+                slash_ctx.gateway = gateway  # patch SlashCtx now gateway exists
 
             # Slash commands
             command_word = message.split(None, 1)[0].lower()
@@ -1155,17 +1216,19 @@ async def run_chat(args: argparse.Namespace) -> int:
 
             # ── Get response ──────────────────────────────────────────
             t0 = time.monotonic()
+            import hashlib as _hashlib
+            _msg_hash = _hashlib.md5(message.encode()).hexdigest()[:8]
+            xp_before = buddy.xp if buddy else 0
 
             if not args.no_stream:
                 response_parts: list[str] = []
-                # Show thinking indicator then stream
-                spinner.start()
+                # Show pipeline stage in spinner while waiting
+                spinner.start("routing…")
                 first_chunk = True
                 started_output = False
                 started_answer = False
                 reasoning_capture = _ReasoningCapture()
-                import hashlib as _hashlib
-                _msg_hash = _hashlib.md5(message.encode()).hexdigest()[:8]
+                _stream_provider = getattr(gateway, '_last_provider', 'unknown')
                 try:
                     async for chunk in gateway.stream_message(
                         message=message,
@@ -1173,6 +1236,11 @@ async def run_chat(args: argparse.Namespace) -> int:
                         client_id=args.client,
                         metadata={"source": "cli", "channel": "cli", "is_owner": True},
                     ):
+                        # Update spinner stage on first chunk (routing resolved)
+                        if first_chunk:
+                            _stream_provider = getattr(gateway, '_last_provider', 'unknown')
+                            spinner.set_stage(f"{_stream_provider}")
+
                         _, visible_chunk = reasoning_capture.consume(chunk)
                         # Spinner runs through the thinking phase — stops on first visible text
                         if first_chunk and visible_chunk:
@@ -1197,15 +1265,34 @@ async def run_chat(args: argparse.Namespace) -> int:
                 except Exception:
                     spinner.stop()
 
+                elapsed = time.monotonic() - t0
+                _stream_provider = getattr(gateway, '_last_provider', _stream_provider)
+
                 # Log any captured reasoning to audit file (never shown to user)
                 _captured = reasoning_capture.captured_thinking
                 if _captured:
-                    _log_reasoning(_captured, session_id=args.session, message_hash=_msg_hash)
+                    _log_reasoning(
+                        _captured,
+                        session_id=args.session,
+                        message_hash=_msg_hash,
+                        message=message,
+                        response="".join(response_parts),
+                        model=_stream_provider,
+                        elapsed_s=elapsed,
+                    )
 
                 if response_parts:
                     response = "".join(response_parts)
-                    elapsed = time.monotonic() - t0
-                    print(f"\n{_c(DIM, f'  [{elapsed:.1f}s]')}")
+                    # Footer: elapsed + provider + XP delta
+                    _footer = f"  [{elapsed:.1f}s · {_stream_provider}]"
+                    try:
+                        new_buddy_xp = load_buddy()
+                        if new_buddy_xp and new_buddy_xp.xp > xp_before:
+                            _xp_delta = new_buddy_xp.xp - xp_before
+                            _footer += f" +{_xp_delta}xp"
+                    except Exception:
+                        pass
+                    print(f"\n{_c(DIM, _footer)}")
                 else:
                     # Streaming yielded nothing — fall back
                     if first_chunk:
@@ -1219,9 +1306,9 @@ async def run_chat(args: argparse.Namespace) -> int:
                     )
                     elapsed = time.monotonic() - t0
                     print(f"\n  {_c(CYAN, 'able')} {response}")
-                    print(_c(DIM, f"  [{elapsed:.1f}s]"))
+                    print(_c(DIM, f"  [{elapsed:.1f}s · {_stream_provider}]"))
             else:
-                spinner.start()
+                spinner.start("thinking…")
                 response = await gateway.process_message(
                     message=message,
                     user_id=args.session,
@@ -1231,8 +1318,9 @@ async def run_chat(args: argparse.Namespace) -> int:
                 spinner.stop()
                 await asyncio.sleep(0.05)
                 elapsed = time.monotonic() - t0
+                _provider = getattr(gateway, '_last_provider', 'unknown')
                 print(f"\n  {_c(CYAN, 'able')} {response}")
-                print(_c(DIM, f"  [{elapsed:.1f}s]"))
+                print(_c(DIM, f"  [{elapsed:.1f}s · {_provider}]"))
 
             # Log outbound
             gateway.transcript_manager.log_message(

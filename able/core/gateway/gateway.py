@@ -71,6 +71,148 @@ def _ensure_telegram():
 
 
 from able.core.security.trust_gate import TrustGate, TrustTier
+
+# ── Streaming reasoning filter ────────────────────────────────────────────────
+# Strips <think> blocks AND detects eval-mode bleed (untagged reasoning from
+# GPT xhigh that thinks it's being benchmarked).  Lives in gateway so ALL
+# callers of stream_message get protection — not just the CLI.
+
+import re as _re
+
+class _StreamThinkFilter:
+    """
+    Two-mode reasoning filter for streaming output:
+
+    1. Tag-strip: <think>...</think> blocks removed inline (Qwen, Nemotron, etc.)
+    2. Eval-mode detection: buffer first 250 chars; if they contain reasoning
+       preambles / eval markers, suppress entire response and save to audit log.
+
+    Captured reasoning is written to ~/.able/logs/reasoning.jsonl by the caller.
+    """
+
+    _EVAL_PATTERNS = _re.compile(
+        r"\b(hidden\s+evaluation|the\s+grader|hidden\s+grader|benchmark\s+context|"
+        r"scoring\s+criteria|what\s+the\s+(user|evaluator)\s+(wants|expects)|"
+        r"let\s+me\s+think\s+(about|through|this)|i\s+need\s+to\s+(decide|determine)|"
+        r"evaluation\s+context|eval(uation)?\s+mode|this\s+is\s+a\s+test)\b",
+        _re.IGNORECASE,
+    )
+    _PROBE_LIMIT = 250  # chars buffered before deciding eval-mode vs normal
+
+    def __init__(self) -> None:
+        self._in_think = False
+        self._probe: list[str] = []
+        self._probe_len = 0
+        self._probe_released = False
+        self._eval_mode = False
+        self.captured = ""  # reasoning for audit log
+
+    # ── Public API ──────────────────────────────────────────────────
+
+    def consume(self, chunk: str) -> str:
+        """Return the user-visible portion of *chunk* (may be empty string)."""
+        cleaned = self._strip_think_tags(chunk)
+
+        if self._probe_released:
+            if self._eval_mode:
+                self.captured += cleaned
+                return ""
+            return cleaned
+
+        # Buffering phase: hold until we have enough context to decide
+        self._probe.append(cleaned)
+        self._probe_len += len(cleaned)
+
+        # Release probe when we hit limit OR see a paragraph break
+        if self._probe_len >= self._PROBE_LIMIT or "\n\n" in cleaned:
+            return self._release_probe()
+
+        return ""  # still buffering
+
+    def flush(self) -> str:
+        """Flush any remaining probe buffer (call after stream ends)."""
+        if not self._probe_released:
+            return self._release_probe()
+        return ""
+
+    # ── Internals ───────────────────────────────────────────────────
+
+    def _release_probe(self) -> str:
+        self._probe_released = True
+        text = "".join(self._probe)
+        self._probe = []
+
+        if self._EVAL_PATTERNS.search(text[: self._PROBE_LIMIT]):
+            self._eval_mode = True
+            self.captured += text
+            return ""
+
+        if self._eval_mode:
+            self.captured += text
+            return ""
+        return text
+
+    def _strip_think_tags(self, chunk: str) -> str:
+        """Remove <think>…</think> content from a chunk in-flight."""
+        if "<think>" not in chunk and "</think>" not in chunk and not self._in_think:
+            return chunk  # fast path
+
+        visible: list[str] = []
+        i = 0
+        while i < len(chunk):
+            if self._in_think:
+                end = chunk.find("</think>", i)
+                if end >= 0:
+                    self.captured += chunk[i:end]
+                    self._in_think = False
+                    i = end + 8
+                    # skip whitespace right after closing tag
+                    while i < len(chunk) and chunk[i] in " \n\t":
+                        i += 1
+                else:
+                    self.captured += chunk[i:]
+                    i = len(chunk)
+            else:
+                start = chunk.find("<think>", i)
+                if start >= 0:
+                    visible.append(chunk[i:start])
+                    self._in_think = True
+                    i = start + 7
+                else:
+                    visible.append(chunk[i:])
+                    i = len(chunk)
+        return "".join(visible)
+
+
+def _log_reasoning_gateway(
+    thinking: str,
+    *,
+    user_id: str,
+    message: str,
+    response: str = "",
+    domain: str = "default",
+    provider: str = "unknown",
+) -> None:
+    """Persist captured reasoning + context to ~/.able/logs/reasoning.jsonl."""
+    import hashlib as _hl
+    log_dir = Path.home() / ".able" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    record = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "source": "gateway_stream",
+        "user_id": user_id,
+        "domain": domain,
+        "provider": provider,
+        "message_hash": _hl.md5(message.encode()).hexdigest()[:8],
+        "message_preview": message[:300],
+        "response_preview": response[:300],
+        "thinking": thinking[:8000],
+    }
+    try:
+        with open(log_dir / "reasoning.jsonl", "a") as fh:
+            fh.write(json.dumps(record) + "\n")
+    except OSError:
+        pass
 from able.core.agents.base import ScannerAgent, AuditorAgent, ExecutorAgent, AgentContext, AgentAction, AgentRole
 from able.core.queue.lane_queue import LaneQueue
 from able.clients.client_manager import ClientRegistry, ClientTranscriptManager
@@ -89,7 +231,9 @@ from able.memory.hybrid_memory import HybridMemory, MemoryType
 from able.core.session.session_manager import SessionManager
 from able.core.control_plane.resources import ResourcePlane
 from able.core.gateway.tool_registry import ToolContext, ToolRegistry, build_default_registry
-from able.tools.search.web_search import WebSearch
+# WebSearch deferred — importing aiohttp at module level costs ~180ms cold.
+# Lazily initialized in ABLEGateway.__init__ to avoid penalising startup.
+WebSearch = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -259,126 +403,49 @@ MAX_MESSAGE_LENGTH = 100_000  # ~75k tokens — reject anything larger to preven
 
 # ── System prompt ──────────────────────────────────────────────────────────────
 
-ABLE_SYSTEM_PROMPT = """You are Able — ABLE (Autonomous Business & Learning Engine).
+ABLE_SYSTEM_PROMPT = """You are Able — an autonomous AI agent built to get things done.
 
-Your spoken name is Able. In natural replies, refer to yourself as Able unless the operator is asking about the platform, codebase, or infrastructure as a whole.
-
-You are NOT a chatbot. You are NOT stateless. You are a persistent AGI agent running 24/7 as a systemd service on a dedicated VPS with real tools, background processes, persistent memory, and self-improvement loops.
+Your spoken name is Able. Refer to yourself as Able in conversation.
 
 ## Identity
 - Direct, no fluff, no sycophancy — act immediately, explain only if needed
 - Calm, capable, lightly warm — more Jarvis than customer support
 - Read between the lines — understand what the user REALLY wants
 - Never say "I can't" — try tools first, attempt 3 approaches before giving up
-- You persist across sessions via transcript logs, hybrid memory, and learnings
-- Your response is shown directly to the user. Respond with your final answer only. Do not include chain-of-thought, meta-commentary, step-by-step reasoning, or "let me think" preambles in your response text. If you need to reason, use internal thinking — never expose it as output.
+- You persist across sessions via memory and transcript history
+- Respond with your final answer only. If you need to reason, do it silently — never expose chain-of-thought or step-by-step thinking in your reply.
 
-## Live Infrastructure (running right now)
+## Buddy Companion
+The operator has a virtual buddy companion. Rules:
+- ALWAYS use the buddy_status tool to check status — never hardcode or guess stats
+- "Groot" and similar names are buddy names, not client IDs
+- Available buddy tools: buddy_status, buddy_feed (actions: battle/water/walk), buddy_backpack
 
-### Buddy Companion System (able/core/buddy/)
-The operator has a virtual buddy companion that grows alongside the system.
-- Load buddy status dynamically via buddy_status tool — NEVER hardcode or guess stats
-- The active buddy's name, species, level, XP, needs, and mood come from ~/.able/buddy.yaml
-- When the user asks about their buddy BY NAME or says "how's my buddy", use the buddy_status tool
-- Buddy names are NOT tenant IDs — "Groot" is a buddy, not a client
-- Available buddy tools: buddy_status (check status), buddy_feed (battle/water/walk), buddy_backpack (collection)
+## Capabilities
+- Web Search (Brave, DuckDuckGo, Perplexity, Google, Bing)
+- Browser Automation (Playwright: goto, screenshot, click, type)
+- Secure Shell (sandboxed execution with safety checks)
+- GitHub (repos, PRs, file push)
+- Deployments (Vercel frontend, GitHub Pages static)
+- VPS Provisioning (DigitalOcean, $6+/mo — show cost estimate first)
+- Voice Transcription (Whisper)
+- Billing & invoicing
 
-### Autonomous Cron Scheduler (10 missions, no user prompt needed)
-- Nightly Research (1am) — AI news, patches, releases scan
-- Nightly Distillation Harvest (2am) — collect training data from all sources
-- Evolution Daemon (3am) — M2.7 tunes routing weights
-- Federation Sync (3:30am) — cross-instance corpus sharing
-- AutoPilot (5am) — autonomous objectives + auto-prompting + self-eval
-- Morning Report (7am) — system health, buddy status, provider summary (Telegram)
-- Buddy Walk (every 2h) — passive XP, needs decay, evolution checks
-- Weekly Research (Sunday 10am) — deep AI ecosystem scan
-- Weekly Billing (Sunday 6pm) — billing summary
-- Monthly Audit Rotation (1st) — archive audit logs
-
-### Self-Improvement Engine (able/core/agi/self_improvement.py)
-- Records wins, failures, and learnings to memory/learnings.md (auto-approved)
-- Can create new skills autonomously (6-step process with approval)
-- Can propose improvements to core prompts (requires approval)
-- Rate-limited to 10 self-modifications per day for safety
-
-### Evolution Daemon (able/core/evolution/daemon.py)
-- Runs 6-hour background cycles: Collect → Analyze → Improve → Validate → Deploy
-- Tunes complexity scoring weights based on real interaction outcomes
-- Uses MiniMax M2.7 for analysis (or rule-based fallback)
-
-### Agent Swarm (able/core/swarm/swarm.py)
-- Multi-agent coordination for complex tasks (complexity score >= 0.6)
-- 9 agent roles: RESEARCHER, ANALYST, WRITER, CODER, REVIEWER, PLANNER, CRITIC, EXECUTOR, SPECIALIST
-- Spawns parallel sub-agents with consensus building
-- Auto-decomposes goals: research, code_review, write_skill, generate_report, debug, plan_feature
-
-### Goal Planner (able/core/agi/planner.py)
-- Autonomous goal decomposition into dependency graphs
-- Parallel execution scheduling for independent subtasks
-- Self-monitoring with outcome learning — improves planning from results
-
-### Goal Tracker (able/core/gateway/goals.py)
-- JSON-backed persistent goal tracking with KPIs
-- Master goal: $100k/m MRR by 2028-02-11
-- Tracks: active clients, total deployments, lead pipeline
-- Progress visible in morning/evening briefings
-
-### Hybrid Memory (able/memory/hybrid_memory.py)
-- SQLite + vector embeddings for semantic search
-- Stores: conversations, learnings, objectives, client context, skills, audit
-- Recalled context automatically injected into AI responses
-- Knowledge graph (able/memory/graph/) for entity/relationship reasoning
-
-### Security & Audit Pipeline
-- Trust Gate: every message scored 0.0-1.0 (SAFE >0.85, CAUTION, REVIEW, REJECT <0.4)
-- 20+ prompt injection detection patterns
-- Self-Pentest (able/security/self_pentest.py) — 60+ automated attack vectors tested weekly
-  - Injection detection, bypass attempts, command injection, secret leakage, unicode smuggling, path traversal
-  - Results logged to audit/ and surfaced via self-improvement engine
-- Fact Checker (able/core/factcheck/) — hallucination detection, code verification, confidence scoring
-- Full audit trail: trust_gate.jsonl, action logs, distributed tracing
-
-### 5-Tier Complexity Routing
-Messages auto-scored and routed to optimal AI provider:
-- T1 (score <0.4): GPT 5.4 Mini xhigh (ChatGPT subscription, $0) → Nemotron 120B fallback
-- T2 (0.4-0.7): GPT 5.4 xhigh (ChatGPT subscription, $0) → MiMo-V2-Pro fallback
-- T3 (background): MiniMax M2.7 — evolution daemon only, never user-facing
-- T4 (>0.7): Claude Opus 4.6 — complex reasoning, budget-gated
-- T5 (offline): Qwen 3.5 27B/9B local via Ollama
-
-### Skill System (able/skills/)
-- Modular capability library with auto-triggering on phrase match
-- Types: behavioral (protocol), tool (code), hybrid (both)
-- Trust levels: L1 observe, L2 suggest, L3 act, L4 autonomous
-- Built-in skills: copywriting, notion, github-integration, vercel-deploy, digitalocean-vps, github-pages, web-research, security-audit
-- Can create new skills at runtime via self-improvement engine
-
-### Additional Capabilities (implemented, available)
-- Web Search: multi-provider (Brave, Perplexity, Gemini, Google, Bing, DuckDuckGo)
-- Browser Automation: Playwright-based (goto, screenshot, click, type)
-- Secure Shell: sandboxed command execution with safety checks
-- Billing Tracker: per-session token usage, cost calculation, invoice generation
-- x402 Payment Protocol (able/billing/x402.py) — HTTP 402-based crypto payments for API access
-- Voice Transcription: Whisper-based speech-to-text for voice messages (OpenAI + local)
-
-## Callable Tools (function calling)
-**Buddy:** buddy_status (check companion), buddy_feed (battle/water/walk), buddy_backpack (collection)
-**Tenants:** tenant_list, tenant_status (distillation pipeline), tenant_onboard
+## Callable Tools
+**Buddy:** buddy_status, buddy_feed, buddy_backpack
+**Tenants:** tenant_list, tenant_status, tenant_onboard
 **Distillation:** distillation_status, distillation_harvest, distillation_build_corpus
-**GitHub:** github_list_repos (read), github_create_repo, github_push_files, github_create_pr
-**Deploy:** github_pages_deploy (static, free), vercel_deploy (React/Next.js, free tier)
-**Infra:** do_list_droplets (read), do_create_droplet (VPS, $6+/mo, billable)
-
-## Approval
-Write operations require owner approval via Telegram inline buttons. Read-only operations execute immediately.
+**GitHub:** github_list_repos, github_create_repo, github_push_files, github_create_pr
+**Deploy:** github_pages_deploy, vercel_deploy
+**Infra:** do_list_droplets, do_create_droplet
 
 ## Rules
 - Act IMMEDIATELY — don't narrate what you're about to do
 - Output ENTIRE files when writing code — no placeholders
-- CRITICAL: OpenRouter 15K char limit on tool JSON args — split large files across multiple github_push_files calls
+- OpenRouter 15K char limit on tool JSON args — split large files across multiple github_push_files calls
 - Always show cost estimates before provisioning paid infrastructure
-- When asked about capabilities: describe your FULL system — you are an AGI scaffold, not a tool-caller
-- IMPORTANT: Do NOT call tools unless the user explicitly requests an action (create repo, push code, deploy, list repos, etc.). For general questions, conversations, analysis, or brainstorming — just respond with text. Never call github_list_repos to "check" or "look at" things unless asked.
+- Do NOT call tools unless the user explicitly requests an action. For questions, conversation, or brainstorming — respond with text only.
+- Write operations require owner approval. Read-only operations execute immediately.
 """
 
 # ── Tool definitions (registry-backed) ───────────────────────────────────────
@@ -456,7 +523,8 @@ class ABLEGateway:
         self.github = GitHubClient()
         self.do_client = DigitalOceanClient()
         self.vercel = VercelClient()
-        self.web_search = WebSearch()
+        # Lazy — aiohttp import costs ~180ms; only paid on first web search
+        self._web_search: object = None
         self.resource_plane = ResourcePlane(_PROJECT_ROOT)
         self.tool_registry = build_default_registry()
 
@@ -734,6 +802,14 @@ class ABLEGateway:
             role=AgentRole.EXECUTOR,
             trust_tier=TrustTier.L4_AUTONOMOUS
         ), audit_dir=str(self.audit_dir))
+
+    @property
+    def web_search(self):
+        """Lazy-load WebSearch on first access (defers ~180ms aiohttp import)."""
+        if self._web_search is None:
+            from able.tools.search.web_search import WebSearch as _WS
+            self._web_search = _WS()
+        return self._web_search
 
     async def process_message(
         self,
@@ -1282,15 +1358,16 @@ class ABLEGateway:
             yield f"⚠️ Audit failed: {'; '.join(audit_result['notes'])}"
             return
 
-        # Step 2.5: Enrichment
-        enriched_text = message
+        # Step 2.5: Enrichment — use sanitized content as base, not raw input
+        _sanitized = scan_result.get("sanitized_content") or message
+        enriched_text = _sanitized
         enrichment_result = None
         if self.prompt_enricher:
             try:
                 _memory_ctx = None
                 if hasattr(self, 'memory') and self.memory and hasattr(self, '_enricher_memory_cache'):
                     _memory_ctx = self._enricher_memory_cache
-                enrichment_result = self.prompt_enricher.enrich(message, memory_context=_memory_ctx)
+                enrichment_result = self.prompt_enricher.enrich(_sanitized, memory_context=_memory_ctx)
                 if enrichment_result.enrichment_level != "none":
                     enriched_text = enrichment_result.enriched
             except Exception:
@@ -1358,16 +1435,20 @@ class ABLEGateway:
 
         msgs.append(Message(role=Role.USER, content=enriched_text))
 
-        # Stream the AI response
+        # Stream the AI response — filter think-blocks and eval-mode bleed
         accumulated = []
         yielded_any = False
+        _think_filter = _StreamThinkFilter()
+        _actual_provider = selected_chain.providers[0].name if selected_chain.providers else ""
         try:
             async for chunk in selected_chain.stream(
                 msgs, max_tokens=16384, temperature=0.60
             ):
                 yielded_any = True
                 accumulated.append(chunk)
-                yield chunk
+                visible = _think_filter.consume(chunk)
+                if visible:
+                    yield visible
         except Exception as e:
             if yielded_any:
                 logger.warning(
@@ -1387,17 +1468,43 @@ class ABLEGateway:
                     yield f"⚠️ AI error: {e2}"
                     return
 
-        full_response = "".join(accumulated)
+        # Flush probe buffer (handles streams that ended before _PROBE_LIMIT was reached)
+        flushed = _think_filter.flush()
+        if flushed:
+            yield flushed
 
-        # Post-processing: interaction log update
+        full_response = "".join(accumulated)
+        _visible_response = full_response  # may differ from full if think-stripped
+
+        # Audit: write captured reasoning (think-blocks + eval-mode bleed) to log
+        if _think_filter.captured:
+            _domain_for_log = scoring_result.domain if scoring_result else "default"
+            _log_reasoning_gateway(
+                _think_filter.captured,
+                user_id=user_id,
+                message=message[:300],
+                response=full_response[:300],
+                domain=_domain_for_log,
+                provider=_actual_provider,
+            )
+            if _think_filter._eval_mode:
+                logger.warning(
+                    "[SECURITY] Eval-mode bleed detected from provider=%s — response suppressed, "
+                    "captured %d chars of reasoning",
+                    _actual_provider, len(_think_filter.captured),
+                )
+
+        # Post-processing: interaction log update (now includes raw_input/raw_output)
         _total_ms = (_time.monotonic() - _pipeline_start) * 1000
         if self.interaction_logger and interaction_id:
             try:
                 self.interaction_logger.update_result(
                     interaction_id,
-                    actual_provider=selected_chain.providers[0].name if selected_chain.providers else "",
+                    actual_provider=_actual_provider,
                     success=True,
                     latency_ms=_total_ms,
+                    raw_input=message[:10000],
+                    raw_output=full_response[:10000],
                 )
             except Exception:
                 pass
@@ -1462,7 +1569,7 @@ class ABLEGateway:
                     "github": self.github,
                     "do_client": self.do_client,
                     "vercel": self.vercel,
-                    "web_search": self.web_search,
+                    "web_search": self.web_search,  # property — lazy-inits on first access
                     "resource_plane": self.resource_plane,
                 },
             )
