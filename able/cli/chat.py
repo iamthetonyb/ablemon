@@ -1195,13 +1195,19 @@ async def run_chat(args: argparse.Namespace) -> int:
                 # plays as a loading indicator while the gateway initialises
                 # (~600ms).  asyncio.shield keeps the task alive if we timeout.
                 if _stop_anim is not None:
+                    # Keep shimmer playing until BOTH gateway is ready AND
+                    # a minimum display time has elapsed — whichever finishes
+                    # last wins.  The animation thread costs ~0% CPU (50ms sleep
+                    # between frames) so there is zero performance impact.
+                    _wait_tasks = [asyncio.ensure_future(asyncio.sleep(2.5))]
                     if _gateway_task is not None and not _gateway_task.done():
-                        try:
-                            await asyncio.wait_for(
-                                asyncio.shield(_gateway_task), timeout=3.0
-                            )
-                        except (asyncio.TimeoutError, Exception):
-                            pass
+                        _wait_tasks.append(
+                            asyncio.ensure_future(asyncio.shield(_gateway_task))
+                        )
+                    try:
+                        await asyncio.gather(*_wait_tasks, return_exceptions=True)
+                    except Exception:
+                        pass
                     _stop_anim()
                     _stop_anim = None
                     print(f"    {_c(DIM, '/help for commands')}\n")

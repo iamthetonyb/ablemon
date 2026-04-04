@@ -295,36 +295,43 @@ _SPECIES_POSES: dict[str, dict[str, list[list[str]]]] = {
     },
 
     # ── ROOT (earth / operator) ─────────────────────────────────────────
+    # Design: tree/Groot-like plant creature.
+    #   Head  : ╭▲╮  (rounded crown with upward growth spike)
+    #   Eyes  : │··│  (calm dots) │**│ (lit/alert)
+    #   Body  : ╲│╱  (two branches spreading from central trunk)
+    #           ╱│╲  (mirrored — used when swaying the other direction)
+    #   Roots : ╱╲╱╲ (root feet spreading out)
+    # Sway = whole design shifts left/right as a unit so the lean reads clearly.
     "root": {
         "stage1": [                                    # 4 lines
             # 0 — idle, grounded
-            ["  ╭▲╮  ", "  │··│  ", "  ╰┤├╯  ", "  ╱╲╱╲  "],
-            # 1 — sway left
-            [" ╭▲╮   ", " /│··│  ", "  ╰┤├╯  ", "  ╱╲╱╲  "],
+            ["  ╭▲╮  ", "  │··│  ", "  ╲│╱  ", " ╱╲╱╲╱ "],
+            # 1 — sway left (whole design leans, left branch lifts)
+            [" ╭▲╮   ", " │··│   ", " ╲│╱   ", "╱╲╱╲╱  "],
             # 2 — eyes light up (alert)
-            ["  ╭▲╮  ", "  │**│  ", "  ╰┤├╯  ", "  ╱╲╱╲  "],
-            # 3 — sway right, arm out
-            ["   ╭▲╮ ", "  │··│\\ ", "  ╰┤├╯  ", "  ╱╲╱╲  "],
+            ["  ╭▲╮  ", "  │**│  ", "  ╲│╱  ", " ╱╲╱╲╱ "],
+            # 3 — sway right (arms mirror, lean right)
+            ["   ╭▲╮ ", "   │··│ ", "   ╱│╲ ", "  ╱╲╱╲╱"],
         ],
         "stage2": [                                    # 5 lines
-            # 0 — idle
-            [" ╭─▲─╮ ", " │ ·· │ ", " ╰┤──├╯ ", " ╱╲╱╲╱╲ ", "  ╰──╯  "],
+            # 0 — idle, grounded wide
+            [" ╭─▲─╮ ", " │ ·· │ ", " ╲─┼─╱ ", " ╱╲╱╲╱╲ ", "  ╰──╯  "],
             # 1 — sway left
-            ["╭─▲─╮  ", " │ ·· │ ", " ╰┤──├╯ ", " ╱╲╱╲╱╲ ", "  ╰──╯  "],
+            ["╭─▲─╮  ", "│ ·· │  ", "╲─┼─╱   ", "╱╲╱╲╱╲  ", " ╰──╯   "],
             # 2 — alert
-            [" ╭─▲─╮ ", " │ ** │ ", " ╰┤──├╯ ", " ╱╲╱╲╱╲ ", "  ╰──╯  "],
-            # 3 — sway right
-            ["  ╭─▲─╮", " │ ·· │ ", " ╰┤──├╯ ", " ╱╲╱╲╱╲ ", "  ╰──╯  "],
+            [" ╭─▲─╮ ", " │ ** │ ", " ╲─┼─╱ ", " ╱╲╱╲╱╲ ", "  ╰──╯  "],
+            # 3 — sway right (arms flip)
+            ["  ╭─▲─╮", " │ ·· │ ", "  ╱─┼─╲ ", " ╱╲╱╲╱╲ ", "  ╰──╯  "],
         ],
         "stage3": [                                    # 6 lines
-            # 0 — idle
-            ["╭──▲▲──╮", "│  ··  │", "│ ╭──╮ │", "╰┤╱╲╱├╯ ", "╱╲╱╲╱╲╱╲", " ╰────╯ "],
+            # 0 — idle, ancient tree
+            ["╭──▲▲──╮", "│  ··  │", "│ ╲─┼─╱│", "╰╲─────╱╯", "╱╲╱╲╱╲╱╲", " ╰────╯ "],
             # 1 — sway left
-            ["╭──▲▲──╮", "│  ··  │", "│ ╭──╮ │", "╰┤╱╲╱├╯ ", "╱╲╱╲╱╲╱╲", " ╰───╯  "],
-            # 2 — alert (eyes light)
-            ["╭──▲▲──╮", "│  **  │", "│ ╭──╮ │", "╰┤╱╲╱├╯ ", "╱╲╱╲╱╲╱╲", " ╰────╯ "],
-            # 3 — rooted deep (foot pattern flips)
-            ["╭──▲▲──╮", "│  ··  │", "│ ╭──╮ │", "╰┤╱╲╱├╯ ", "╲╱╲╱╲╱╲╱", " ╰────╯ "],
+            ["╭──▲▲──╮", "│  ··  │", "│ ╲─┼─╱│", "╰╲─────╱╯", "╱╲╱╲╱╲╱╲", " ╰───╯  "],
+            # 2 — eyes lit (deep pulse)
+            ["╭──▲▲──╮", "│  **  │", "│ ╲─┼─╱│", "╰╲─────╱╯", "╱╲╱╲╱╲╱╲", " ╰────╯ "],
+            # 3 — rooted deep (root pattern flips, arms spread wide)
+            ["╭──▲▲──╮", "│  ··  │", "│╲──┼──╱│", "╰╲─────╱╯", "╲╱╲╱╲╱╲╱", " ╰────╯ "],
         ],
     },
 
@@ -547,7 +554,12 @@ def render_header(
         lines.append(f"{indent}{col_line}{padding}{gap}{info_line}")
 
     if buddy.catch_phrase:
-        lines.append(f"{indent}{' ' * art_width}{gap}\"{buddy.catch_phrase}\"")
+        # Render catch_phrase with a single set of surrounding quotes.
+        # Strip any existing quote characters the user may have stored so we
+        # never double-wrap (e.g. stored as '"I AM GROOT"' → displays as "I AM GROOT").
+        _phrase = buddy.catch_phrase.strip('"\'')
+        _phrase_colored = _c(_DIM, f'"{_phrase}"') if _COLORS_ON else f'"{_phrase}"'
+        lines.append(f"{indent}{' ' * art_width}{gap}{_phrase_colored}")
 
     return "\n".join(lines)
 
@@ -623,7 +635,8 @@ def render_full(buddy: BuddyState, stats: BuddyStats | None = None) -> str:
     border = _c(_GOLD, "=" * 42) if _COLORS_ON else "=" * 42
     sub    = _c(_DIM,  "─" * 42) if _COLORS_ON else "─" * 42
     lines  = [border]
-    lines.append(f"  {buddy.display_emoji}  {buddy.name} the {meta['label']}  —  \"{buddy.catch_phrase}\"")
+    _fp = buddy.catch_phrase.strip('"\'')
+    lines.append(f"  {buddy.display_emoji}  {buddy.name} the {meta['label']}  —  \"{_fp}\"")
     lines.append(sub)
     for art_line in art_lines:
         lines.append(f"         {art_line}")
