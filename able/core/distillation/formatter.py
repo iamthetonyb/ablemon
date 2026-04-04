@@ -32,6 +32,7 @@ class TrainingFormatter:
         "cowork": 0.16,
         "able_cli": 0.14,
         "able_interaction": 0.12,
+        "reasoning_log": 0.10,  # (prompt,thinking,response) triples — truncated previews, but thinking present
         "codex": 0.12,
         "chatgpt": 0.10,
         "opencli": 0.08,

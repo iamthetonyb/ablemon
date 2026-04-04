@@ -62,6 +62,8 @@ def _ensure_telegram():
         g["CallbackQueryHandler"] = _tg_ext.CallbackQueryHandler
         g["filters"] = _tg_ext.filters
         g["ContextTypes"] = _tg_ext.ContextTypes
+        g["InlineKeyboardMarkup"] = _tg.InlineKeyboardMarkup
+        g["InlineKeyboardButton"] = _tg.InlineKeyboardButton
         try:
             g["AIORateLimiter"] = _tg_ext.AIORateLimiter
             _RATE_LIMITER_AVAILABLE = True
@@ -147,9 +149,6 @@ class _StreamThinkFilter:
             self.captured += text
             return ""
 
-        if self._eval_mode:
-            self.captured += text
-            return ""
         return text
 
     def _strip_think_tags(self, chunk: str) -> str:
@@ -849,6 +848,27 @@ class ABLEGateway:
         _msg_preview = (text_content[:80] + "...") if isinstance(text_content, str) and len(text_content) > 80 else text_content
         logger.info(f"[PIPELINE] ── START ── user={user_id} client={client_id} msg={_msg_preview!r}")
 
+        # ── Implicit correction detection ──────────────────────────────────────
+        # When a user immediately corrects or rephrases, mark the previous turn
+        # as negative feedback so the DPO pipeline can use it as a rejected sample.
+        _CORRECTION_PREFIXES = (
+            "no,", "no.", "no ", "nope", "wrong", "incorrect", "that's wrong",
+            "actually,", "actually ", "wait,", "wait ", "redo", "fix this",
+            "that's not", "that isn't", "you missed", "you got that wrong",
+            "not what i", "not what I", "try again", "do it again",
+            "you're wrong", "youre wrong", "you're incorrect",
+        )
+        if isinstance(text_content, str) and self.interaction_logger:
+            _lowered = text_content.strip().lower()
+            if any(_lowered.startswith(p) for p in _CORRECTION_PREFIXES):
+                try:
+                    _prev = self.interaction_logger.get_latest_for_session(user_id)
+                    if _prev and not _prev.get("correction_detected"):
+                        self.interaction_logger.mark_correction_detected(_prev["id"])
+                        logger.info("[RLHF] Implicit correction detected — marked prev interaction %s as negative", _prev["id"])
+                except Exception:
+                    pass
+
         # Collect pipeline steps for dashboard
         _pipeline_steps = []
 
@@ -1153,7 +1173,26 @@ class ABLEGateway:
                 # thinking_content is preserved on the CompletionResult for distillation
                 result.strip_thinking()
                 _has_thinking = result.has_thinking
+                _thinking_content = result.thinking_content or ""
                 final_text = result.content or "⚠️ ABLE exceeded the maximum internal thinking steps (15 turns)."
+
+                # ── Capture reasoning trace for ALL channels (not just CLI) ──────────
+                # CLI captures via _StreamThinkFilter in stream_message.
+                # process_message (Telegram, Discord, API) must capture here.
+                if _has_thinking and _thinking_content and isinstance(text_content, str):
+                    import hashlib as _hl
+                    _msg_hash = _hl.sha256(text_content.encode()).hexdigest()[:16]
+                    _log_reasoning_gateway(
+                        thinking=_thinking_content,
+                        session=user_id,
+                        message_hash=_msg_hash,
+                        message=text_content,
+                        response=final_text,
+                        model=result.model or "",
+                        elapsed_s=_total_ms / 1000,
+                        domain=scoring_result.domain if scoring_result else "",
+                        provider=result.provider if hasattr(result, 'provider') else _channel,
+                    )
                 logger.info(
                     f"[PIPELINE] ── DONE ── provider={_provider_name} iterations={loop_iteration + 1} "
                     f"total={_total_ms:.0f}ms"
@@ -1240,6 +1279,7 @@ class ABLEGateway:
                             raw_input=_raw_input[:10000],
                             raw_output=_raw_output_for_log[:10000] if _raw_output_for_log else None,
                             thinking_tokens_preserved=_has_thinking,
+                            thinking_content=_thinking_content[:8000] if _thinking_content else None,
                             corpus_eligible=_quality_scores.get("eligible", True) if _quality_scores else True,
                             quality_score=_quality_scores.get("average", 0.0) if _quality_scores else None,
                         )
@@ -1973,7 +2013,7 @@ class ABLEGateway:
                     "direction": "outbound"
                 })
 
-                await self._send_telegram_chunked(update, response)
+                await self._send_telegram_chunked(update, response, user_id=user_id)
 
                 # Buddy nudge — notify if needs are low
                 try:
@@ -1992,14 +2032,32 @@ class ABLEGateway:
 
         asyncio.create_task(_run_pipeline())
 
-    async def _send_telegram_chunked(self, update: Update, text: str):
-        """Send a response to Telegram, splitting into chunks if >4096 chars."""
+    def _feedback_keyboard(self, user_id: str):
+        """Build RLHF feedback inline keyboard.  Callback data: 'rlhf:<signal>:<user_id>'"""
+        try:
+            return InlineKeyboardMarkup([[
+                InlineKeyboardButton("👍", callback_data=f"rlhf:positive:{user_id}"),
+                InlineKeyboardButton("👎", callback_data=f"rlhf:negative:{user_id}"),
+            ]])
+        except Exception:
+            return None
+
+    async def _send_telegram_chunked(self, update: Update, text: str, user_id: str | None = None):
+        """Send a response to Telegram, splitting into chunks if >4096 chars.
+
+        When *user_id* is provided, attaches a 👍/👎 feedback keyboard to the
+        last chunk so users can rate responses for RLHF training.
+        """
         MAX_LEN = 4096
+        _keyboard = self._feedback_keyboard(user_id) if user_id else None
+
         if len(text) <= MAX_LEN:
             try:
-                await update.message.reply_text(text, parse_mode="Markdown")
+                await update.message.reply_text(
+                    text, parse_mode="Markdown", reply_markup=_keyboard
+                )
             except Exception:
-                await update.message.reply_text(text)
+                await update.message.reply_text(text, reply_markup=_keyboard)
             return
 
         # Split on paragraph boundaries first, fall back to hard split
@@ -2009,23 +2067,48 @@ class ABLEGateway:
             if len(remaining) <= MAX_LEN:
                 chunks.append(remaining)
                 break
-            # Try to split at last double-newline within limit
             split_at = remaining.rfind("\n\n", 0, MAX_LEN)
             if split_at == -1:
-                # Try single newline
                 split_at = remaining.rfind("\n", 0, MAX_LEN)
             if split_at == -1 or split_at < MAX_LEN // 2:
-                # Hard split at limit
                 split_at = MAX_LEN
             chunk = remaining[:split_at]
             remaining = remaining[split_at:].lstrip("\n")
             chunks.append(chunk)
 
-        for chunk in chunks:
+        for i, chunk in enumerate(chunks):
+            is_last = (i == len(chunks) - 1)
+            kb = _keyboard if is_last else None
             try:
-                await update.message.reply_text(chunk, parse_mode="Markdown")
+                await update.message.reply_text(chunk, parse_mode="Markdown", reply_markup=kb)
             except Exception:
-                await update.message.reply_text(chunk)
+                await update.message.reply_text(chunk, reply_markup=kb)
+
+    async def _handle_rlhf_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle 👍/👎 feedback callbacks — store RLHF signal on the latest interaction."""
+        query = update.callback_query
+        await query.answer()  # acknowledge immediately (removes loading spinner)
+
+        data = query.data or ""
+        if not data.startswith("rlhf:"):
+            return
+
+        parts = data.split(":", 2)
+        if len(parts) < 3:
+            return
+        _, signal, session_user_id = parts
+
+        if self.interaction_logger:
+            try:
+                _rec = self.interaction_logger.get_latest_for_session(session_user_id)
+                if _rec:
+                    self.interaction_logger.record_feedback(_rec["id"], signal=signal)
+                    _ack = "Thanks! 🙌" if signal == "positive" else "Got it — I'll learn from that 📝"
+                    await query.edit_message_reply_markup(reply_markup=None)
+                    await query.message.reply_text(_ack)
+                    logger.info("[RLHF] %s feedback recorded for interaction %s (user=%s)", signal, _rec["id"], session_user_id)
+            except Exception as e:
+                logger.warning("[RLHF] Feedback callback failed: %s", e)
 
     async def _handle_approval_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle Telegram inline button callbacks for approval workflow."""
@@ -2093,7 +2176,7 @@ class ABLEGateway:
                     "message": response,
                     "direction": "outbound"
                 })
-                await self._send_telegram_chunked(update, response)
+                await self._send_telegram_chunked(update, response, user_id=user_id)
             except Exception as e:
                 logger.error(f"Client pipeline error: {e}", exc_info=True)
                 try:
@@ -2207,6 +2290,61 @@ class ABLEGateway:
             return self._unauthorized_response()
         return web.json_response(self.resource_plane.get_setup_wizard())
 
+    async def _research_report_handler(self, request: web.Request) -> web.Response:
+        """Serve latest research report JSON — accessible locally via curl localhost:8080/api/reports/research/latest"""
+        import json as _json
+        from pathlib import Path as _Path
+        report_dirs = [
+            _Path.home() / ".able" / "reports" / "research",
+            _Path("data/research_reports"),
+        ]
+        latest_path = None
+        latest_mtime = 0.0
+        for rdir in report_dirs:
+            candidate = rdir / "latest.json"
+            if candidate.exists() and candidate.stat().st_mtime > latest_mtime:
+                latest_path = candidate
+                latest_mtime = candidate.stat().st_mtime
+            if rdir.exists():
+                for f in rdir.glob("research_*.json"):
+                    if f.stat().st_mtime > latest_mtime:
+                        latest_path = f
+                        latest_mtime = f.stat().st_mtime
+        if latest_path is None:
+            return web.json_response({"error": "No research report found"}, status=404)
+        try:
+            data = _json.loads(latest_path.read_text())
+            return web.json_response(data)
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _research_report_md_handler(self, request: web.Request) -> web.Response:
+        """Serve latest research report as Markdown."""
+        from pathlib import Path as _Path
+        report_dirs = [
+            _Path.home() / ".able" / "reports" / "research",
+            _Path("data/research_reports"),
+        ]
+        latest_path = None
+        latest_mtime = 0.0
+        for rdir in report_dirs:
+            for name in ("latest.md",):
+                candidate = rdir / name
+                if candidate.exists() and candidate.stat().st_mtime > latest_mtime:
+                    latest_path = candidate
+                    latest_mtime = candidate.stat().st_mtime
+            if rdir.exists():
+                for f in rdir.glob("research_*.md"):
+                    if f.stat().st_mtime > latest_mtime:
+                        latest_path = f
+                        latest_mtime = f.stat().st_mtime
+        if latest_path is None:
+            return web.Response(text="No research report found", status=404, content_type="text/plain")
+        try:
+            return web.Response(text=latest_path.read_text(), content_type="text/markdown")
+        except Exception as e:
+            return web.Response(text=str(e), status=500, content_type="text/plain")
+
     async def start_health_server(self, port: int = 8080, *, quiet: bool = False):
         """Start lightweight HTTP health check server"""
         web = _ensure_aiohttp()
@@ -2219,6 +2357,8 @@ class ABLEGateway:
         app.router.add_get("/control/resources/{resource_id}", self._control_resource_detail_handler)
         app.router.add_get("/control/collections", self._control_collections_handler)
         app.router.add_get("/control/setup-wizard", self._control_setup_wizard_handler)
+        app.router.add_get("/api/reports/research/latest", self._research_report_handler)
+        app.router.add_get("/api/reports/research/latest.md", self._research_report_md_handler)
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", port)
@@ -2315,6 +2455,9 @@ class ABLEGateway:
         self.master_bot.add_handler(CommandHandler("status", self._cmd_status))
         self.master_bot.add_handler(CommandHandler("clients", self._cmd_clients))
         self.master_bot.add_handler(CommandHandler("audit", self._cmd_audit))
+        self.master_bot.add_handler(
+            CallbackQueryHandler(self._handle_rlhf_callback, pattern=r"^rlhf:")
+        )
         self.master_bot.add_handler(CallbackQueryHandler(self._handle_approval_callback))
         self.master_bot.add_handler(MessageHandler(
             (filters.TEXT | filters.VOICE | filters.AUDIO | filters.PHOTO | filters.VIDEO | filters.VIDEO_NOTE | filters.Document.ALL) & ~filters.COMMAND,
@@ -2462,6 +2605,8 @@ class ABLEGateway:
             memory=self.memory,
             audit_log=None,
             send_telegram=_send_telegram,
+            provider_chain=self.tier_chains.get(1, self.provider_chain),  # T1 as cheap judge
+            interaction_logger=self.interaction_logger,
         )
         print(f"🕰️ ABLE Persistent Scheduler started with {len(self.scheduler.jobs)} autonomous missions")
 

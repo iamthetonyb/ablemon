@@ -71,6 +71,16 @@ class InteractionRecord:
     enrichment_level: str = ""  # none/light/standard/deep
     split_test_group: str = ""
     thinking_tokens_preserved: bool = False
+    thinking_content: Optional[str] = None  # actual reasoning trace — captured from all channels
+
+    # ── RLHF signals ──────────────────────────────────────────
+    feedback_signal: Optional[str] = None   # "positive" | "negative" | "correction"
+    feedback_text: Optional[str] = None     # user's corrected / better version
+    correction_detected: bool = False       # implicit (user rephrased after bad answer)
+
+    # ── Audit (filled by InteractionAuditor background job) ───
+    audit_score: Optional[float] = None     # 0.0–5.0 judge LLM quality score
+    audit_notes: Optional[str] = None       # JSON: {accuracy, relevance, improvements}
 
 
 class InteractionLogger:
@@ -129,6 +139,13 @@ class InteractionLogger:
         ("split_test_group", "TEXT DEFAULT ''"),
         ("thinking_tokens_preserved", "INTEGER DEFAULT 0"),
         ("quality_score", "REAL"),
+        # RLHF + audit columns (2026-04-04)
+        ("thinking_content", "TEXT"),
+        ("feedback_signal", "TEXT"),
+        ("feedback_text", "TEXT"),
+        ("correction_detected", "INTEGER DEFAULT 0"),
+        ("audit_score", "REAL"),
+        ("audit_notes", "TEXT"),
     ]
 
     def __init__(self, db_path: str = DEFAULT_DB_PATH):
@@ -265,6 +282,12 @@ class InteractionLogger:
         split_test_group: Optional[str] = None,
         thinking_tokens_preserved: Optional[bool] = None,
         quality_score: Optional[float] = None,
+        thinking_content: Optional[str] = None,
+        feedback_signal: Optional[str] = None,
+        feedback_text: Optional[str] = None,
+        correction_detected: Optional[bool] = None,
+        audit_score: Optional[float] = None,
+        audit_notes: Optional[str] = None,
     ):
         """
         Update execution results after a provider responds.
@@ -292,6 +315,12 @@ class InteractionLogger:
             ("split_test_group", split_test_group),
             ("thinking_tokens_preserved", int(thinking_tokens_preserved) if thinking_tokens_preserved is not None else None),
             ("quality_score", quality_score),
+            ("thinking_content", thinking_content),
+            ("feedback_signal", feedback_signal),
+            ("feedback_text", feedback_text),
+            ("correction_detected", int(correction_detected) if correction_detected is not None else None),
+            ("audit_score", audit_score),
+            ("audit_notes", audit_notes),
         ]:
             if val is not None:
                 updates.append(f"{col} = ?")
@@ -306,6 +335,52 @@ class InteractionLogger:
             conn.execute(
                 f"UPDATE interaction_log SET {', '.join(updates)} WHERE id = ?",
                 values,
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def record_feedback(
+        self,
+        record_id: str,
+        signal: str,                    # "positive" | "negative" | "correction"
+        feedback_text: Optional[str] = None,
+    ) -> bool:
+        """Store explicit RLHF feedback from Telegram/CLI/API.
+
+        Returns True if the record was found and updated.
+        """
+        conn = self._connect()
+        try:
+            cur = conn.execute(
+                "UPDATE interaction_log SET feedback_signal = ?, feedback_text = ? WHERE id = ?",
+                (signal, feedback_text, record_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def get_latest_for_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Return the most recent interaction for a given session (for correction detection)."""
+        conn = self._connect()
+        try:
+            cur = conn.execute(
+                "SELECT * FROM interaction_log WHERE session_id = ? ORDER BY timestamp DESC LIMIT 1",
+                (session_id,),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def mark_correction_detected(self, record_id: str):
+        """Mark previous interaction as implicitly negative (user corrected output)."""
+        conn = self._connect()
+        try:
+            conn.execute(
+                "UPDATE interaction_log SET correction_detected = 1, feedback_signal = 'negative' WHERE id = ?",
+                (record_id,),
             )
             conn.commit()
         finally:

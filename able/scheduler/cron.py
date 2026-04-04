@@ -572,6 +572,8 @@ def register_default_jobs(
     billing=None,
     audit_log=None,
     send_telegram: Optional[Callable] = None,
+    provider_chain=None,       # ProviderChain — used as judge LLM for interaction auditor
+    interaction_logger=None,   # InteractionLogger — passed to auditor to avoid duplicate init
 ) -> None:
     """Register all default ABLE maintenance jobs."""
 
@@ -953,6 +955,40 @@ def register_default_jobs(
         max_retries=1,
     )
 
+    # ── Interaction audit — every 4 hours ────────────────────────
+    async def run_interaction_audit():
+        from able.core.distillation.interaction_auditor import InteractionAuditor
+
+        auditor = InteractionAuditor()
+        result = await auditor.run_batch(limit=50)
+        logger.info(
+            "Interaction audit: audited=%d skipped=%d avg_score=%.3f",
+            result["audited"],
+            result["skipped"],
+            result["avg_score"],
+        )
+
+        # Award buddy XP proportional to audit volume (each scored row = 1 XP)
+        if result["audited"] > 0:
+            try:
+                from able.core.buddy.xp import award_distillation_xp
+                xp = award_distillation_xp(new_pairs=result["audited"])
+                if xp:
+                    logger.info("Buddy gained %d XP from interaction audit", xp)
+            except Exception as bxp_err:
+                logger.debug("Buddy XP skip (audit): %s", bxp_err)
+
+        return result
+
+    scheduler.add_job(
+        "interaction-audit",
+        "0 */4 * * *",
+        run_interaction_audit,
+        description="Score recent interactions with TrainingFormatter + optional LLM judge",
+        timeout=300.0,
+        max_retries=2,
+    )
+
     # ── gstack learnings harvest — every 4 hours ─────────────────
     async def harvest_gstack_learnings():
         """Harvest gstack sprint learnings and award buddy XP.
@@ -1089,4 +1125,22 @@ def register_default_jobs(
         description="Harvest gstack sprint learnings, award buddy XP for completed skills",
         timeout=60.0,
         max_retries=1,
+    )
+
+    # ── DPO Builder — nightly at 2:30am ─────────────────────────
+    async def run_dpo_builder():
+        from able.core.distillation.dpo_builder import DPOBuilder
+
+        builder = DPOBuilder()
+        written = await asyncio.to_thread(builder.export_jsonl, since_hours=24)
+        logger.info("DPO builder: wrote %d pairs to distillation_dpo.jsonl", written)
+        return {"pairs_written": written}
+
+    scheduler.add_job(
+        "dpo-builder",
+        "30 2 * * *",
+        run_dpo_builder,
+        description="Build DPO chosen/rejected pairs from audited interaction log",
+        timeout=180.0,
+        max_retries=2,
     )

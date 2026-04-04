@@ -28,6 +28,7 @@ SOURCE_PRIORITY: dict[str, int] = {
     "cowork": 1,            # Claude Cowork sessions — same quality as Claude Code
     "able_interaction": 2,  # ABLE's own high-quality responses
     "able_cli": 2,          # ABLE CLI sessions (same quality as able_interaction)
+    "reasoning_log": 2,     # (prompt, thinking, response) triples from reasoning.jsonl
     "0wav_ml": 3,           # 0wav labeled behavioral profiles (domain-specific)
     "0wav_claude_code": 3,  # 0wav Claude Code sessions (domain-specific)
     "gstack": 3,            # gstack sprint learnings (code review, QA, security insights)
@@ -118,6 +119,13 @@ def _get_harvesters(project_root: Path, tenant_id: str = "default") -> list:
 
     # Priority 2b: ABLE CLI sessions (~/.able/sessions/*.jsonl)
     harvesters.append(("able_cli", CLISessionHarvester()))
+
+    # Priority 2c: (prompt, thinking, response) triples from reasoning.jsonl
+    # Only included when the log exists — avoids importing if irrelevant
+    reasoning_log = Path.home() / ".able" / "logs" / "reasoning.jsonl"
+    if reasoning_log.exists():
+        from able.core.distillation.harvesters.reasoning_log_harvester import ReasoningLogHarvester
+        harvesters.append(("reasoning_log", ReasoningLogHarvester()))
 
     # Priority 3: 0wav ML harvester (labeled profiles + 0wav Claude sessions)
     if tenant_id == "0wav":

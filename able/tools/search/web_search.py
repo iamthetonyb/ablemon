@@ -14,6 +14,7 @@ Supports:
 
 Returns structured results with title, snippet, URL.
 """
+from __future__ import annotations  # makes aiohttp.ClientSession annotations lazy
 
 import asyncio
 import json
@@ -28,17 +29,45 @@ from urllib.parse import quote_plus, urlencode
 
 logger = logging.getLogger(__name__)
 
-try:
-    import aiohttp
-    AIOHTTP_AVAILABLE = True
-except ImportError:
-    AIOHTTP_AVAILABLE = False
+# ── Lazy imports — deferred to first actual use (~193ms combined) ──────────
+# aiohttp and bs4 are only needed when a search is actually executed.
+# Importing them at module level added ~193ms to every `able chat` cold start.
 
-try:
-    from bs4 import BeautifulSoup
-    BS4_AVAILABLE = True
-except ImportError:
-    BS4_AVAILABLE = False
+_aiohttp_mod: Any = None   # populated by _require_aiohttp()
+_bs4_cls: Any = None       # populated by _require_bs4()
+
+AIOHTTP_AVAILABLE: bool | None = None  # None = not yet checked
+BS4_AVAILABLE: bool | None = None
+
+
+def _require_aiohttp() -> Any:
+    """Return the aiohttp module, importing it on first call."""
+    global _aiohttp_mod, AIOHTTP_AVAILABLE
+    if AIOHTTP_AVAILABLE is None:
+        try:
+            import aiohttp as _m
+            _aiohttp_mod = _m
+            AIOHTTP_AVAILABLE = True
+        except ImportError:
+            AIOHTTP_AVAILABLE = False
+    if not AIOHTTP_AVAILABLE:
+        raise RuntimeError("aiohttp not installed — pip install aiohttp")
+    return _aiohttp_mod
+
+
+def _require_bs4() -> Any:
+    """Return BeautifulSoup class, importing it on first call."""
+    global _bs4_cls, BS4_AVAILABLE
+    if BS4_AVAILABLE is None:
+        try:
+            from bs4 import BeautifulSoup as _BS
+            _bs4_cls = _BS
+            BS4_AVAILABLE = True
+        except ImportError:
+            BS4_AVAILABLE = False
+    if not BS4_AVAILABLE:
+        raise RuntimeError("beautifulsoup4 not installed — pip install beautifulsoup4")
+    return _bs4_cls
 
 
 class SearchProvider(Enum):
@@ -92,10 +121,8 @@ class BraveSearch:
         self._session: Optional[aiohttp.ClientSession] = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
-        if not AIOHTTP_AVAILABLE:
-            raise RuntimeError("aiohttp not installed")
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
+            self._session = _require_aiohttp().ClientSession(
                 headers={
                     "Accept": "application/json",
                     "Accept-Encoding": "gzip",
@@ -214,10 +241,8 @@ class PerplexitySearch:
         self._session: Optional[aiohttp.ClientSession] = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
-        if not AIOHTTP_AVAILABLE:
-            raise RuntimeError("aiohttp not installed")
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
+            self._session = _require_aiohttp().ClientSession(
                 headers={
                     "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",
@@ -376,10 +401,8 @@ class GeminiSearch:
         self._session: Optional[aiohttp.ClientSession] = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
-        if not AIOHTTP_AVAILABLE:
-            raise RuntimeError("aiohttp not installed")
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            self._session = _require_aiohttp().ClientSession()
         return self._session
 
     async def search(self, query: str, max_results: int = 10) -> List[SearchResult]:
@@ -503,10 +526,8 @@ class DuckDuckGoSearch:
         self._min_delay = 1.0
 
     async def _get_session(self) -> aiohttp.ClientSession:
-        if not AIOHTTP_AVAILABLE:
-            raise RuntimeError("aiohttp not installed")
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
+            self._session = _require_aiohttp().ClientSession(
                 headers={
                     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                                   "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -517,7 +538,9 @@ class DuckDuckGoSearch:
 
     async def search(self, query: str, max_results: int = 10) -> List[SearchResult]:
         """Search DuckDuckGo"""
-        if not BS4_AVAILABLE:
+        try:
+            _BS4 = _require_bs4()
+        except RuntimeError:
             logger.warning("BeautifulSoup not installed, using fallback")
             return []
 
@@ -538,7 +561,7 @@ class DuckDuckGoSearch:
                     return []
                 html = await response.text()
 
-            soup = BeautifulSoup(html, 'html.parser')
+            soup = _BS4(html, 'html.parser')
             results = []
 
             for i, result in enumerate(soup.select('.result')):
@@ -592,10 +615,8 @@ class GoogleSearch:
         self._session: Optional[aiohttp.ClientSession] = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
-        if not AIOHTTP_AVAILABLE:
-            raise RuntimeError("aiohttp not installed")
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            self._session = _require_aiohttp().ClientSession()
         return self._session
 
     async def search(self, query: str, max_results: int = 10) -> List[SearchResult]:
@@ -658,10 +679,8 @@ class BingSearch:
         self._session: Optional[aiohttp.ClientSession] = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
-        if not AIOHTTP_AVAILABLE:
-            raise RuntimeError("aiohttp not installed")
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
+            self._session = _require_aiohttp().ClientSession(
                 headers={"Ocp-Apim-Subscription-Key": self.api_key}
             )
         return self._session

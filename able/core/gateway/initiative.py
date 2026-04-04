@@ -200,9 +200,14 @@ class InitiativeEngine:
                 "error_count": job.error_count,
             })
 
-        # Memory status
+        # Memory status — distinguish between "no object" vs "fallback mode"
         if hasattr(self.gateway, 'memory') and self.gateway.memory:
-            stats["memory_status"] = "active"
+            mem = self.gateway.memory
+            # Check for fallback mode indicators (sentence-transformers / sqlite-vec missing)
+            is_fallback = getattr(mem, 'use_fallback', False) or not getattr(mem, 'vectors', None)
+            stats["memory_status"] = "active (fallback embeddings)" if is_fallback else "active"
+        else:
+            stats["memory_status"] = "unavailable (init failed — check logs)"
 
         return stats
 
@@ -321,6 +326,47 @@ class InitiativeEngine:
         except Exception:
             pass
 
+        # Load last night's research report (newest file wins)
+        research_summary = ""
+        try:
+            report_dirs = [
+                Path.home() / ".able" / "reports" / "research",
+                Path("data/research_reports"),
+            ]
+            latest_report = None
+            latest_mtime = 0.0
+            for rdir in report_dirs:
+                candidate = rdir / "latest.json"
+                if candidate.exists() and candidate.stat().st_mtime > latest_mtime:
+                    latest_report = candidate
+                    latest_mtime = candidate.stat().st_mtime
+                # Also check dated files in case latest.json is stale
+                if rdir.exists():
+                    for f in rdir.glob("research_*.json"):
+                        if f.stat().st_mtime > latest_mtime:
+                            latest_report = f
+                            latest_mtime = f.stat().st_mtime
+            if latest_report:
+                data = json.loads(latest_report.read_text())
+                findings = data.get("findings", [])
+                ts = data.get("timestamp", "")[:10]
+                total = data.get("total_findings", len(findings))
+                high = data.get("high_priority_count", 0)
+                if findings:
+                    top = findings[:5]
+                    lines = [f"\n## Last Night's Research ({ts} · {total} findings, {high} high-priority)"]
+                    for fi in top:
+                        title = fi.get("title") or fi.get("query", "")
+                        summary = (fi.get("summary") or fi.get("snippet") or "")[:120]
+                        relevance = fi.get("relevance", "")
+                        tag = f" [{relevance.upper()}]" if relevance else ""
+                        lines.append(f"- {title}{tag}: {summary}")
+                    research_summary = "\n".join(lines)
+                else:
+                    research_summary = f"\n## Last Night's Research\n- Report from {ts} had 0 findings (search may have failed)"
+        except Exception:
+            pass
+
         prompt = f"""Draft the morning briefing based on this REAL system data.
 
 ## System Status
@@ -338,13 +384,15 @@ class InitiativeEngine:
 
 ## Goals
 {goals_context}
-{buddy_status}
+{buddy_status}{research_summary}
+
 Structure:
 1. System health summary (2-3 lines, based on data above — flag any failed crons or missing providers)
 2. Goal progress update (based on actual numbers from goals data)
 3. Buddy status (if data present — mention mood, suggest actions if needs are low)
-4. 2-3 recommended focus areas for today
-5. Any issues that need immediate attention
+4. Research highlights (if present — bullet the top 2-3 findings worth acting on)
+5. 2-3 recommended focus areas for today
+6. Any issues that need immediate attention
 
 Rules: Be direct. No fluff. Every claim must reference the data above. If something is at zero, say so."""
 
@@ -402,6 +450,13 @@ Keep it under 500 words."""
 
     async def _github_digest(self):
         """Scan repos and send a real digest."""
+        # Check token before making the call — avoids opaque errors
+        if not os.environ.get("GITHUB_TOKEN") and not os.environ.get("GH_TOKEN"):
+            await self._send_to_owner(
+                "📡 GitHub Digest: Skipped — GITHUB_TOKEN not set in environment.",
+                "github-digest",
+            )
+            return
         try:
             repos = await self.gateway.github.list_repos()
             if not repos:
@@ -423,7 +478,10 @@ Keep it under 500 words."""
                 "github-digest",
             )
         except Exception as e:
-            await self._send_to_owner(f"📡 GitHub Digest: Error — {e}", "github-digest")
+            err_str = str(e)
+            if "401" in err_str or "auth" in err_str.lower() or "token" in err_str.lower():
+                err_str = f"Auth error — check GITHUB_TOKEN is valid: {e}"
+            await self._send_to_owner(f"📡 GitHub Digest: Error — {err_str}", "github-digest")
 
     async def _self_reflection(self):
         """Weekly self-improvement diagnostic with REAL data."""

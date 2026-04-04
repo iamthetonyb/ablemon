@@ -1061,6 +1061,7 @@ async def run_chat(args: argparse.Namespace) -> int:
     from able.core.buddy.renderer import (
         render_backpack, render_banner, render_header, render_full, render_starter_selection,
         render_battle_result, render_evolution, render_legendary_unlock,
+        play_level_up_sound,
     )
 
     _enable_line_editing()
@@ -1181,7 +1182,15 @@ async def run_chat(args: argparse.Namespace) -> int:
     try:
         while True:
             try:
-                raw = await asyncio.to_thread(_prompt_input, f"{_rl(GREEN, '>')} ")
+                # Thin separator to visually chunk conversations (nano-claude-code style)
+                print(_c(DIM, "  " + "─" * 46))
+                # Build prompt: [BuddyName L11 🌱] > (compact, nano-claude-code style)
+                if buddy:
+                    _buddy_tag = _c(DIM, f"[{buddy.name} L{buddy.level}{buddy.display_emoji}]")
+                    _prompt_str = f"{_buddy_tag} {_rl(GREEN, '>')} "
+                else:
+                    _prompt_str = f"{_rl(GREEN, '>')} "
+                raw = await asyncio.to_thread(_prompt_input, _prompt_str)
             except (EOFError, KeyboardInterrupt):
                 print(f"\n{_c(DIM, '  bye')}")
                 return 0
@@ -1337,6 +1346,7 @@ async def run_chat(args: argparse.Namespace) -> int:
                 old_legendary = buddy.legendary_title if buddy else ""
                 showed_legendary = False
                 if new_buddy and buddy and new_buddy.level > buddy.level:
+                    play_level_up_sound()
                     print(f"  {new_buddy.display_emoji} {new_buddy.name} leveled up to {new_buddy.level}!")
                     new_stage = new_buddy.check_evolution()
                     if new_stage:
