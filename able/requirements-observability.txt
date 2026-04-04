@@ -1,0 +1,20 @@
+# ABLE Observability — Phoenix + OpenInference auto-instrumentation
+# Install alongside requirements-core.txt to get Phoenix traces.
+#
+#   pip install -r requirements-observability.txt
+#
+# Or add to Docker build via PROFILE=observability (see Dockerfile ARG).
+#
+# What each package does:
+#   arize-phoenix-otel              — phoenix.otel.register(), connects to Phoenix server
+#   openinference-instrumentation-openai    — auto-traces every openai.ChatCompletion call
+#   openinference-instrumentation-anthropic — auto-traces every anthropic.messages.create call
+#   opentelemetry-sdk               — OTel SDK (spans, exporters, context propagation)
+#   opentelemetry-exporter-otlp-proto-http  — OTLP HTTP exporter (sends spans to Phoenix)
+
+arize-phoenix-otel>=0.6.0
+openinference-instrumentation-openai>=0.1.12
+openinference-instrumentation-anthropic>=0.1.6
+openinference-semantic-conventions>=0.1.17
+opentelemetry-sdk>=1.25.0
+opentelemetry-exporter-otlp-proto-http>=1.25.0

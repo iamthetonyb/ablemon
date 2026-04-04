@@ -25,12 +25,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-COPY able/requirements-core.txt able/requirements-full.txt able/requirements.txt /tmp/
+COPY able/requirements-core.txt able/requirements-full.txt able/requirements-observability.txt able/requirements.txt /tmp/
 
 # Install deps based on profile
+# Profiles: slim (default), full, observability (slim + phoenix + openinference)
 RUN pip install --no-cache-dir --upgrade pip && \
     if [ "$PROFILE" = "full" ]; then \
-        pip install --no-cache-dir -r /tmp/requirements-full.txt; \
+        pip install --no-cache-dir -r /tmp/requirements-full.txt && \
+        pip install --no-cache-dir -r /tmp/requirements-observability.txt; \
+    elif [ "$PROFILE" = "observability" ]; then \
+        pip install --no-cache-dir -r /tmp/requirements-core.txt && \
+        pip install --no-cache-dir -r /tmp/requirements-observability.txt; \
     else \
         pip install --no-cache-dir -r /tmp/requirements-core.txt; \
     fi

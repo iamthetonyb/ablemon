@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "codex": {
+      "command": "/Users/abenton333/.local/bin/codex",
+      "args": ["mcp-server"]
+    }
+  }
+}

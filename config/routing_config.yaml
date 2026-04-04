@@ -100,7 +100,31 @@ providers:
       reasoning_effort: "xhigh"
       timeout: 180.0
 
-  # ── Tier 2: Fallback A — Gemma 4 26B A4B on OpenRouter ─────────
+  # ── Tier 2: Fallback A — Qwen 3.6 Plus (FREE on OpenRouter) ────
+  # API-only (closed weights), always-on reasoning, 1M context.
+  # Free tier: qwen/qwen3.6-plus:free — no cost while the free tier lasts.
+  # Terminal-Bench 2.0: 61.6 (beats Claude Opus 4.6 at 59.3).
+  # NOTE: forced CoT on every response (no non-thinking mode) — fine for T2
+  # user-facing tasks, wasteful for background/evolution work (use M2.7).
+  # Watch: when free tier ends, cost-evaluate vs Gemma 4 26B ($0.13/$0.40/M).
+  - name: "qwen3.6-plus-free"
+    tier: 2
+    provider_type: "openrouter"
+    endpoint: "https://openrouter.ai/api/v1"
+    model_id: "qwen/qwen3.6-plus:free"
+    cost_per_m_input: 0.00
+    cost_per_m_output: 0.00
+    max_context: 1000000
+    supports_tools: true
+    supports_vision: false
+    throughput_tps: 60
+    enabled: true
+    fallback_to: "gemma4-26b-openrouter"
+    api_key_env: "OPENROUTER_API_KEY"
+    extra:
+      timeout: 180.0
+
+  # ── Tier 2: Fallback B — Gemma 4 26B A4B on OpenRouter ─────────
   # MoE: 25.2B total, 3.8B active — very fast, $0.13/$0.40/M.
   # 8x cheaper than MiMo. 256K context. Apache 2.0. Run shootout before
   # using as primary T2 fallback vs MiMo.
@@ -144,6 +168,10 @@ providers:
 
   # ── Tier 3: Background Only (Evolution Daemon) ──────────────────
   # Inherent reasoning model — 1M context, always max thinking. Never user-facing.
+  # NOTE: minimax-m2.7:cloud is available on Ollama, but keeping OpenRouter here
+  # because: (1) evolution daemon runs ~4x/day — low volume, (2) OpenRouter needs
+  # no auth setup, (3) Ollama cloud requires Pro subscription for concurrent use.
+  # Switch to Ollama cloud if OpenRouter costs become significant.
   - name: "minimax-m2.7"
     tier: 3
     provider_type: "openrouter"
@@ -207,21 +235,24 @@ providers:
       thinking_budget_tokens: 16000
       timeout: 300.0
 
-  # ── Tier 5: Ollama (Server) — Gemma 4 31B UD-Q4_K_XL ───────────
-  # Upgraded from Qwen 3.5 27B. Gemma 4 31B benchmarks higher on reasoning
-  # and coding (the dominant T5 use cases). Apache 2.0, day-0 Ollama support.
-  # Unsloth Dynamic 2.0: 18.8GB VRAM (vs Qwen's 17.6GB — negligible delta).
-  # Fine-tuning: same Unsloth Dynamic pipeline, drop-in format.
-  # Setup:
-  #   ollama pull gemma4:31b                               (direct pull)
-  #   -- OR for fine-tuned GGUF --
-  #   huggingface-cli download unsloth/gemma-4-31B-it-GGUF gemma-4-31B-it-UD-Q4_K_XL.gguf --local-dir ./models
-  #   ollama create gemma4-31b-ud -f config/ollama/Modelfile.gemma4-31b
+  # ── Tier 5: Ollama (Server) — Gemma 4 31B cloud ─────────────────
+  # Uses Ollama cloud inference (gemma4:31b-cloud) — saves 18.8GB on server.
+  # Runs on Ollama's NVIDIA Blackwell/Vera Rubin hardware, not local CPU/GPU.
+  # Works identically to local: same endpoint http://localhost:11434, same API.
+  # Requires: ollama signin (free tier: 1 concurrent model, session limits;
+  #           Pro $20/mo for production use with rate limits removed).
+  #
+  # For fine-tuning: use local model, NOT cloud. Download separately on Colab:
+  #   huggingface-cli download unsloth/gemma-4-31B-it-GGUF gemma-4-31B-it-UD-Q4_K_XL.gguf
+  #
+  # Setup server:
+  #   ollama signin                                         (one-time, browser auth)
+  #   # gemma4:31b-cloud pulls automatically on first use — no 18.8GB download
   - name: "ollama-local"
     tier: 5
     provider_type: "ollama"
     endpoint: "http://localhost:11434"
-    model_id: "gemma4:31b"
+    model_id: "gemma4:31b-cloud"
     cost_per_m_input: 0.00
     cost_per_m_output: 0.00
     max_context: 131072

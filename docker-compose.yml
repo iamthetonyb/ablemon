@@ -6,7 +6,9 @@
 #   3. docker compose logs -f         (watch startup)
 #
 # With observability dashboard (Phoenix at http://localhost:6006):
-#   docker compose --profile observability up -d
+#   PROFILE=observability docker compose --profile observability up -d
+#   (PROFILE=observability installs arize-phoenix-otel + openinference in the ABLE container)
+#   (PROFILE=full also includes observability packages)
 #
 # Full build (ML, browser, billing):
 #   PROFILE=full docker compose up -d --build
