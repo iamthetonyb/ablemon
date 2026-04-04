@@ -648,7 +648,9 @@ class ABLEGateway:
                     fallback_path=traces_path,
                 )
                 if self.phoenix.is_available:
-                    logger.info("Phoenix dashboard live at http://localhost:6006")
+                    import os as _os
+                    _ph_ui = _os.environ.get("PHOENIX_COLLECTOR_ENDPOINT", "http://localhost:6006/v1/traces").replace("/v1/traces", "")
+                    logger.info("Phoenix dashboard live at %s", _ph_ui)
                 else:
                     logger.info("Phoenix unavailable — JSONL tracing active as fallback")
         except Exception as e:
@@ -2693,7 +2695,9 @@ class ABLEGateway:
 
         # Report observability status
         if self.phoenix and self.phoenix.is_available:
-            print(f"🔭 Phoenix dashboard: http://localhost:6006 (project: able)")
+            import os as _os
+            _ph_ui = _os.environ.get("PHOENIX_COLLECTOR_ENDPOINT", "http://localhost:6006/v1/traces").replace("/v1/traces", "")
+            print(f"🔭 Phoenix dashboard: {_ph_ui} (project: able)")
         elif self.tracer:
             print(f"🔭 Tracing: JSONL fallback (data/traces.jsonl)")
         if self.evaluator:

@@ -5,6 +5,9 @@
 #   2. docker compose up -d           (slim: ~200MB, boots in seconds)
 #   3. docker compose logs -f         (watch startup)
 #
+# With observability dashboard (Phoenix at http://localhost:6006):
+#   docker compose --profile observability up -d
+#
 # Full build (ML, browser, billing):
 #   PROFILE=full docker compose up -d --build
 #
@@ -28,6 +31,9 @@ services:
     environment:
       - ABLE_HOME=/home/able/.able
       - PYTHONUNBUFFERED=1
+      # Phoenix — set automatically when running with --profile observability.
+      # Override to point at a remote Phoenix instance.
+      - PHOENIX_COLLECTOR_ENDPOINT=${PHOENIX_COLLECTOR_ENDPOINT:-http://phoenix:6006/v1/traces}
     volumes:
       # Persistent state (buddy, memory, sessions, distillation corpus)
       - able_data:/home/able/.able
@@ -47,6 +53,36 @@ services:
         max-size: "10m"
         max-file: "5"
 
+  # ── Arize Phoenix — LLM Observability Dashboard ─────────────────────────────
+  # Browse traces, latency, token usage, and routing decisions at:
+  #   http://localhost:6006
+  #
+  # Start with:  docker compose --profile observability up -d
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    container_name: able-phoenix
+    profiles: [observability]
+    restart: unless-stopped
+    ports:
+      - "6006:6006"      # Phoenix UI + OTLP HTTP ingest
+      - "4317:4317"      # OTLP gRPC ingest (optional)
+    environment:
+      - PHOENIX_WORKING_DIR=/phoenix
+    volumes:
+      - phoenix_data:/phoenix
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6006/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   able_data:
   able_db:
+  phoenix_data:

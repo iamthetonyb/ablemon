@@ -8,7 +8,8 @@ Scoring strategy (layered):
   2. SECONDARY: Optional judge LLM (chat_fn) — if provided, averaged with primary score
      (weighted 40% formatter / 60% judge).  Falls back to primary-only when unavailable.
   3. OBSERVABILITY: Emits an OpenTelemetry span per interaction when Phoenix is available
-     (self-hosted at localhost:6006 via PhoenixObserver).  Falls back silently to JSONL.
+     (via PhoenixObserver; endpoint from PHOENIX_COLLECTOR_ENDPOINT env var).
+     Falls back silently to JSONL.
 
 Runs every 4 hours via cron (job: "interaction-audit").
 Can also be invoked directly:
@@ -26,11 +27,17 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import sqlite3
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+
+_PHOENIX_ENDPOINT = (
+    os.environ.get("PHOENIX_COLLECTOR_ENDPOINT")
+    or _PHOENIX_ENDPOINT
+)
 
 from able.core.routing.interaction_log import DEFAULT_DB_PATH, InteractionLogger
 
@@ -410,7 +417,7 @@ class InteractionAuditor:
                     "_phoenix_available": False,
                     "_fallback_path": "data/traces.jsonl",
                     "_project_name": "able",
-                    "_endpoint": "http://localhost:6006/v1/traces",
+                    "_endpoint": _PHOENIX_ENDPOINT,
                     "session": None,
                     "tracer_provider": None,
                 })
@@ -420,7 +427,7 @@ class InteractionAuditor:
                     from phoenix.otel import register  # type: ignore[import-untyped]
                     _tp = register(
                         project_name="able-audit",
-                        endpoint="http://localhost:6006/v1/traces",
+                        endpoint=_PHOENIX_ENDPOINT,
                     )
                     self._tracer_provider = _tp
                     logger.debug("InteractionAuditor: connected to existing Phoenix instance")

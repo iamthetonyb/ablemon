@@ -1,21 +1,32 @@
 """
 Phoenix Observer — Optional Arize Phoenix integration for ABLE.
 
-Self-hosted at localhost:6006.  Traces all model calls across tiers and
-tenants.  Falls back to JSONL tracing when Phoenix is not installed or
-the server is unreachable.
+Local dashboard at http://localhost:6006.
+Start with:  docker compose --profile observability up -d
+
+The observer connects to the Phoenix server via OTLP HTTP.  The endpoint is
+read from PHOENIX_COLLECTOR_ENDPOINT (default: http://localhost:6006/v1/traces).
+When running inside the ABLE Docker container alongside the `phoenix` service
+the env var is pre-set to http://phoenix:6006/v1/traces.
+
+Falls back to JSONL tracing when Phoenix is unreachable or not installed.
 """
 
 import logging
+import os
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
+# Default endpoint — overridden by PHOENIX_COLLECTOR_ENDPOINT env var.
+_DEFAULT_ENDPOINT = "http://localhost:6006/v1/traces"
+
 
 class PhoenixObserver:
     """
-    Wraps Arize Phoenix for ABLE.  Self-hosted at localhost:6006.
-    Traces ALL model calls across all tiers and tenants.
+    Wraps Arize Phoenix for ABLE.  Connects to an external Phoenix server
+    (local container or remote) via OTLP HTTP.  Traces ALL model calls across
+    all tiers and tenants.
 
     Falls back to JSONL tracing when Phoenix is not available.
     """
@@ -23,26 +34,31 @@ class PhoenixObserver:
     def __init__(
         self,
         project_name: str = "able",
-        endpoint: str = "http://localhost:6006/v1/traces",
+        endpoint: str | None = None,
         fallback_path: str = "data/traces.jsonl",
     ):
+        # Honour env var first, then explicit arg, then default.
+        self._endpoint = (
+            os.environ.get("PHOENIX_COLLECTOR_ENDPOINT")
+            or endpoint
+            or _DEFAULT_ENDPOINT
+        )
         self._phoenix_available = False
         self._fallback_path = fallback_path
         self._project_name = project_name
-        self._endpoint = endpoint
         self.session: Any = None
         self.tracer_provider: Any = None
 
         try:
-            import phoenix as px  # type: ignore[import-untyped]
             from phoenix.otel import register  # type: ignore[import-untyped]
 
-            self.session = px.launch_app(host="0.0.0.0", port=6006)
+            # Connect to external Phoenix server — do NOT call px.launch_app()
+            # here; the server is managed by docker-compose (or the user).
             self.tracer_provider = register(
-                project_name=project_name, endpoint=endpoint
+                project_name=project_name, endpoint=self._endpoint
             )
             self._phoenix_available = True
-            logger.info("Phoenix observer started at %s", endpoint)
+            logger.info("Phoenix observer connected → %s", self._endpoint)
         except ImportError:
             logger.info(
                 "Phoenix not installed — using JSONL fallback at %s",
@@ -50,7 +66,7 @@ class PhoenixObserver:
             )
         except Exception as exc:
             logger.warning(
-                "Phoenix failed to start (%s) — using JSONL fallback at %s",
+                "Phoenix failed to connect (%s) — using JSONL fallback at %s",
                 exc,
                 fallback_path,
             )
