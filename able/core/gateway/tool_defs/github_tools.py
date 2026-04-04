@@ -3,9 +3,15 @@ GitHub tool definitions and handlers.
 Extracted from gateway.py for modularity.
 """
 
+import os
 import re
 import logging
 from typing import TYPE_CHECKING
+
+
+def _github_available() -> bool:
+    """Availability check: GITHUB_TOKEN must be set."""
+    return bool(os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN"))
 
 if TYPE_CHECKING:
     from able.core.gateway.tool_registry import ToolRegistry, ToolContext
@@ -208,6 +214,7 @@ def register_tools(registry: "ToolRegistry"):
         surface="github",
         artifact_kind="markdown",
         tags=["github", "read"],
+        availability_check=_github_available,
     )
     registry.register(
         name="github_create_repo",
@@ -222,6 +229,7 @@ def register_tools(registry: "ToolRegistry"):
         surface="github",
         artifact_kind="markdown",
         tags=["github", "write"],
+        availability_check=_github_available,
     )
     registry.register(
         name="github_push_files",
@@ -236,6 +244,7 @@ def register_tools(registry: "ToolRegistry"):
         surface="github",
         artifact_kind="markdown",
         tags=["github", "write", "code"],
+        availability_check=_github_available,
     )
     registry.register(
         name="github_create_pr",
@@ -250,6 +259,7 @@ def register_tools(registry: "ToolRegistry"):
         surface="github",
         artifact_kind="markdown",
         tags=["github", "review"],
+        availability_check=_github_available,
     )
     registry.register(
         name="github_pages_deploy",
@@ -264,4 +274,5 @@ def register_tools(registry: "ToolRegistry"):
         surface="deploy",
         artifact_kind="markdown",
         tags=["github", "deploy"],
+        availability_check=_github_available,
     )

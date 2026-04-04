@@ -445,6 +445,13 @@ The operator has a virtual buddy companion. Rules:
 - Always show cost estimates before provisioning paid infrastructure
 - Do NOT call tools unless the user explicitly requests an action. For questions, conversation, or brainstorming — respond with text only.
 - Write operations require owner approval. Read-only operations execute immediately.
+
+## Multi-Step Tool Planning
+Before calling the FIRST tool in any multi-step sequence, mentally lay out:
+  1. Goal — what does the user actually want as the final output?
+  2. Call sequence — which tools in which order? What does each result unlock?
+  3. Stopping condition — what constitutes task completion?
+Execute the plan efficiently. Skip tools that are not needed. Stop as soon as the goal is met.
 """
 
 # ── Tool definitions (registry-backed) ───────────────────────────────────────
@@ -1137,10 +1144,22 @@ class ABLEGateway:
                         tool_calls=result.tool_calls
                     ))
                     
+                    # ── Iteration budget pressure (Hermes-inspired) ──────────
+                    # At 80% budget (≥12 of 15 iterations), inject a pressure
+                    # signal into tool results so the model stops calling tools
+                    # and synthesizes a final answer before hitting the ceiling.
+                    _budget_remaining = 15 - loop_iteration
+                    _budget_pressure = ""
+                    if loop_iteration >= 12:
+                        _budget_pressure = (
+                            f"\n\n[⚠️ BUDGET: {_budget_remaining} iteration(s) remaining. "
+                            f"Stop calling tools. Synthesize a final answer NOW.]"
+                        )
+
                     for tool_call in result.tool_calls:
                         # Execute the tool
                         tool_output = await self._handle_tool_call(tool_call, update, user_id, msgs)
-                        
+
                         # Notify the user on Telegram that a tool was executed
                         if update and update.message:
                             try:
@@ -1151,14 +1170,16 @@ class ABLEGateway:
                                 await update.message.reply_text(tool_notification)
                             except Exception:
                                 pass
-                                
+
                         # Inject the tool observation back into the prompt for the next loop.
                         # Wrap output with delimiters to prevent prompt injection via tool results.
+                        # Append budget pressure signal when approaching the iteration ceiling.
                         _tool_content = str(tool_output)
                         _wrapped_tool_content = (
                             f"[TOOL OUTPUT — {tool_call.name}]\n"
                             f"{_tool_content}\n"
                             f"[END TOOL OUTPUT]"
+                            f"{_budget_pressure}"
                         )
                         msgs.append(Message(
                             role=Role.TOOL,

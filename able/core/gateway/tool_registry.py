@@ -33,6 +33,12 @@ class ToolDef:
     artifact_kind: str = "markdown"
     enabled_by_default: bool = True
     tags: List[str] = field(default_factory=list)
+    # Optional availability check — called at get_definitions() time.
+    # Return True if the tool is available (required env vars set, service
+    # reachable, etc.).  A failing check silently excludes the tool from the
+    # LLM's tool list, preventing hallucinated calls to unavailable tools.
+    # Signature: () -> bool
+    availability_check: Optional[Callable[[], bool]] = None
 
 
 @dataclass
@@ -83,8 +89,15 @@ class ToolRegistry:
         artifact_kind: str = "markdown",
         enabled_by_default: bool = True,
         tags: Optional[List[str]] = None,
+        availability_check: Optional[Callable[[], bool]] = None,
     ):
-        """Register a single tool."""
+        """Register a single tool.
+
+        availability_check: optional callable () -> bool.  When provided, it
+        is run at get_definitions() time.  Tools that return False are silently
+        excluded from the LLM's tool list, preventing hallucinated calls to
+        services/env-vars that are not currently available.
+        """
         function_meta = definition.get("function", {})
         self._tools[name] = ToolDef(
             name=name,
@@ -101,6 +114,7 @@ class ToolRegistry:
             artifact_kind=artifact_kind,
             enabled_by_default=enabled_by_default,
             tags=list(tags or []),
+            availability_check=availability_check,
         )
         logger.debug(
             "Registered tool: %s (approval=%s, category=%s, read_only=%s)",
@@ -124,13 +138,35 @@ class ToolRegistry:
         self,
         effective_settings: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> List[Dict[str, Any]]:
-        """Get tool definitions for LLM function-calling, filtered by settings."""
+        """Get tool definitions for LLM function-calling, filtered by settings.
+
+        Tools are excluded when:
+        - Disabled via effective_settings (Studio toggle or env var override)
+        - Their availability_check() returns False (missing env vars, service down)
+
+        Tools that fail availability checks are silently omitted — the LLM never
+        sees a schema for a tool it cannot call, preventing hallucinated calls.
+        """
         definitions: List[Dict[str, Any]] = []
         for tool in self._tools.values():
             setting = (effective_settings or {}).get(tool.name, {})
             enabled = setting.get("enabled", tool.enabled_by_default)
-            if enabled:
-                definitions.append(tool.definition)
+            if not enabled:
+                continue
+            # Run availability check — skip tools whose dependencies aren't met
+            if tool.availability_check is not None:
+                try:
+                    if not tool.availability_check():
+                        logger.debug(
+                            "Tool %s excluded: availability_check returned False", tool.name
+                        )
+                        continue
+                except Exception as _exc:
+                    logger.warning(
+                        "Tool %s availability_check raised %s — excluding", tool.name, _exc
+                    )
+                    continue
+            definitions.append(tool.definition)
         return definitions
 
     def get_tool(self, name: str) -> Optional[ToolDef]:

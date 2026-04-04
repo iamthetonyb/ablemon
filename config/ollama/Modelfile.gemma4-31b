@@ -1,0 +1,37 @@
+# Gemma 4 31B — Unsloth Dynamic 2.0 Q4_K_XL (18.8GB)
+# Server-grade distillation base model for ABLE T5 / T1 fine-tuning target.
+# Replaces Qwen 3.5 27B. Stronger on reasoning + coding, Apache 2.0 license.
+#
+# Setup options:
+#
+# Option A — Direct pull (no fine-tuning yet):
+#   ollama pull gemma4:31b
+#
+# Option B — Fine-tuned GGUF (after distillation run):
+#   huggingface-cli download unsloth/gemma-4-31B-it-GGUF \
+#     gemma-4-31B-it-UD-Q4_K_XL.gguf --local-dir ./models
+#   ollama create gemma4-31b-ud -f config/ollama/Modelfile.gemma4-31b
+#
+# Benchmarks (vs Qwen 3.5 27B):
+#   MMLU Pro:           85.2% (Gemma 4) vs ~82% (Qwen 3.5)
+#   GPQA Diamond:       84.3% (Gemma 4) vs 85.5% (Qwen 3.5) — roughly tied
+#   Codeforces ELO:     2150 Expert (Gemma 4) vs not reported (Qwen 3.5)
+#   Multilingual:       Qwen 3.5 wins (201 languages, 250K vocab)
+#
+# Note: Use Qwen 3.5 9B (ollama-edge) for edge/multilingual workloads.
+
+FROM ./models/gemma-4-31B-it-UD-Q4_K_XL.gguf
+
+PARAMETER temperature 0.7
+PARAMETER num_ctx 131072
+PARAMETER stop <end_of_turn>
+PARAMETER stop <start_of_turn>
+
+# Gemma 4 uses a different chat template than ChatML.
+# Uses <start_of_turn>role\ncontent<end_of_turn> format.
+TEMPLATE """{{- if .System }}<start_of_turn>user
+{{ .System }}<end_of_turn>
+{{ end }}{{- range .Messages }}<start_of_turn>{{ if eq .Role "assistant" }}model{{ else }}{{ .Role }}{{ end }}
+{{ .Content }}<end_of_turn>
+{{ end }}<start_of_turn>model
+"""

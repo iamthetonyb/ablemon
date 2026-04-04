@@ -4,7 +4,16 @@ Extracted from gateway.py for modularity.
 """
 
 import logging
+import os
 from typing import TYPE_CHECKING
+
+
+def _do_available() -> bool:
+    return bool(os.environ.get("DIGITALOCEAN_API_KEY") or os.environ.get("DO_API_KEY"))
+
+
+def _vercel_available() -> bool:
+    return bool(os.environ.get("VERCEL_TOKEN") or os.environ.get("VERCEL_API_TOKEN"))
 
 if TYPE_CHECKING:
     from able.core.gateway.tool_registry import ToolRegistry, ToolContext
@@ -149,6 +158,7 @@ def register_tools(registry: "ToolRegistry"):
         surface="digitalocean",
         artifact_kind="markdown",
         tags=["infra", "read"],
+        availability_check=_do_available,
     )
     registry.register(
         name="do_create_droplet",
@@ -163,6 +173,7 @@ def register_tools(registry: "ToolRegistry"):
         surface="digitalocean",
         artifact_kind="markdown",
         tags=["infra", "billable"],
+        availability_check=_do_available,
     )
     registry.register(
         name="vercel_deploy",
@@ -177,4 +188,5 @@ def register_tools(registry: "ToolRegistry"):
         surface="vercel",
         artifact_kind="markdown",
         tags=["deploy", "frontend"],
+        availability_check=_vercel_available,
     )

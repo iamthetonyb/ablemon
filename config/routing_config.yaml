@@ -39,41 +39,44 @@ providers:
       reasoning_effort: "xhigh"
       timeout: 180.0
 
-  # ── Tier 1: Fallback — Nemotron on NIM (free) ──────────────────
-  # Shootout: 1/5 (20%) — poor quality but FREE. Used when Nano is down
-  # or for trivial tasks where quality doesn't matter.
-  - name: "nemotron-120b-nim"
+  # ── Tier 1: Fallback — Gemma 4 31B on NIM (free tier) ──────────
+  # Replaces Nemotron 120B which scored 1/5 (20%) in shootout.
+  # Gemma 4 31B: MMLU Pro 85.2%, LiveCodeBench v6 80%, Codeforces ELO 2150 (expert).
+  # Apache 2.0 license. Run eval (able/evals/) against Nemotron first run.
+  # NIM free prototyping tier: build.nvidia.com — no API key cost on free tier.
+  - name: "gemma4-31b-nim"
     tier: 1
     provider_type: "nvidia_nim"
     endpoint: "https://integrate.api.nvidia.com/v1"
-    model_id: "nvidia/nemotron-3-super-120b-a12b"
-    cost_per_m_input: 0.30
-    cost_per_m_output: 0.80
-    max_context: 262144
+    model_id: "google/gemma-4-31b-it"
+    cost_per_m_input: 0.00
+    cost_per_m_output: 0.00
+    max_context: 131072
     supports_tools: true
-    supports_vision: false
+    supports_vision: true
     throughput_tps: 60
     enabled: true
-    fallback_to: "nemotron-120b-openrouter"
+    fallback_to: "gemma4-31b-openrouter"
     api_key_env: "NVIDIA_API_KEY"
 
-  # ── Tier 1: Last resort — Nemotron on OpenRouter (free) ─────────
-  - name: "nemotron-120b-openrouter"
+  # ── Tier 1: Last resort — Gemma 4 31B on OpenRouter (cheap) ────
+  # $0.14/$0.40/M — fallback when NIM free tier is exhausted.
+  - name: "gemma4-31b-openrouter"
     tier: 1
     provider_type: "openrouter"
     endpoint: "https://openrouter.ai/api/v1"
-    model_id: "nvidia/nemotron-3-super-120b-a12b:free"
-    cost_per_m_input: 0.00
-    cost_per_m_output: 0.00
-    max_context: 262144
+    model_id: "google/gemma-4-31b-it"
+    cost_per_m_input: 0.14
+    cost_per_m_output: 0.40
+    max_context: 131072
     supports_tools: true
-    supports_vision: false
+    supports_vision: true
     throughput_tps: 60
     enabled: true
     fallback_to: "gpt-5.4-mini"
     api_key_env: "OPENROUTER_API_KEY"
     extra:
-      timeout: 600.0
+      timeout: 120.0
 
   # ── Tier 2: Primary — GPT 5.4 (ChatGPT Subscription + Reasoning) ─
   # Full GPT 5.4 with reasoning.effort=high for deep thinking.
@@ -97,9 +100,30 @@ providers:
       reasoning_effort: "xhigh"
       timeout: 180.0
 
-  # ── Tier 2: Fallback — MiMo-V2-Pro ─────────────────────────────
+  # ── Tier 2: Fallback A — Gemma 4 26B A4B on OpenRouter ─────────
+  # MoE: 25.2B total, 3.8B active — very fast, $0.13/$0.40/M.
+  # 8x cheaper than MiMo. 256K context. Apache 2.0. Run shootout before
+  # using as primary T2 fallback vs MiMo.
+  - name: "gemma4-26b-openrouter"
+    tier: 2
+    provider_type: "openrouter"
+    endpoint: "https://openrouter.ai/api/v1"
+    model_id: "google/gemma-4-27b-it"
+    cost_per_m_input: 0.13
+    cost_per_m_output: 0.40
+    max_context: 262144
+    supports_tools: true
+    supports_vision: true
+    throughput_tps: 80
+    enabled: true
+    fallback_to: "mimo-v2-pro"
+    api_key_env: "OPENROUTER_API_KEY"
+    extra:
+      timeout: 120.0
+
+  # ── Tier 2: Fallback B — MiMo-V2-Pro ────────────────────────────
   # Shootout: 5/5 (100%) at $1/$3, avg 1392ms
-  # Same quality as Mini but 4x slower. Good backup.
+  # Same quality as Mini but 4x slower. Good backup, kept as secondary.
   # Inherent reasoning model — always uses <think> blocks, no config needed.
   - name: "mimo-v2-pro"
     tier: 2
@@ -183,21 +207,27 @@ providers:
       thinking_budget_tokens: 16000
       timeout: 300.0
 
-  # ── Tier 5: Ollama (Server) — Qwen 3.5 27B UD-Q4_K_XL ──────────
-  # Unsloth Dynamic 2.0 quant — measurably better accuracy than standard Q4.
-  # 17.6GB VRAM. Distillation base model for custom T1 fine-tuning.
-  # Setup: ollama create qwen3.5-27b-ud -f config/ollama/Modelfile.27b
+  # ── Tier 5: Ollama (Server) — Gemma 4 31B UD-Q4_K_XL ───────────
+  # Upgraded from Qwen 3.5 27B. Gemma 4 31B benchmarks higher on reasoning
+  # and coding (the dominant T5 use cases). Apache 2.0, day-0 Ollama support.
+  # Unsloth Dynamic 2.0: 18.8GB VRAM (vs Qwen's 17.6GB — negligible delta).
+  # Fine-tuning: same Unsloth Dynamic pipeline, drop-in format.
+  # Setup:
+  #   ollama pull gemma4:31b                               (direct pull)
+  #   -- OR for fine-tuned GGUF --
+  #   huggingface-cli download unsloth/gemma-4-31B-it-GGUF gemma-4-31B-it-UD-Q4_K_XL.gguf --local-dir ./models
+  #   ollama create gemma4-31b-ud -f config/ollama/Modelfile.gemma4-31b
   - name: "ollama-local"
     tier: 5
     provider_type: "ollama"
     endpoint: "http://localhost:11434"
-    model_id: "qwen3.5-27b-ud"
+    model_id: "gemma4:31b"
     cost_per_m_input: 0.00
     cost_per_m_output: 0.00
     max_context: 131072
     supports_tools: true
-    supports_vision: false
-    throughput_tps: 25
+    supports_vision: true
+    throughput_tps: 22
     enabled: true
     fallback_to: "ollama-edge"
 
