@@ -1188,8 +1188,20 @@ async def run_chat(args: argparse.Namespace) -> int:
     try:
         while True:
             try:
-                # Stop the shimmer animation before first prompt so cursor is clean
+                # Stop shimmer animation before first prompt.
+                # Critical: we must yield the event loop so the animation
+                # thread (which sleeps 50ms between frames) can actually run.
+                # The natural yield is awaiting the gateway task — animation
+                # plays as a loading indicator while the gateway initialises
+                # (~600ms).  asyncio.shield keeps the task alive if we timeout.
                 if _stop_anim is not None:
+                    if _gateway_task is not None and not _gateway_task.done():
+                        try:
+                            await asyncio.wait_for(
+                                asyncio.shield(_gateway_task), timeout=3.0
+                            )
+                        except (asyncio.TimeoutError, Exception):
+                            pass
                     _stop_anim()
                     _stop_anim = None
                     print(f"    {_c(DIM, '/help for commands')}\n")
