@@ -1062,6 +1062,7 @@ async def run_chat(args: argparse.Namespace) -> int:
         render_backpack, render_banner, render_header, render_full, render_starter_selection,
         render_battle_result, render_evolution, render_legendary_unlock,
         play_level_up_sound, force_colors as _force_renderer_colors,
+        animate_startup_header,
     )
     # Explicitly sync renderer color mode with chat.py's reliable detection.
     # This sidesteps any asyncio/import-timing issues with isatty() in renderer.
@@ -1098,11 +1099,11 @@ async def run_chat(args: argparse.Namespace) -> int:
             needs = buddy.get_needs()
             print(f"  {buddy.display_emoji} {buddy.name}: \"{needs.mood_message}\"")
 
-    # Print full header immediately at startup.
+    # Print animated boot header immediately at startup.
     # provider_count=0 renders "connecting…" until gateway is ready.
     print()
     if buddy:
-        print(render_header(buddy, 0))
+        animate_startup_header(buddy, 0)
     else:
         print(f"    {_c(BOLD, 'ABLE')} {_c(DIM, '· starting…')}")
     print(f"    {_c(DIM, '/help for commands')}\n")

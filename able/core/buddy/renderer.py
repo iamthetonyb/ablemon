@@ -19,6 +19,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 from .model import (
     BuddyState,
@@ -144,12 +145,36 @@ def play_legendary_sound() -> None:
 
 # ── Bar renderers ─────────────────────────────────────────────────────────────
 
-def _progress_bar(pct: float, width: int = 12) -> str:
+# 6-stop gold shimmer palette (256-color xterm codes) — used by both the
+# XP bar and the ABLE title animation.
+_SHIMMER_STOPS = [
+    "\033[38;5;136m",   # dark amber
+    "\033[38;5;172m",   # amber-gold
+    "\033[38;5;178m",   # warm gold
+    "\033[38;5;220m",   # bright gold
+    "\033[38;5;226m",   # near-white gold
+    "\033[38;5;220m",   # bright gold (mirror)
+    "\033[38;5;178m",   # warm gold (mirror)
+    "\033[38;5;172m",   # amber-gold (mirror)
+]
+_N_STOPS = len(_SHIMMER_STOPS)
+
+
+def _progress_bar(pct: float, width: int = 12, offset: int = 0) -> str:
+    """XP bar with a cycling shimmer wave across the filled blocks.
+
+    offset shifts the colour pattern so the animation loop can call this
+    with incrementing offsets to produce a left-to-right sweep.
+    """
     filled = int(pct / 100 * width)
     empty  = width - filled
-    if _COLORS_ON:
-        return f"[{_GOLD}{'█' * filled}{_RESET}{_DIM}{'░' * empty}{_RESET}]"
-    return f"[{'█' * filled}{'░' * empty}]"
+    if not _COLORS_ON:
+        return f"[{'█' * filled}{'░' * empty}]"
+    filled_str = "".join(
+        f"{_SHIMMER_STOPS[(offset + i) % _N_STOPS]}█"
+        for i in range(filled)
+    )
+    return f"[{filled_str}{_RESET}{_DIM}{'░' * empty}{_RESET}]"
 
 
 def _need_bar(value: float, width: int = 8) -> str:
@@ -168,29 +193,18 @@ def _need_bar(value: float, width: int = 8) -> str:
 
 # ── Text effects ─────────────────────────────────────────────────────────────
 
-def _shimmer_able(text: str = "ABLE") -> str:
-    """Per-character 256-color gold gradient shimmer.
+def _shimmer_able(text: str = "ABLE", offset: int = 0) -> str:
+    """Per-character 256-color gold gradient — uses shared _SHIMMER_STOPS palette.
 
-    Uses xterm-256 codes (\033[38;5;Nm) — supported by every modern terminal
-    that handles color at all.  Each letter steps through dark-amber → bright-gold
-    giving the left-to-right shimmer effect.
+    offset shifts which stop each character lands on, so the animation loop
+    can call this with incrementing offsets to produce a rolling shimmer sweep
+    across the title letters.
     """
     if not _COLORS_ON:
         return text
-    # 256-color gold sweep: dark amber → orange-gold → gold → bright yellow
-    sweep = [
-        "\033[38;5;136m",   # dark amber-gold
-        "\033[38;5;178m",   # warm gold
-        "\033[38;5;220m",   # bright gold
-        "\033[38;5;226m",   # near-white gold
-        "\033[38;5;220m",   # bright gold (mirror back)
-        "\033[38;5;178m",   # warm gold
-        "\033[38;5;136m",   # dark amber-gold
-    ]
-    n = len(sweep)
     result = _BOLD
     for i, ch in enumerate(text):
-        result += f"{sweep[i % n]}{ch}"
+        result += f"{_SHIMMER_STOPS[(offset + i) % _N_STOPS]}{ch}"
     result += _RESET
     return result
 
@@ -234,11 +248,13 @@ def render_banner(buddy: BuddyState) -> str:
     )
 
 
-def render_header(buddy: BuddyState, provider_count: int) -> str:
+def render_header(buddy: BuddyState, provider_count: int, _offset: int = 0) -> str:
     """Startup header — colored ASCII art left, buddy stats right.
 
     Uses standard 16-color ANSI for maximum terminal compatibility.
     provider_count=0 → shows 'connecting…' while gateway initialises.
+    _offset shifts the shimmer gradient phase — increment it each frame
+    to animate the gold sweep across the title and XP bar.
     """
     meta    = buddy.meta
     art_key = f"art_stage{buddy.stage}"
@@ -250,11 +266,11 @@ def render_header(buddy: BuddyState, provider_count: int) -> str:
     needs      = buddy.get_needs()
     mood_icon  = {"thriving": "✨", "content": "✔️", "hungry": "⚠️", "neglected": "❗"}.get(needs.mood, "•")
     stage_name = STAGE_NAMES[buddy.stage_enum]
-    xp_bar     = _progress_bar(buddy.xp_progress_pct, 10)
+    xp_bar     = _progress_bar(buddy.xp_progress_pct, 10, _offset)
     rarity     = f" · {buddy.rarity_label}" if buddy.rarity_label != "Standard" else ""
 
-    # Title: per-character shimmer gradient
-    title = _shimmer_able("ABLE")
+    # Title: per-character shimmer gradient — offset animates the sweep
+    title = _shimmer_able("ABLE", _offset)
 
     # Name colored by species
     name_str = _c(_species_art_color(buddy.species) + _BOLD, buddy.name) if _COLORS_ON else buddy.name
@@ -265,12 +281,12 @@ def render_header(buddy: BuddyState, provider_count: int) -> str:
     else:
         prov_str = _c(_DIM, "connecting…") if _COLORS_ON else "connecting…"
 
-    # Note: space after each emoji — they render 2 columns wide
+    # ❤️ is 2 columns wide → 2 spaces after; 💧 and ⚡ are single-width → no extra space
     info = [
         title,
         f"{buddy.display_emoji} {name_str} the {meta['label']}  Lv.{buddy.level}  {xp_bar}{rarity}",
         f"{stage_name} · {mood_icon} {needs.mood.title()} · {prov_str}",
-        f"❤️ {needs.hunger:.0f}  💧 {needs.thirst:.0f}  ⚡ {needs.energy:.0f}"
+        f"❤️  {needs.hunger:.0f}  💧{needs.thirst:.0f}  ⚡{needs.energy:.0f}"
         f"  ·  Wins {buddy.battles_won}  Draws {buddy.battles_drawn}  Losses {buddy.battles_lost}",
     ]
 
@@ -293,6 +309,43 @@ def render_header(buddy: BuddyState, provider_count: int) -> str:
         lines.append(f"{indent}{' ' * art_width}{gap}\"{buddy.catch_phrase}\"")
 
     return "\n".join(lines)
+
+
+def animate_startup_header(
+    buddy: BuddyState,
+    provider_count: int,
+    frames: int = 20,
+    fps: float = 20.0,
+) -> None:
+    """Boot animation — continuously shifts the shimmer offset to produce a
+    rolling gold sweep across the ABLE title letters and XP bar.
+
+    Prints the first frame, then uses ANSI cursor-up to overwrite the same
+    screen region on every subsequent frame.  When colors are disabled the
+    header is printed once (no animation).
+
+    After the function returns the cursor is positioned immediately below the
+    last frame so callers can print the '/help for commands' line normally.
+    """
+    first = render_header(buddy, provider_count, 0)
+    n_lines = first.count("\n") + 1
+
+    print(first)
+    sys.stdout.flush()
+
+    if not _COLORS_ON:
+        return
+
+    frame_delay = 1.0 / fps
+    for frame in range(1, frames):
+        time.sleep(frame_delay)
+        offset = frame * 2          # advance 2 palette stops per frame
+        new_frame = render_header(buddy, provider_count, offset)
+        # Cursor up n_lines, then reprint
+        sys.stdout.write(f"\033[{n_lines}A\r")
+        sys.stdout.flush()
+        print(new_frame)
+        sys.stdout.flush()
 
 
 def render_full(buddy: BuddyState, stats: BuddyStats | None = None) -> str:
