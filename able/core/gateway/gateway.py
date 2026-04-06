@@ -2657,10 +2657,14 @@ class ABLEGateway:
                         text=text,
                     )
 
+        # Initialize audit log for cron and system event tracking
+        from able.audit.logs.audit_log import AuditLog as _CronAuditLog
+        _audit_log_instance = _CronAuditLog()
+
         register_default_jobs(
             self.scheduler,
             memory=self.memory,
-            audit_log=None,
+            audit_log=_audit_log_instance,
             send_telegram=_send_telegram,
             provider_chain=self.tier_chains.get(1, self.provider_chain),  # T1 as cheap judge
             interaction_logger=self.interaction_logger,

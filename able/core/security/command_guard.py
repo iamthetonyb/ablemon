@@ -144,6 +144,51 @@ ALWAYS_DENIED = {
 class CommandGuard:
     def __init__(self, trust_tier: int = 1):
         self.trust_tier = trust_tier  # 1-4, higher = more permissions
+        self._yaml_permissions = self._load_yaml_permissions()
+
+    @staticmethod
+    def _load_yaml_permissions() -> Optional[dict]:
+        """Load tool_permissions.yaml if available. Falls back to hardcoded defaults."""
+        yaml_path = Path(__file__).parent.parent.parent.parent / "config" / "tool_permissions.yaml"
+        if not yaml_path.exists():
+            return None
+        try:
+            import yaml
+            with open(yaml_path) as f:
+                data = yaml.safe_load(f)
+            if not isinstance(data, dict):
+                return None
+            return data
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning(
+                "tool_permissions.yaml is invalid — using hardcoded defaults"
+            )
+            return None
+
+    def _yaml_verdict(self, command: str) -> Optional[CommandVerdict]:
+        """Check YAML permissions first. Returns verdict or None to fall through."""
+        if not self._yaml_permissions:
+            return None
+
+        cmd_lower = command.lower().strip()
+
+        # Check never_allow first
+        for pattern in self._yaml_permissions.get("never_allow", []):
+            if cmd_lower == pattern or cmd_lower.startswith(pattern + " "):
+                return CommandVerdict.DENIED
+
+        # Check always_allow
+        for pattern in self._yaml_permissions.get("always_allow", []):
+            if cmd_lower == pattern or cmd_lower.startswith(pattern + " "):
+                return CommandVerdict.ALLOWED
+
+        # Check ask_before
+        for pattern in self._yaml_permissions.get("ask_before", []):
+            if cmd_lower == pattern or cmd_lower.startswith(pattern + " "):
+                return CommandVerdict.REQUIRES_APPROVAL
+
+        return None  # Fall through to hardcoded rules
 
     def _parse_command(self, command: str) -> Tuple[str, List[str], List[str]]:
         """Parse command into base command and arguments.
@@ -327,6 +372,20 @@ class CommandGuard:
         base_cmd, args, argv = self._parse_command(command)
         uses_shell_syntax, shell_reason, shell_is_denied = self._detect_shell_syntax(command)
 
+        # YAML never_allow checked first (hard deny always wins)
+        yaml_verdict = self._yaml_verdict(command)
+        if yaml_verdict == CommandVerdict.DENIED:
+            return CommandAnalysis(
+                verdict=CommandVerdict.DENIED,
+                command=command,
+                base_command=base_cmd,
+                parsed_args=args,
+                parsed_argv=argv,
+                reason="YAML policy: denied",
+                risk_level=9,
+                uses_shell_syntax=uses_shell_syntax,
+            )
+
         # DoS protection: cap subcommand count (ported from Claude Code)
         subcommands = re.split(r"\s*(?:&&|\|\||;|\|)\s*", command)
         if len(subcommands) > MAX_SUBCOMMANDS:
@@ -365,6 +424,19 @@ class CommandGuard:
                 parsed_argv=argv,
                 reason=shell_reason,
                 risk_level=8 if shell_is_denied else 6,
+                uses_shell_syntax=uses_shell_syntax,
+            )
+
+        # YAML allow/ask_before (checked after dangerous patterns/shell syntax)
+        if yaml_verdict is not None:
+            return CommandAnalysis(
+                verdict=yaml_verdict,
+                command=command,
+                base_command=base_cmd,
+                parsed_args=args,
+                parsed_argv=argv,
+                reason=f"YAML policy: {yaml_verdict.value}",
+                risk_level={"allowed": 1, "requires_approval": 5}.get(yaml_verdict.value, 5),
                 uses_shell_syntax=uses_shell_syntax,
             )
 

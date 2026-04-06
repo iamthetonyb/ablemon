@@ -340,3 +340,66 @@ class ProviderRegistry:
                 logger.warning(f"Failed to init {tc.name} for tier {tier} chain: {e}")
 
         return ProviderChain(providers)
+
+    async def smoke_test_providers(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Canary/smoke test: verify each provider's credentials actually work.
+
+        Sends a minimal "Reply with exactly ABLE_OK" prompt to each provider.
+        Returns a status dict per provider.
+
+        Inspired by OpenClaw's provider verification pattern — catches auth
+        failures, quota exhaustion, and network issues before real requests.
+        """
+        results = {}
+        _CANARY = "Reply with exactly: ABLE_OK"
+
+        for config in self.available_providers:
+            if config.tier == 3:
+                continue  # Skip background-only (M2.7)
+
+            status: Dict[str, Any] = {
+                "tier": config.tier,
+                "model": config.model_id,
+                "healthy": False,
+                "latency_ms": 0,
+                "error": None,
+            }
+
+            try:
+                import time
+                provider = self._instantiate_provider(config)
+                if not provider:
+                    status["error"] = "Failed to instantiate"
+                    results[config.name] = status
+                    continue
+
+                t0 = time.time()
+                result = await provider.complete(
+                    prompt=_CANARY,
+                    system="You are a health check responder.",
+                    max_tokens=10,
+                )
+                latency = (time.time() - t0) * 1000
+
+                if result and hasattr(result, "content") and result.content:
+                    status["healthy"] = "ABLE_OK" in result.content
+                    if not status["healthy"]:
+                        status["error"] = f"Unexpected response: {result.content[:50]}"
+                else:
+                    status["error"] = "Empty response"
+                status["latency_ms"] = round(latency, 1)
+
+            except Exception as e:
+                status["error"] = str(e)[:100]
+
+            results[config.name] = status
+            logger.info(
+                "Smoke test %s (T%d): %s (%.0fms)",
+                config.name,
+                config.tier,
+                "PASS" if status["healthy"] else f"FAIL: {status['error']}",
+                status["latency_ms"],
+            )
+
+        return results

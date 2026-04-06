@@ -142,6 +142,74 @@ Claude and other models emit synthetic declarations that never run — those are
 - Ollama: real token logprobs via `/api/generate?logprobs=true`
 - All others: calibrated proxy (reasoning depth + response calibration + audit signal + guidance)
 
+## Observability (Phoenix + TriliumNext)
+
+### Phoenix (OpenTelemetry Tracing)
+- Docker service in `observability` profile — `http://localhost:6006`
+- Auto-instruments all LLM calls, routing decisions, tool executions
+- Historical replay via `able/core/observability/phoenix_replay.py` — **idempotent** (state tracked in `data/.phoenix_replay_state.json`)
+- Run: `python -m able.core.observability.phoenix_replay` (add `--force` to re-send, `--clear-project` to wipe)
+
+### TriliumNext (Knowledge Base)
+- Docker service in `observability` profile — `http://localhost:8081`
+- ETAPI client: `able/tools/trilium/client.py` (httpx-based, follows MCPBridge pattern)
+- Wiki skill: `able/tools/trilium/wiki_skill.py` — `/wiki <topic>`, `/wiki add`, `/wiki recent`, `/wiki clips`
+- Historical upload: `able/tools/trilium/historic_upload.py` — uploads architecture docs, provider configs, skill registry, evolution history
+- Research ingestion: `wiki_ingest_research()` creates per-finding notes with cross-references + web clipper relation linking
+- Config: `TRILIUM_URL`, `TRILIUM_ETAPI_TOKEN` in `.env`
+
+## CVC Context Management
+
+### Context Compaction (`able/core/session/context_compactor.py`)
+- At 80% context window: summarizes oldest 60% via T1, replaces with `[CONTEXT SUMMARY]`
+- Wire into orchestrator before plan step
+
+### Session Versioning (`able/core/session/context_versioning.py`)
+- Merkle DAG snapshots — SHA-256 of serialized messages stored in `context_snapshots` table
+- Auto-snapshot at decision boundaries (before tool calls, routing escalations)
+- `save_snapshot()` / `rollback()` for branch-on-escalation pattern
+
+## Security Additions
+
+### Egress Inspector (`able/core/security/egress_inspector.py`)
+- Pre-hook before `CommandGuard.analyze()` in secure shell
+- Extracts URLs, S3/GCS paths, git remotes, IPs via regex
+- Returns `EgressVerdict` with destinations, risk_level, requires_approval
+
+### YAML Tool Permissions (`config/tool_permissions.yaml`)
+- Three sections: `always_allow`, `ask_before`, `never_allow`
+- CommandGuard loads from YAML — hardcoded values become fallback defaults
+
+### Provider Smoke Test
+- `ProviderRegistry.smoke_test_providers()` — canary "Reply with ABLE_OK" to each provider
+- Catches auth failures, quota exhaustion, network issues before real requests
+
+## Codex Cross-Audit (`able/tools/codex_audit.py`)
+
+- Three-layer fallback: codex CLI → claude CLI → rule-based static analysis
+- Rule-based always runs as supplement — merges findings across layers
+- Pre-deploy gate via `/ship` skill
+- Standalone: `python -m able.tools.codex_audit`
+
+## Cumulative Research (Karpathy LLM Wiki Pattern)
+
+`able/core/evolution/weekly_research.py` uses 6-phase query generation:
+1. **Follow-up** — queries from past high-value findings
+2. **Open questions** — from M2.7 analysis gaps
+3. **Stale rotation** — staleness-sorted topic refresh
+4. **Goal-aware** — from `current_objectives.yaml`
+5. **System evolution** — auto-discovers providers, skills, modules from config/code
+6. **Growth** — mines learnings + audit failures for improvement areas
+
+Research is cumulative: loads past 10 reports, extracts explored topics, deduplicates, builds on high-value threads.
+
+## Interaction Auditor Enhancements
+
+`able/core/distillation/interaction_auditor.py` judge prompt includes:
+- **Adversarial probes**: answering unasked questions, claiming unverifiable capabilities, verbosity, promises, edge cases
+- **Before-FAIL checklist**: handled elsewhere? intentional? model tier limitation?
+- **Structured VERDICT**: PASS/FAIL/PARTIAL with reasoning
+
 ## Skill routing
 
 When the user's request matches an available skill, ALWAYS invoke it using the Skill
@@ -161,3 +229,4 @@ Key routing rules:
 - Architecture review → invoke plan-eng-review
 - Save progress, checkpoint, resume → invoke checkpoint
 - Code quality, health check → invoke health
+- Wiki, knowledge base, look up notes → invoke wiki skill

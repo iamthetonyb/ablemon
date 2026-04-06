@@ -30,8 +30,27 @@ cd able && bash deploy.sh
 - [ ] All changes committed and pushed
 - [ ] No failing tests
 - [ ] Security scan clean
+- [ ] **Codex cross-audit PASS** (run below)
 - [ ] Environment variables set on server (`.secrets/`)
 - [ ] `requirements.txt` up to date if deps changed
+
+### Codex Cross-Audit (Pre-Merge Gate)
+Before deploying, run an independent code audit on the diff:
+```bash
+python3 -m able.tools.codex_audit HEAD~1..HEAD
+```
+Or from Python:
+```python
+from able.tools.codex_audit import audit_diff
+result = await audit_diff(commit_range="HEAD~5..HEAD")
+if result.verdict == "FAIL":
+    print(f"BLOCKED: {result.critical_count} critical findings")
+    for f in result.findings:
+        print(f"  [{f.severity}] {f.description}")
+```
+- **PASS**: proceed to deploy
+- **PARTIAL**: review warnings, deploy at discretion
+- **FAIL**: fix critical findings before deploying
 
 ## Post-Deploy Verification
 1. Check GitHub Actions: `gh run list --limit 1`

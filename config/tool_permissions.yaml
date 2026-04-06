@@ -1,0 +1,188 @@
+# ABLE Tool Permissions
+# Goose-inspired 3-tier permission system for shell commands.
+#
+# This file supplements (does not replace) the hardcoded allowlist in
+# command_guard.py.  YAML rules are checked FIRST — if a command matches
+# here, the hardcoded defaults are skipped.  This lets you loosen or
+# tighten permissions without code changes or restarts.
+#
+# Patterns use fnmatch-style globs:  *  ?  [seq]  [!seq]
+# Subcommand matching:  "git push" matches "git push origin main"
+#
+# Changes take effect on next CommandGuard instantiation (gateway restart
+# or hot-reload).  The file is validated on load — syntax errors fall
+# back to hardcoded defaults with a warning.
+
+# ── Always allow (no approval needed) ────────────────────────────────
+always_allow:
+  # Read-only filesystem
+  - ls
+  - cat
+  - head
+  - tail
+  - grep
+  - rg
+  - find
+  - wc
+  - sort
+  - uniq
+  - cut
+  - diff
+  - echo
+  - pwd
+  - whoami
+  - date
+  - which
+  - type
+  - file
+  - tree
+  - du
+  - df
+  - stat
+
+  # Git (read-only)
+  - "git status"
+  - "git log"
+  - "git diff"
+  - "git branch"
+  - "git show"
+  - "git ls-files"
+  - "git remote"
+  - "git fetch"
+  - "git stash list"
+
+  # Python/Node read-only
+  - "pip list"
+  - "pip show"
+  - "pip freeze"
+  - "npm list"
+  - "npm ls"
+  - "npm view"
+  - "npm outdated"
+
+  # Docker inspect (read-only)
+  - "docker ps"
+  - "docker images"
+  - "docker logs"
+  - "docker inspect"
+  - "docker compose ps"
+  - "docker compose logs"
+
+  # Ollama (local model management)
+  - "ollama list"
+  - "ollama show"
+  - "ollama ps"
+
+# ── Ask before executing (requires approval callback) ────────────────
+ask_before:
+  # File modification
+  - mkdir
+  - touch
+  - cp
+  - mv
+  - tee
+
+  # Package installation
+  - "pip install"
+  - "npm install"
+  - "npm ci"
+  - "cargo install"
+
+  # Git writes
+  - "git commit"
+  - "git push"
+  - "git merge"
+  - "git rebase"
+  - "git reset"
+  - "git checkout"
+  - "git stash"
+  - "git tag"
+
+  # Container operations
+  - "docker run"
+  - "docker build"
+  - "docker compose up"
+  - "docker compose down"
+  - "docker compose restart"
+
+  # Python/Node execution
+  - python
+  - python3
+  - node
+
+  # Network (controlled)
+  - curl
+  - wget
+  - http
+
+  # Ollama model management
+  - "ollama pull"
+  - "ollama create"
+  - "ollama run"
+
+  # Process management
+  - "brew install"
+  - "brew upgrade"
+
+# ── Never allow (always denied, no override) ─────────────────────────
+never_allow:
+  # Deletion
+  - rm
+  - rmdir
+  - "rm -rf"
+
+  # Privilege escalation
+  - sudo
+  - su
+  - doas
+
+  # Permission changes
+  - chmod
+  - chown
+  - chgrp
+
+  # Dangerous network tools
+  - nc
+  - netcat
+  - ncat
+  - socat
+  - telnet
+
+  # Remote access
+  - ssh
+  - scp
+  - sftp
+  - ftp
+
+  # Process/system control
+  - kill
+  - killall
+  - pkill
+  - shutdown
+  - reboot
+  - halt
+
+  # Disk operations
+  - dd
+  - mkfs
+  - fdisk
+  - parted
+
+  # Firewall
+  - iptables
+  - ufw
+  - firewall-cmd
+
+  # Scheduled tasks (use ABLE's cron instead)
+  - crontab
+
+  # Dynamic execution
+  - eval
+  - exec
+  - source
+
+  # Force operations
+  - "git push --force"
+  - "git push -f"
+  - "git reset --hard"
+  - "docker system prune"

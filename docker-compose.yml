@@ -36,6 +36,9 @@ services:
       # Phoenix — set automatically when running with --profile observability.
       # Override to point at a remote Phoenix instance.
       - PHOENIX_COLLECTOR_ENDPOINT=${PHOENIX_COLLECTOR_ENDPOINT:-http://phoenix:6006/v1/traces}
+      # TriliumNext — knowledge base ETAPI access
+      - TRILIUM_URL=${TRILIUM_URL:-http://trilium:8080}
+      - TRILIUM_ETAPI_TOKEN=${TRILIUM_ETAPI_TOKEN:-}
     volumes:
       # Persistent state (buddy, memory, sessions, distillation corpus)
       - able_data:/home/able/.able
@@ -84,7 +87,37 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # ── TriliumNext — Persistent Knowledge Base ─────────────────────────────────
+  # ETAPI docs: https://triliumnext.github.io/Docs/Wiki/etapi.html
+  # Browse / edit notes at:  http://localhost:8081
+  # Web Clipper, relation maps, code notes, custom attributes all available.
+  #
+  # Start with:  docker compose --profile observability up -d
+  trilium:
+    image: triliumnext/notes:latest
+    container_name: able-trilium
+    profiles: [observability]
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    environment:
+      - TRILIUM_DATA_DIR=/home/node/trilium-data
+    volumes:
+      - trilium_data:/home/node/trilium-data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health-check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   able_data:
   able_db:
   phoenix_data:
+  trilium_data:

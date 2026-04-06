@@ -527,7 +527,12 @@ class DuckDuckGoSearch:
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
+            import ssl
+            import certifi
+            ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+            connector = _require_aiohttp().TCPConnector(ssl=ssl_ctx)
             self._session = _require_aiohttp().ClientSession(
+                connector=connector,
                 headers={
                     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                                   "AppleWebKit/537.36 (KHTML, like Gecko) "

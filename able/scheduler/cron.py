@@ -471,6 +471,8 @@ class CronScheduler:
 
     async def _run_job(self, job: CronJob, trigger: str = "scheduled", attempt: int = 1) -> JobResult:
         """Execute a single job with timeout, persistence, and audit logging."""
+        from able.core.observability.tracer import trace_operation
+
         start = time.time()
         job.last_run = start
         job.run_count += 1
@@ -486,31 +488,50 @@ class CronScheduler:
         self.db.record_start(result)
         logger.info(f"⏰ Running job: {job.name} [trigger={trigger}, attempt={attempt}]")
 
-        try:
-            output = await asyncio.wait_for(
-                job.task(**job.args),
-                timeout=job.timeout_seconds,
-            )
+        with trace_operation(
+            f"cron.{job.name}",
+            attributes={
+                "cron.job_name": job.name,
+                "cron.trigger": trigger,
+                "cron.attempt": attempt,
+                "cron.schedule": job.schedule,
+                "cron.timeout_seconds": job.timeout_seconds,
+                "cron.run_count": job.run_count,
+            },
+            tracer_name="able.cron",
+        ) as span:
+            try:
+                output = await asyncio.wait_for(
+                    job.task(**job.args),
+                    timeout=job.timeout_seconds,
+                )
 
-            result.duration_s = time.time() - start
-            result.success = True
-            result.output = output
-            job.last_status = "success"
-            logger.info(f"✅ Job '{job.name}' completed in {result.duration_s:.1f}s")
+                result.duration_s = time.time() - start
+                result.success = True
+                result.output = output
+                job.last_status = "success"
+                span.set_attribute("cron.success", True)
+                span.set_attribute("cron.duration_s", result.duration_s)
+                span.set_attribute("cron.output_preview", str(output)[:300])
+                logger.info(f"✅ Job '{job.name}' completed in {result.duration_s:.1f}s")
 
-        except asyncio.TimeoutError:
-            result.duration_s = time.time() - start
-            result.error = f"Timed out after {job.timeout_seconds}s"
-            job.last_status = "timeout"
-            job.error_count += 1
-            logger.warning(f"⏱ Job '{job.name}' timed out after {job.timeout_seconds}s")
+            except asyncio.TimeoutError:
+                result.duration_s = time.time() - start
+                result.error = f"Timed out after {job.timeout_seconds}s"
+                job.last_status = "timeout"
+                job.error_count += 1
+                span.set_attribute("cron.success", False)
+                span.set_attribute("cron.error", result.error)
+                logger.warning(f"⏱ Job '{job.name}' timed out after {job.timeout_seconds}s")
 
-        except Exception as e:
-            result.duration_s = time.time() - start
-            result.error = str(e)
-            job.last_status = "failed"
-            job.error_count += 1
-            logger.error(f"❌ Job '{job.name}' failed: {e}")
+            except Exception as e:
+                result.duration_s = time.time() - start
+                result.error = str(e)
+                job.last_status = "failed"
+                job.error_count += 1
+                span.set_attribute("cron.success", False)
+                span.set_attribute("cron.error", str(e)[:500])
+                logger.error(f"❌ Job '{job.name}' failed: {e}")
 
         # Persist result AFTER execution (before any delivery)
         self.db.record_finish(result)
@@ -578,9 +599,11 @@ def register_default_jobs(
     """Register all default ABLE maintenance jobs."""
 
     async def consolidate_memory():
-        if memory:
-            logger.info("Running memory consolidation...")
-            return "Memory consolidated"
+        if not memory:
+            logger.info("Memory consolidation skipped: memory engine not initialized")
+            return {"skipped": True, "reason": "memory engine not initialized"}
+        logger.info("Running memory consolidation...")
+        return "Memory consolidated"
 
     scheduler.add_job(
         "memory-consolidation",
@@ -590,9 +613,11 @@ def register_default_jobs(
     )
 
     async def billing_summary():
-        if billing:
-            logger.info("Generating weekly billing summary...")
-            return "Billing summary generated"
+        if not billing:
+            logger.info("Billing summary skipped: billing engine not initialized")
+            return {"skipped": True, "reason": "billing engine not initialized"}
+        logger.info("Generating weekly billing summary...")
+        return "Billing summary generated"
 
     scheduler.add_job(
         "weekly-billing-summary",
@@ -615,9 +640,11 @@ def register_default_jobs(
     )
 
     async def rotate_audit_log():
-        if audit_log:
-            logger.info("Rotating audit logs...")
-            return "Audit logs rotated"
+        if not audit_log:
+            logger.info("Audit log rotation skipped: audit_log not initialized")
+            return {"skipped": True, "reason": "audit_log not initialized"}
+        logger.info("Rotating audit logs...")
+        return "Audit logs rotated"
 
     scheduler.add_job(
         "audit-log-rotation",
@@ -1172,4 +1199,88 @@ def register_default_jobs(
         description="Evaluate full conversation chains, build multi-turn DPO pairs",
         timeout=240.0,
         max_retries=2,
+    )
+
+    # ── Batch trajectory generator — Sunday 4am weekly ─────────
+    # Auto-improvement loop:
+    #   1. Query interaction_log for domains with low average audit score
+    #   2. Run targeted batch generation in those weak domains (2x prompts)
+    #   3. Run standard Codex prompt set for remaining domains
+    #   4. New pairs feed nightly harvest → DPO builder → fine-tune cycle
+    async def run_batch_trajectories():
+        import sqlite3 as _sqlite3
+        from able.core.distillation.batch_runner import BatchTrajectoryRunner
+
+        # ── Detect weak domains from audit history ───────────────
+        weak_domains: list[str] = []
+        domain_scores: dict[str, float] = {}
+        try:
+            _db = Path("data/interaction_log.db")
+            if _db.exists():
+                _conn = _sqlite3.connect(str(_db))
+                _rows = _conn.execute(
+                    """
+                    SELECT domain, AVG(audit_score) AS avg_score, COUNT(*) AS n
+                    FROM interaction_log
+                    WHERE audit_score IS NOT NULL AND domain != '' AND domain != 'default'
+                    GROUP BY domain
+                    HAVING n >= 5
+                    ORDER BY avg_score ASC
+                    """
+                ).fetchall()
+                _conn.close()
+                for _domain, _avg, _n in _rows:
+                    domain_scores[_domain] = round(_avg, 2)
+                    if _avg < 3.5:
+                        weak_domains.append(_domain)
+                if weak_domains:
+                    logger.info(
+                        "Weak domains detected (avg audit < 3.5): %s — targeting 2x prompts",
+                        weak_domains,
+                    )
+                else:
+                    logger.info("Domain audit scores: %s — all healthy", domain_scores)
+        except Exception as _e:
+            logger.debug("Domain detection skipped: %s", _e)
+
+        runner = BatchTrajectoryRunner(
+            output_path="data/batch_trajectories.jsonl",
+            checkpoint_path="data/batch_runner_checkpoint.json",
+        )
+
+        # Run Codex-style set (always), with weak domains getting 2x representation
+        result = await runner.run_codex_tasks(
+            max_tasks=24, max_concurrent=2, boost_domains=weak_domains
+        )
+        logger.info(
+            "Batch trajectories: %d/%d successful, %d failed → %s | weak_domains=%s",
+            result.successful, result.total, result.failed,
+            result.output_path, weak_domains or "none",
+        )
+
+        if result.successful > 0:
+            try:
+                from able.core.buddy.xp import award_distillation_xp
+                xp = award_distillation_xp(new_pairs=result.successful)
+                if xp:
+                    logger.info("Buddy gained %d XP from batch trajectories", xp)
+            except Exception as bxp_err:
+                logger.debug("Buddy XP skip (batch-trajectories): %s", bxp_err)
+
+        return {
+            "total": result.total,
+            "successful": result.successful,
+            "failed": result.failed,
+            "elapsed_s": result.elapsed_seconds,
+            "weak_domains": weak_domains,
+            "domain_scores": domain_scores,
+        }
+
+    scheduler.add_job(
+        "batch-trajectories",
+        "0 4 * * 0",  # Sunday 4am — after nightly harvest + DPO
+        run_batch_trajectories,
+        description="Synthetic corpus growth — targets weak audit domains, runs Codex prompt set",
+        timeout=1800.0,  # 30 min — 24 prompts × ~45s per provider call
+        max_retries=1,
     )

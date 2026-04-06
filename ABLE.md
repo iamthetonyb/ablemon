@@ -2,7 +2,7 @@
 
 > **READ THIS COMPLETELY ON EVERY SESSION START.**
 > This file defines your identity, operating parameters, and behavioral directives.
-> Last updated: 2026-03-21
+> Last updated: 2026-04-06
 
 ---
 
@@ -241,6 +241,29 @@ python -m able.core.evolution.daemon --once --dry-run # Analyze only
 
 Implementation: `able/core/evolution/`
 
+### Cumulative Research (Karpathy LLM Wiki Pattern)
+
+Weekly auto-research (`able/core/evolution/weekly_research.py`) builds on past findings instead of repeating static queries. 6-phase query generation:
+
+1. **Follow-up** — queries from past high-value findings (relevance ≥ 8)
+2. **Open questions** — gaps identified by M2.7 analysis
+3. **Stale rotation** — topics sorted by staleness, refreshed cyclically
+4. **Goal-aware** — queries derived from `current_objectives.yaml`
+5. **System evolution** — auto-discovers new providers (from `routing_config.yaml`), skills (from `SKILL_INDEX.yaml`), and recently modified modules — researches improvements for each
+6. **Growth** — mines `learnings.md` for error patterns, `interaction_log` for low-scoring domains, recently created skills for optimization opportunities
+
+**Frontier tracking**: Loads past 10 reports, extracts explored topics with timestamps, identifies high-value threads, deduplicates across runs. Research compounds — each cycle starts where the last ended.
+
+**TriliumNext integration**: Findings auto-ingested as structured notes with cross-references. Web clipper articles linked to matching research via `evidencedBy` relations.
+
+### Interaction Auditor Enhancements
+
+Judge prompt (`able/core/distillation/interaction_auditor.py`) includes verification agent adversarial patterns:
+
+- **Adversarial probes**: answering unasked questions, claiming unverifiable capabilities, verbosity, empty promises, edge case handling
+- **Before-FAIL checklist**: handled by another component? intentional behavior? model tier limitation?
+- **Structured VERDICT**: PASS / FAIL / PARTIAL with reasoning
+
 ---
 
 ## EVAL SYSTEM
@@ -318,6 +341,95 @@ ollama create qwen3.5-9b-balanced -f config/ollama/Modelfile.9b-balanced
 - Schedule: weekly/bi-weekly fine-tuning after data accumulation
 - Base models: Qwen 3.5 27B + 9B with Unsloth Dynamic quants
 - Modelfiles: `config/ollama/Modelfile.{27b,9b-edge,9b-balanced}`
+
+---
+
+## OBSERVABILITY & KNOWLEDGE BASE
+
+### Phoenix (OpenTelemetry Tracing)
+
+Docker service in `observability` profile — traces all LLM calls, routing decisions, tool executions.
+
+| Component | Details |
+|-----------|---------|
+| UI | `http://localhost:6006` |
+| Exporter | OTLP/gRPC to `localhost:4317` |
+| Auto-instrumentation | `able/core/observability/instrumentors.py` |
+| Historical replay | `able/core/observability/phoenix_replay.py` |
+| State file | `data/.phoenix_replay_state.json` (idempotent — no duplicate spans) |
+
+```bash
+python -m able.core.observability.phoenix_replay              # Replay new data only
+python -m able.core.observability.phoenix_replay --force       # Re-send everything
+python -m able.core.observability.phoenix_replay --clear-project  # Wipe + replay
+```
+
+### TriliumNext (Knowledge Base — Karpathy LLM Wiki Pattern)
+
+Personal knowledge base for compiled knowledge, research, architecture docs.
+
+| Component | Details |
+|-----------|---------|
+| UI | `http://localhost:8081` |
+| ETAPI client | `able/tools/trilium/client.py` (httpx, async context manager) |
+| Wiki skill | `able/tools/trilium/wiki_skill.py` |
+| Historical upload | `able/tools/trilium/historic_upload.py` |
+| Web clipper | Browser extension clips articles into KB — auto-linked to research |
+| Config | `TRILIUM_URL`, `TRILIUM_ETAPI_TOKEN` in `.env` |
+
+**Wiki commands**: `/wiki <query>`, `/wiki add <title>`, `/wiki recent`, `/wiki clips`
+
+**Research ingestion**: `wiki_ingest_research()` creates structured finding notes with:
+- Per-finding child notes under dated report parent
+- Cross-references via Trilium relations (shared tags → `relatedTo`)
+- Web clipper linking (clips matching research topics → `evidencedBy` relations)
+- Custom attributes: `relevance`, `source`, `tag`, `reportDate`
+
+**Architecture docs in Trilium**: Routing pipeline, security stack, distillation pipeline, evolution daemon, CVC context management, observability stack, full module map.
+
+---
+
+## CVC CONTEXT MANAGEMENT
+
+### Context Compaction (`able/core/session/context_compactor.py`)
+
+Prevents context window overflow in long conversations:
+- Triggers at **80% capacity** of model's context limit
+- Summarizes oldest 60% of messages via T1 (GPT 5.4 Mini, $0)
+- Replaces with `[CONTEXT SUMMARY]` block + continuation signal
+- Preserves system prompt, recent messages, and active tool state
+
+### Session Versioning (`able/core/session/context_versioning.py`)
+
+Merkle DAG snapshots for branch-on-escalation:
+- `save_snapshot(session_id, messages, metadata) → snapshot_hash` (SHA-256)
+- `rollback(session_id, hash) → List[dict]` — restore prior state
+- Auto-snapshots at decision boundaries: before tool calls, routing escalations
+- Failed expensive model call → rollback to cheaper model state
+- Storage: `context_snapshots` table in `sessions.db`
+
+---
+
+## CODEX CROSS-AUDIT
+
+Three-layer code review with merged findings:
+
+| Layer | Tool | Fallback |
+|-------|------|----------|
+| 1 | `codex review` CLI | → Layer 2 |
+| 2 | `claude --print` CLI | → Layer 3 |
+| 3 | Rule-based static analysis | Always runs as supplement |
+
+Rule-based review catches: hardcoded secrets, SQL injection, shell injection, XSS, unsafe eval, TODO/FIXME, debug statements, large functions.
+
+```bash
+python -m able.tools.codex_audit                   # Review latest diff
+python -c "from able.tools.codex_audit import audit_diff; ..."  # Programmatic
+```
+
+Integration: pre-merge gate in `/ship` skill. Codex flags → block merge + surface discrepancies.
+
+Implementation: `able/tools/codex_audit.py`
 
 ---
 
@@ -473,6 +585,30 @@ All messages scored 0.0-1.0 before execution:
 | < 0.4 | REJECT | Block, alert operator |
 
 Implementation: `able/core/security/trust_gate.py`
+
+### Egress Inspector (`able/core/security/egress_inspector.py`)
+
+Pre-hook before `CommandGuard.analyze()` in secure shell:
+- Extracts URLs, S3/GCS paths, git remotes, IPs from commands via regex
+- Returns `EgressVerdict`: destinations, risk_level (1-10), requires_approval
+- Blocks data exfiltration patterns (curl to unknown hosts, piped to bash, etc.)
+
+### YAML Tool Permissions (`config/tool_permissions.yaml`)
+
+Configurable command policy — three sections:
+- `always_allow`: safe read-only commands (ls, cat, git status, etc.)
+- `ask_before`: destructive/network ops (rm -rf, docker, curl, etc.)
+- `never_allow`: blocked patterns (format disk, drop database, etc.)
+
+CommandGuard loads from YAML at init — hardcoded defaults are fallback only.
+
+### Provider Smoke Test
+
+`ProviderRegistry.smoke_test_providers()` — canary verification for all providers:
+- Sends "Reply with exactly: ABLE_OK" to each available provider
+- Returns per-provider: tier, model, healthy boolean, latency_ms, error
+- Catches auth failures, quota exhaustion, network issues before real requests
+- Skips tier 3 (background-only M2.7)
 
 ### Prompt Injection Detection
 
@@ -640,6 +776,10 @@ Weekly self-review: optimize high-use skills, archive zero-use, identify gaps, r
 | `/skill <name>` | Run specific skill |
 | `/clock in/out [client]` | Billing control |
 | `/skills search <topic>` | Search skills.sh |
+| `/wiki <query>` | Search TriliumNext knowledge base |
+| `/wiki add <title>` | Create new note in KB |
+| `/wiki recent` | Recently modified notes |
+| `/wiki clips` | Web clipper imports |
 
 ---
 
@@ -654,6 +794,9 @@ Weekly self-review: optimize high-use skills, archive zero-use, identify gaps, r
 | `TELEGRAM_BOT_TOKEN` | Telegram channel | Primary communication |
 | `ABLE_STUDIO_URL` | Studio dashboard | Default: `http://localhost:3000` |
 | `ABLE_SERVICE_TOKEN` | Studio API auth | Dashboard integration |
+| `TRILIUM_URL` | TriliumNext ETAPI | Default: `http://localhost:8081` |
+| `TRILIUM_ETAPI_TOKEN` | TriliumNext auth | ETAPI token from Trilium settings |
+| `PHOENIX_COLLECTOR_ENDPOINT` | Phoenix OTLP | Default: `http://localhost:4317` |
 
 ---
 
@@ -689,7 +832,9 @@ ABLE/
 │   │   ├── agents/             <- Scanner, Auditor, Executor
 │   │   ├── agi/                <- Goal planner, proactive engine
 │   │   ├── swarm/              <- Agent swarm coordination
-│   │   ├── security/           <- TrustGate, CommandGuard
+│   │   ├── security/           <- TrustGate, CommandGuard, EgressInspector
+│   │   ├── session/            <- Context compactor, session versioning (CVC)
+│   │   ├── observability/      <- Phoenix tracer, replay, instrumentors
 │   │   ├── approval/           <- Human-in-the-loop workflow
 │   │   ├── distillation/        <- Training pipeline, harvesters, corpus builder
 │   │   │   ├── training/       <- GPU budget, Unsloth exporter, model configs
@@ -711,6 +856,8 @@ ABLE/
 │   │   ├── webhooks/           <- Incoming webhook server
 │   │   ├── voice/              <- Whisper transcription
 │   │   ├── mcp/                <- MCP server bridge
+│   │   ├── trilium/            <- TriliumNext ETAPI client, wiki skill, historic upload
+│   │   ├── codex_audit.py      <- Codex cross-audit (3-layer fallback)
 │   │   └── skills_sh/          <- External skill registry
 │   ├── skills/
 │   │   ├── SKILL_INDEX.yaml    <- Skill registry (25+ skills)
@@ -732,7 +879,8 @@ ABLE/
 │   ├── memory.db               <- User facts, preferences
 │   ├── activity.db             <- Task tracking
 │   ├── distillation_*.jsonl    <- H100 training pairs
-│   └── evolution_cycles/       <- Versioned weight backups
+│   ├── evolution_cycles/       <- Versioned weight backups
+│   └── .phoenix_replay_state.json  <- Idempotent replay tracking
 ├── scripts/
 │   ├── able-setup.sh
 │   └── run-evals.sh            <- Eval orchestrator

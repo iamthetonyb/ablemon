@@ -48,8 +48,11 @@ class AuditLog:
         self.logs_dir = logs_dir or Path(__file__).parent
         self.logs_dir.mkdir(parents=True, exist_ok=True)
 
-        # v1 audit log bridge
+        # v1 audit log bridge — ensure directory + file exist
         self._v1_audit_path = Path.home() / ".able" / "logs" / "audit" / "audit.log"
+        self._v1_audit_path.parent.mkdir(parents=True, exist_ok=True)
+        if not self._v1_audit_path.exists():
+            self._v1_audit_path.touch()
 
     def log(
         self,
@@ -274,3 +277,10 @@ class AuditLog:
                 stats["successful_executions"] += 1
 
         return stats
+
+    async def log_event(self, action: str, details: Dict[str, Any] = None, **kwargs):
+        """Async-compatible event logger — bridge for CronScheduler and other async callers."""
+        self.log(
+            action=AuditAction.AGENT_EXECUTE,
+            details={"event_action": action, **(details or {}), **kwargs},
+        )

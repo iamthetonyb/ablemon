@@ -24,20 +24,21 @@ logger = logging.getLogger(__name__)
 
 # ── Source priority (lower = higher priority, harvested first) ────────
 SOURCE_PRIORITY: dict[str, int] = {
-    "claude_code": 1,      # Claude Max subscription — richest reasoning traces
-    "cowork": 1,            # Claude Cowork sessions — same quality as Claude Code
-    "able_interaction": 2,  # ABLE's own high-quality responses
-    "able_cli": 2,          # ABLE CLI sessions (same quality as able_interaction)
-    "reasoning_log": 2,     # (prompt, thinking, response) triples from reasoning.jsonl
-    "0wav_ml": 3,           # 0wav labeled behavioral profiles (domain-specific)
-    "0wav_claude_code": 3,  # 0wav Claude Code sessions (domain-specific)
-    "gstack": 3,            # gstack sprint learnings (code review, QA, security insights)
-    "codex": 4,             # OpenAI Codex CLI (bundled w/ GPT sub, clean transcripts)
-    "chatgpt": 5,           # ChatGPT web (GPT sub, good reasoning)
-    "antigravity": 6,       # Antigravity Pro sessions
-    "external_tool": 7,     # Third-party AI tools (user-configured drop dir)
-    "grok": 7,              # Grok free tier (thinner reasoning)
-    "inbox": 8,             # Manually saved conversations
+    "claude_code": 1,        # Claude Max subscription — richest reasoning traces
+    "cowork": 1,              # Claude Cowork sessions — same quality as Claude Code
+    "able_interaction": 2,   # ABLE's own high-quality responses
+    "able_cli": 2,            # ABLE CLI sessions (same quality as able_interaction)
+    "reasoning_log": 2,      # (prompt, thinking, response) triples from reasoning.jsonl
+    "0wav_ml": 3,             # 0wav labeled behavioral profiles (domain-specific)
+    "0wav_claude_code": 3,   # 0wav Claude Code sessions (domain-specific)
+    "gstack": 3,              # gstack sprint learnings (code review, QA, security insights)
+    "batch_trajectory": 4,   # Synthetic data from BatchTrajectoryRunner (Codex-style prompts)
+    "codex": 4,               # OpenAI Codex CLI (bundled w/ GPT sub, clean transcripts)
+    "chatgpt": 5,             # ChatGPT web (GPT sub, good reasoning)
+    "antigravity": 6,         # Antigravity Pro sessions
+    "external_tool": 7,      # Third-party AI tools (user-configured drop dir)
+    "grok": 7,                # Grok free tier (thinner reasoning)
+    "inbox": 8,               # Manually saved conversations
 }
 
 
@@ -175,6 +176,16 @@ def _get_harvesters(project_root: Path, tenant_id: str = "default") -> list:
         harvesters.append(("external_tool", ExternalToolHarvester()))
     except Exception as e:
         logger.warning("External tool harvester unavailable: %s", e)
+
+    # Priority 4: Batch trajectories (synthetic data from BatchTrajectoryRunner)
+    # Incremental — cursor-based so each nightly run only picks up new pairs.
+    batch_traj = project_root / "data" / "batch_trajectories.jsonl"
+    if batch_traj.exists():
+        try:
+            from able.core.distillation.harvesters.batch_trajectory_harvester import BatchTrajectoryHarvester
+            harvesters.append(("batch_trajectory", BatchTrajectoryHarvester(jsonl_path=batch_traj)))
+        except Exception as e:
+            logger.warning("Batch trajectory harvester unavailable: %s", e)
 
     # Priority 9: Inbox (manually saved conversations)
     inbox_dir = Path.home() / "able-corpus-inbox"

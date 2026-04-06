@@ -320,4 +320,11 @@ def build_default_registry() -> ToolRegistry:
     except Exception as exc:  # pragma: no cover - defensive during partial boots
         logger.warning("Resource tools unavailable: %s", exc)
 
+    try:
+        from able.core.gateway.tool_defs import document_tools
+
+        document_tools.register(registry)
+    except Exception as exc:  # pragma: no cover - pypdf/bs4 may not be installed in slim
+        logger.debug("Document tools unavailable: %s", exc)
+
     return registry

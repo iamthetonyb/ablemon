@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from enum import Enum
 
 from able.core.security.command_guard import CommandAnalysis, CommandGuard, CommandVerdict
+from able.core.security.egress_inspector import EgressInspector, EgressRisk
 
 
 class ApprovalStatus(Enum):
@@ -53,6 +54,7 @@ class SecureShell:
         approval_callback: Optional[Callable[[str, CommandAnalysis], bool]] = None
     ):
         self.guard = CommandGuard(trust_tier=trust_tier)
+        self.egress = EgressInspector()
         self.trust_tier = trust_tier
         self.work_dir = Path(work_dir) if work_dir else Path.cwd()
         self.timeout = timeout
@@ -184,7 +186,35 @@ class SecureShell:
         """Execute a shell command with security checks"""
         audit_id = self._generate_audit_id(command)
 
-        # Analyze command
+        # Pre-hook: egress inspection (before allowlist check)
+        egress = self.egress.inspect(command)
+        if egress.requires_approval and egress.risk_level in (EgressRisk.HIGH, EgressRisk.CRITICAL):
+            # Synthesize a CommandAnalysis for the egress block
+            egress_analysis = CommandAnalysis(
+                verdict=CommandVerdict.REQUIRES_APPROVAL,
+                command=command,
+                base_command=command.split()[0] if command.split() else "",
+                parsed_args=[],
+                parsed_argv=[],
+                reason=f"[EGRESS] {egress.reason}",
+                risk_level=9 if egress.risk_level == EgressRisk.CRITICAL else 7,
+                uses_shell_syntax=False,
+            )
+            if not self.approval_callback or not self.approval_callback(command, egress_analysis):
+                result = ShellResult(
+                    command=command,
+                    stdout="",
+                    stderr=f"Egress blocked: {egress.reason}",
+                    exit_code=-1,
+                    execution_time=0,
+                    approval_status=ApprovalStatus.DENIED,
+                    approval_reason=egress.reason,
+                    audit_id=audit_id,
+                )
+                self._log_audit(command, egress_analysis, result)
+                return result
+
+        # Analyze command (allowlist check)
         analysis = self.guard.analyze(command)
 
         # Handle denied commands

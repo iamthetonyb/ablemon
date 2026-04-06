@@ -107,6 +107,8 @@ class WeeklyResearchScout:
         - Previous findings (dedup against last report)
         - Current ABLE goals/objectives (goal-aware queries)
         """
+        from able.core.observability.tracer import trace_operation
+
         report = WeeklyResearchReport(
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
@@ -124,41 +126,54 @@ class WeeklyResearchScout:
         queries = self._generate_queries(mode, categories)
         previous_urls = self._load_previous_urls()
 
-        for query, category in queries:
-            try:
-                findings = await self._search_topic(search, query, category)
-                for f in findings:
-                    # Dedup against previous report
-                    if f.url and f.url in previous_urls:
-                        continue
-                    report.findings.append(f)
-                    if f.relevance == "high":
-                        report.high_priority.append(f)
-                report.search_queries_run += 1
-            except Exception as e:
-                report.errors.append(f"Query '{query}': {e}")
-                logger.warning(f"Research query failed: {query} — {e}")
+        with trace_operation(
+            f"research.{mode}",
+            attributes={
+                "research.mode": mode,
+                "research.query_count": len(queries),
+                "research.categories": str(categories or "all"),
+            },
+            tracer_name="able.research",
+        ) as span:
+            for query, category in queries:
+                try:
+                    findings = await self._search_topic(search, query, category)
+                    for f in findings:
+                        if f.url and f.url in previous_urls:
+                            continue
+                        report.findings.append(f)
+                        if f.relevance == "high":
+                            report.high_priority.append(f)
+                    report.search_queries_run += 1
+                except Exception as e:
+                    report.errors.append(f"Query '{query}': {e}")
+                    logger.warning(f"Research query failed: {query} — {e}")
 
-            await asyncio.sleep(1.0)
+                await asyncio.sleep(1.0)
 
-        # Phase 2 (weekly only): Deep analysis via Claude Code SDK
-        if mode == "weekly":
-            await self._deep_research_phase(report)
+            # Phase 2 (weekly only): Deep analysis via Claude Code SDK
+            if mode == "weekly":
+                await self._deep_research_phase(report)
 
-        report.total_findings = len(report.findings)
+            report.total_findings = len(report.findings)
 
-        # Phase 3: LLM analysis — turn raw findings into actionable intelligence
-        if report.findings:
-            await self._analyze_findings(report)
+            # Phase 3: LLM analysis — turn raw findings into actionable intelligence
+            if report.findings:
+                await self._analyze_findings(report)
 
-        # Save report
-        self._save_report(report)
+            # Save report
+            self._save_report(report)
 
-        logger.info(
-            f"{mode.title()} research complete: {report.total_findings} findings "
-            f"({len(report.high_priority)} high priority), "
-            f"{len(report.errors)} errors"
-        )
+            span.set_attribute("research.total_findings", report.total_findings)
+            span.set_attribute("research.high_priority", len(report.high_priority))
+            span.set_attribute("research.queries_run", report.search_queries_run)
+            span.set_attribute("research.errors", len(report.errors))
+
+            logger.info(
+                f"{mode.title()} research complete: {report.total_findings} findings "
+                f"({len(report.high_priority)} high priority), "
+                f"{len(report.errors)} errors"
+            )
 
         return report
 
@@ -166,48 +181,95 @@ class WeeklyResearchScout:
         self, mode: str, categories: List[str] = None
     ) -> List[tuple]:
         """
-        Generate fresh, date-aware search queries. Returns list of (query, category).
+        Karpathy cumulative research: generate queries that BUILD on previous findings.
 
-        Nightly: rotates through NIGHTLY_TOPIC_COUNT topics per night.
-        Weekly: scans all topics with deeper queries.
+        Each run:
+        1. Prioritizes topics that haven't been searched recently (staleness rotation)
+        2. Generates follow-up queries from past high-priority findings
+        3. Explores open questions identified by previous M2.7 analysis
+        4. Falls back to keyword rotation for breadth coverage
+
+        Returns list of (query, category).
         """
         now = datetime.now(timezone.utc)
-        date_str = now.strftime("%B %Y")  # e.g. "March 2026"
+        date_str = now.strftime("%B %Y")
         recency = "this week" if mode == "nightly" else "this month"
 
+        # Load the research frontier from past reports
+        frontier = self._load_research_frontier()
+
+        queries = []
+
+        # === Phase 1: Follow-up queries from previous high-value findings ===
+        # This is the Karpathy pattern — each run digs deeper into what the last run found
+        for thread in frontier["high_value_threads"][:4]:
+            follow_up = (
+                f"{thread['title']} latest developments implementation guide {recency}"
+            )
+            tag = thread["tags"][0] if thread["tags"] else "general"
+            queries.append((follow_up, tag))
+
+        # === Phase 2: Explore open questions from past analysis ===
+        for q in frontier["open_questions"][:3]:
+            queries.append((
+                f"{q['question'][:60]} how to approach {date_str}",
+                q["category"] or "general",
+            ))
+
+        # === Phase 3: Stale topic rotation (prioritize topics not searched recently) ===
         all_topics = list(RESEARCH_TOPICS.keys())
         if categories:
             selected_topics = [t for t in categories if t in RESEARCH_TOPICS]
         elif mode == "nightly":
-            # Rotate: use day-of-year to pick different topics each night
-            day_offset = now.timetuple().tm_yday
-            start = (day_offset * NIGHTLY_TOPIC_COUNT) % len(all_topics)
-            indices = [(start + i) % len(all_topics) for i in range(NIGHTLY_TOPIC_COUNT)]
-            selected_topics = [all_topics[i] for i in indices]
+            # Sort topics by staleness — search least-recently-touched first
+            topic_staleness = []
+            for t in all_topics:
+                days = frontier["topic_freshness"].get(t, 999)  # never searched = most stale
+                topic_staleness.append((days, t))
+            topic_staleness.sort(reverse=True)  # Most stale first
+            selected_topics = [t for _, t in topic_staleness[:NIGHTLY_TOPIC_COUNT]]
         else:
             selected_topics = all_topics
 
-        queries = []
         for topic_name in selected_topics:
             topic = RESEARCH_TOPICS[topic_name]
             keywords = topic["keywords"]
 
             if mode == "nightly":
-                # 2 queries per topic, focused on breaking news
-                for kw in keywords[:2]:
-                    queries.append((f"{kw} new release update {recency}", topic_name))
+                # 1 query per topic (reduced — we have follow-up queries now)
+                kw = keywords[now.timetuple().tm_yday % len(keywords)]
+                queries.append((f"{kw} new release update {recency}", topic_name))
             else:
-                # 3 queries per topic, deeper
-                for kw in keywords[:3]:
+                # 2 queries per topic (reduced from 3 — follow-ups cover depth)
+                for kw in keywords[:2]:
                     queries.append((f"{kw} {date_str} latest", topic_name))
-                # Add one trend query
-                queries.append(
-                    (f"best new {topic_name.replace('_', ' ')} tools techniques {date_str}", topic_name)
-                )
 
-        # Add goal-aware queries from current objectives
+        # === Phase 4: Goal-aware queries ===
         goal_queries = self._generate_goal_queries(recency)
         queries.extend(goal_queries)
+
+        # === Phase 5: System evolution queries (auto-discovers new ABLE components) ===
+        # This is the "research grows WITH the system" pattern — when we add a new
+        # tool, provider, or module, research automatically picks it up and looks
+        # for improvements, alternatives, and best practices.
+        evo_queries = self._generate_system_evolution_queries(recency)
+        queries.extend(evo_queries)
+
+        # === Phase 6: Improvement/growth queries from past learnings ===
+        # Mine ABLE's own learnings.md for growth opportunities
+        growth_queries = self._generate_growth_queries(recency)
+        queries.extend(growth_queries)
+
+        # Log frontier state for debugging
+        logger.info(
+            "Research frontier: %d explored topics, %d follow-up threads, "
+            "%d open questions, %d system-evo queries, %d total queries generated",
+            len(frontier["explored_topics"]),
+            len(frontier["high_value_threads"]),
+            len(frontier["open_questions"]),
+            len(evo_queries),
+            len(queries),
+        )
 
         return queries
 
@@ -242,6 +304,163 @@ class WeeklyResearchScout:
 
         return queries[:4]  # Cap at 4 goal queries
 
+    def _generate_system_evolution_queries(self, recency: str) -> List[tuple]:
+        """
+        Auto-research: generate queries based on ABLE's actual current capabilities.
+
+        Scans the codebase for tools, providers, and modules — then generates
+        research queries about improvements, alternatives, and best practices
+        for each component. This makes research evolve WITH the system.
+        """
+        queries = []
+        project_root = Path(__file__).parent.parent.parent.parent
+
+        # 1. Discover active providers from routing config
+        try:
+            import yaml
+            config_path = project_root / "config" / "routing_config.yaml"
+            if config_path.exists():
+                with open(config_path) as f:
+                    config = yaml.safe_load(f) or {}
+                for p in config.get("providers", []):
+                    if p.get("enabled", True):
+                        model = p.get("model_id", "")
+                        if model:
+                            queries.append((
+                                f"{model} performance benchmarks alternatives {recency}",
+                                "models_training",
+                            ))
+        except Exception:
+            pass
+
+        # 2. Discover active tools from skill index
+        try:
+            import yaml
+            skill_path = project_root / "able" / "skills" / "SKILL_INDEX.yaml"
+            if skill_path.exists():
+                with open(skill_path) as f:
+                    skills = yaml.safe_load(f) or {}
+                # Research improvements for most-used skills
+                for name, info in (skills.get("skills") or {}).items():
+                    count = info.get("use_count", 0)
+                    if count > 0:
+                        queries.append((
+                            f"AI agent {name.replace('-', ' ')} skill best practices {recency}",
+                            "agentic_systems",
+                        ))
+        except Exception:
+            pass
+
+        # 3. Discover new modules added since last scan
+        try:
+            module_dirs = [
+                project_root / "able" / "core",
+                project_root / "able" / "tools",
+            ]
+            new_modules = set()
+            for d in module_dirs:
+                if d.exists():
+                    for py_file in d.rglob("*.py"):
+                        if py_file.stat().st_mtime > (datetime.now().timestamp() - 7 * 86400):
+                            module_name = py_file.stem
+                            if module_name != "__init__" and module_name not in new_modules:
+                                new_modules.add(module_name)
+
+            # Research best practices for recently added modules
+            for mod in list(new_modules)[:3]:
+                clean_name = mod.replace("_", " ")
+                queries.append((
+                    f"AI agent {clean_name} implementation best practices {recency}",
+                    "agentic_systems",
+                ))
+        except Exception:
+            pass
+
+        return queries[:5]  # Cap to avoid explosion
+
+    def _generate_growth_queries(self, recency: str) -> List[tuple]:
+        """
+        Mine ABLE's own learnings, errors, and audit results for growth opportunities.
+
+        This closes the loop: ABLE encounters problems → logs them → research
+        finds solutions → solutions get implemented → new problems emerge.
+        """
+        queries = []
+        project_root = Path(__file__).parent.parent.parent.parent
+
+        # 1. Mine learnings.md for recurring patterns worth researching
+        try:
+            learnings_path = Path.home() / ".able" / "memory" / "learnings.md"
+            if learnings_path.exists():
+                content = learnings_path.read_text()[:3000]
+                # Look for error patterns, tool mentions, improvement areas
+                import re
+                # Extract lines with "error", "issue", "improve", "bug", "fix"
+                problem_lines = [
+                    line.strip("- ").strip()
+                    for line in content.split("\n")
+                    if any(kw in line.lower() for kw in ["error", "issue", "improve", "bug", "fix", "slow", "fail"])
+                    and len(line.strip()) > 15
+                ]
+                for problem in problem_lines[:2]:
+                    queries.append((
+                        f"AI agent solution for {problem[:50]} {recency}",
+                        "agentic_systems",
+                    ))
+        except Exception:
+            pass
+
+        # 2. Mine recent audit failures for improvement research
+        try:
+            import sqlite3
+            db_path = project_root / "data" / "interaction_log.db"
+            if db_path.exists():
+                conn = sqlite3.connect(str(db_path))
+                conn.row_factory = sqlite3.Row
+                # Find domains with low audit scores
+                rows = conn.execute(
+                    "SELECT domain, AVG(audit_score) as avg, COUNT(*) as cnt "
+                    "FROM interaction_log WHERE audit_score IS NOT NULL "
+                    "GROUP BY domain HAVING avg < 3.0 AND cnt > 2 "
+                    "ORDER BY avg ASC LIMIT 3"
+                ).fetchall()
+                conn.close()
+
+                for row in rows:
+                    domain = row["domain"] or "general"
+                    queries.append((
+                        f"AI agent {domain} response quality improvement techniques {recency}",
+                        domain if domain in RESEARCH_TOPICS else "agentic_systems",
+                    ))
+        except Exception:
+            pass
+
+        # 3. Check for recently added skills that might have improvement docs
+        try:
+            import yaml
+            skill_path = project_root / "able" / "skills" / "SKILL_INDEX.yaml"
+            if skill_path.exists():
+                with open(skill_path) as f:
+                    skills = yaml.safe_load(f) or {}
+                # Find recently created skills (last 14 days)
+                now = datetime.now(timezone.utc)
+                for name, info in (skills.get("skills") or {}).items():
+                    created = info.get("created", "")
+                    if created:
+                        try:
+                            created_dt = datetime.fromisoformat(created)
+                            if (now - created_dt.replace(tzinfo=timezone.utc)).days < 14:
+                                queries.append((
+                                    f"AI {name.replace('-', ' ')} skill optimization best practices",
+                                    "agentic_systems",
+                                ))
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+        return queries[:4]  # Cap growth queries
+
     def _load_previous_urls(self) -> set:
         """Load URLs from the most recent research report for dedup."""
         urls = set()
@@ -257,6 +476,97 @@ class WeeklyResearchScout:
         except Exception:
             pass
         return urls
+
+    def _load_research_frontier(self) -> dict:
+        """
+        Karpathy cumulative research: load the knowledge frontier from past reports.
+
+        Returns a dict with:
+          - explored_topics: set of topics already deeply researched
+          - open_questions: list of unanswered questions / gaps from previous runs
+          - high_value_threads: findings worth following up on
+          - topic_freshness: {topic: days_since_last_searched} for rotation
+        """
+        frontier = {
+            "explored_topics": set(),
+            "open_questions": [],
+            "high_value_threads": [],
+            "topic_freshness": {},
+        }
+
+        try:
+            reports = sorted(self.report_dir.glob("research_*.json"), reverse=True)
+            now = datetime.now(timezone.utc)
+
+            for report_file in reports[:10]:  # Look at last 10 reports
+                try:
+                    data = json.load(open(report_file))
+                except Exception:
+                    continue
+
+                report_ts = data.get("timestamp", "")
+                try:
+                    report_dt = datetime.fromisoformat(report_ts.replace("Z", "+00:00"))
+                    days_ago = (now - report_dt).days
+                except Exception:
+                    days_ago = 30
+
+                # Track explored topics
+                for finding in data.get("findings", []):
+                    for tag in finding.get("tags", []):
+                        if tag in RESEARCH_TOPICS:
+                            frontier["explored_topics"].add(tag)
+                            # Track freshness
+                            if tag not in frontier["topic_freshness"] or days_ago < frontier["topic_freshness"][tag]:
+                                frontier["topic_freshness"][tag] = days_ago
+
+                # Extract high-value threads to follow up on
+                for finding in data.get("findings", []):
+                    if finding.get("relevance") == "high" and days_ago < 14:
+                        action = finding.get("action", "")
+                        title = finding.get("title", "")
+                        if action and action != "Review for potential improvement":
+                            frontier["high_value_threads"].append({
+                                "title": title[:80],
+                                "action": action[:150],
+                                "tags": finding.get("tags", []),
+                                "days_ago": days_ago,
+                            })
+
+                # Extract open questions from action items
+                for item in data.get("action_items", []):
+                    effort = item.get("effort", "")
+                    if effort in ("medium", "major"):
+                        frontier["open_questions"].append({
+                            "question": item.get("action", "")[:150],
+                            "category": item.get("category", ""),
+                            "days_ago": days_ago,
+                        })
+
+        except Exception as e:
+            logger.debug("Frontier loading failed: %s", e)
+
+        # Deduplicate threads by title prefix
+        seen_titles = set()
+        unique_threads = []
+        for t in frontier["high_value_threads"]:
+            key = t["title"][:30].lower()
+            if key not in seen_titles:
+                seen_titles.add(key)
+                unique_threads.append(t)
+        frontier["high_value_threads"] = unique_threads[:10]
+
+        # Deduplicate questions
+        seen_q = set()
+        unique_q = []
+        for q in frontier["open_questions"]:
+            key = q["question"][:40].lower()
+            if key not in seen_q:
+                seen_q.add(key)
+                unique_q.append(q)
+        frontier["open_questions"] = unique_q[:8]
+
+        return frontier
 
     async def _deep_research_phase(self, report: WeeklyResearchReport):
         """
@@ -661,6 +971,58 @@ RULES:
             json_paths[0],
             self.operator_report_dir / "latest.md",
         )
+
+        # File findings to TriliumNext knowledge base
+        self._file_to_trilium(report, date_str)
+
+    def _file_to_trilium(self, report: WeeklyResearchReport, date_str: str):
+        """File each high-priority finding as a child note in Trilium."""
+        try:
+            from able.tools.trilium.client import TriliumClient, KNOWN_PARENTS
+
+            parent_id = KNOWN_PARENTS.get("weekly_research")
+            if not parent_id:
+                logger.debug("TRILIUM_WEEKLY_RESEARCH not set, skipping Trilium filing")
+                return
+
+            async def _file():
+                async with TriliumClient() as client:
+                    if not await client.is_available():
+                        logger.debug("Trilium not available, skipping filing")
+                        return
+
+                    # Create a summary note for this week's research
+                    findings = report.high_priority + report.findings
+                    if not findings:
+                        return
+
+                    for f in report.high_priority[:10]:
+                        html = (
+                            f"<h3>{f.title}</h3>"
+                            f"<p>{f.summary}</p>"
+                            f"<p><strong>Source:</strong> {f.source}</p>"
+                            f"<p><strong>Relevance:</strong> {f.relevance}</p>"
+                        )
+                        if f.url:
+                            html += f'<p><a href="{f.url}">{f.url}</a></p>'
+                        if f.action:
+                            html += f"<p><strong>Action:</strong> {f.action}</p>"
+
+                        await client.file_research_finding(
+                            title=f"[{date_str}] {f.title[:80]}",
+                            html_content=html,
+                            source=f.source,
+                            tags=f.tags,
+                            relevance={"high": 0.9, "medium": 0.6, "low": 0.3}.get(f.relevance, 0.5),
+                        )
+
+                    logger.info("Filed %d findings to Trilium", min(len(report.high_priority), 10))
+
+            asyncio.run(_file())
+        except ImportError:
+            logger.debug("Trilium client not available, skipping filing")
+        except Exception as e:
+            logger.warning("Trilium filing failed (non-fatal): %s", e)
 
     def format_telegram(self, report: WeeklyResearchReport, mode: str = "weekly") -> str:
         """Format report for Telegram — actionable intelligence, not link dumps."""
