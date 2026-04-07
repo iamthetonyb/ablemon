@@ -86,10 +86,17 @@ ABLE turns your conversations into training data automatically.
 - Harvests conversations from CLI, Claude Code, Codex, ChatGPT, and any tool you've connected
 - Builds a distillation corpus with deduplication and quality filtering
 
+**Weekly research scout (Karpathy LLM Wiki pattern):**
+- 6-phase cumulative research that builds on previous findings
+- Auto-discovers new system components and researches improvements
+- Source verification, knowledge graph, mermaid topic maps
+- Everything filed to TriliumNext with cross-references
+
 **When you're ready to fine-tune:**
 - Training pairs are in `data/distillation_*.jsonl`
 - Unsloth notebooks generated automatically for Qwen 3.5 9B / 27B
 - Fine-tuned model plugs into T5 (local), promotes to T1 when it passes eval
+- Apple Silicon ANE-aware: battery mode uses Neural Engine prefill + GPU decode
 
 ---
 
@@ -104,6 +111,19 @@ It earns XP from real system work:
 - Every gstack sprint skill run
 
 It evolves through 3 stages. It has needs. It gets stronger when the system is healthy.
+
+---
+
+## Observability — see everything
+
+```bash
+# Start Phoenix + TriliumNext
+docker compose --profile observability up -d
+```
+
+- **Phoenix** at `localhost:6006` — traces every LLM call, tool execution, cron job
+- **TriliumNext** at `localhost:8081` — knowledge base with research findings, architecture docs, topic maps
+- **Knowledge graph** at `data/research_graph.html` — interactive D3 visualization of research topology
 
 ---
 
@@ -129,6 +149,8 @@ Docker auto-installs on the server. Pre-built image pulls from GHCR. Done.
 | `OPENROUTER_API_KEY` | Fallback models + evolution daemon |
 | `ANTHROPIC_API_KEY` | Claude Opus 4.6 (T4 premium tier) |
 | `NVIDIA_API_KEY` | Nemotron 120B (free T1 fallback) |
+| `TRILIUM_ETAPI_TOKEN` | TriliumNext knowledge base |
+| `XCRAWL_API_KEY` | XCrawl structured web scraping |
 
 Full list: [`able/.env.example`](able/.env.example)
 
@@ -154,11 +176,17 @@ able/
 ├── core/gateway/        AI request pipeline (routing, tools, Telegram)
 ├── core/routing/        Complexity scorer + provider chain
 ├── core/buddy/          Companion system (XP, evolution, renderer)
-├── core/evolution/      Self-tuning routing weights (6h daemon)
+├── core/evolution/      Self-tuning weights + cumulative research scout
 ├── core/distillation/   Training data pipeline (harvest → score → export)
-├── core/federation/     Network sharing (anonymized high-quality pairs)
-├── scheduler/           12+ cron jobs (audit, harvest, evolution, buddy care)
-└── tools/               Browser, search, GitHub, DigitalOcean, Vercel
+├── core/federation/     Network sharing + distributed compute mesh
+├── core/observability/  Phoenix tracing (every LLM call, every tool, every cron)
+├── core/session/        Context compaction + session versioning
+├── core/security/       TrustGate, CommandGuard, egress inspector
+├── scheduler/           15+ cron jobs (audit, harvest, evolution, research, lint)
+├── tools/trilium/       TriliumNext knowledge base (wiki, research ingestion)
+├── tools/xcrawl/        Structured web scraping for deep research
+├── tools/graphify/      Knowledge graph builder (D3 + mermaid)
+└── tools/               Browser, search, GitHub, DigitalOcean, Vercel, codex audit
 ```
 
 ---

@@ -49,6 +49,66 @@ User (Telegram) → Gateway → TrustGate → Scanner → Enricher → Complexit
 - `config/scorer_weights.yaml` — Complexity scoring weights (M2.7-tunable)
 - `able/.env` / `able/.env.example` — All env vars (API keys, tokens)
 
+## What Was Just Shipped (2026-04-06) — Research Pipeline, Knowledge Base, Security Hardening, Edge Compute
+
+### Research Pipeline Overhaul (Karpathy LLM Wiki + Feynman + OMEGA)
+
+- **6-phase cumulative research** (`weekly_research.py`): Follow-up → open questions → stale rotation → goal-aware → system evolution auto-discovery → growth mining. Each run builds on the last 10 reports.
+- **XCrawl integration** (`able/tools/xcrawl/client.py`): Full structured content extraction for high-priority findings (replaces snippet-only search results)
+- **Source grounding** (`able/core/evolution/source_grounder.py`): Feynman pattern — HEAD request URL verification + secondary search cross-verification → `#verified`/`#broken-link`/`#contested` tags
+- **Knowledge graph** (`able/tools/graphify/builder.py`): NetworkX + Louvain community detection → interactive D3 HTML visualization + mermaid diagrams for Trilium
+- **Semantic search index** (`able/memory/research_index.py`): SQLite FTS5 + BM25 + recency/relevance/verification boost — scales wiki queries without loading index into context
+- **Wiki lint** (`able/tools/trilium/wiki_lint.py`): Weekly quality check — orphans, stale notes, duplicates, missing sources, low confidence → auto-filed to Trilium
+- **Deep research skill** (`able/skills/library/deep-research/`): Multi-agent with source grounding, XCrawl, knowledge graph, Trilium filing
+
+### TriliumNext Knowledge Base
+
+- Docker service in `observability` profile (port 8081)
+- ETAPI client with async context manager, search, CRUD, attributes, relations
+- Wiki skill: `/wiki search`, `/wiki add`, `/wiki recent`, `/wiki clips`
+- Historic upload: architecture docs, provider configs, evolution history
+- Research ingestion: per-finding notes with mermaid topic map + cross-references + web clipper linking
+- Cron: `wiki-lint` Sundays at 11am (after weekly research)
+
+### Phoenix Observability Fixes
+
+- **Idempotent replay** (`phoenix_replay.py`): State tracking via `data/.phoenix_replay_state.json` — no duplicate spans
+- **Cron tracer fix** (`tracer.py`): Properly detects no-op provider (was always returning True). Cron scheduler now explicitly initializes Phoenix at startup.
+- Added `--force` and `--clear-project` flags to replay CLI
+
+### Security Hardening
+
+- **Egress inspector** (`egress_inspector.py`): Pre-hook URL/IP extraction before CommandGuard
+- **YAML tool permissions** (`config/tool_permissions.yaml`): `always_allow`/`ask_before`/`never_allow` sections
+- **Provider smoke test** (`provider_registry.py`): Canary "ABLE_OK" verification per provider
+- **Codex cross-audit** (`codex_audit.py`): 3-layer fallback (codex → claude → rule-based), rules always supplement
+- **Interaction auditor**: Verification agent adversarial probes + VERDICT field
+
+### CVC Context Management
+
+- **Context compactor** (`context_compactor.py`): Summarizes oldest 60% at 80% window capacity via T1
+- **Session versioning** (`context_versioning.py`): Merkle DAG snapshots with branch-on-escalation rollback
+
+### Edge Inference & Distributed Compute
+
+- **ANE optimizer** (`ane_optimizer.py`): Per-chip M1-M4 profiles, battery-aware routing (ANE prefill + GPU decode)
+- **Compute mesh** (`compute_mesh.py`): mDNS discovery, capability reporting, idle-aware job scheduling
+
+### Key Files
+
+| File | What |
+|------|------|
+| `able/tools/trilium/client.py` | TriliumNext ETAPI client |
+| `able/tools/xcrawl/client.py` | XCrawl structured scraping |
+| `able/tools/graphify/builder.py` | Knowledge graph builder |
+| `able/core/evolution/source_grounder.py` | Feynman source verification |
+| `able/memory/research_index.py` | FTS5 semantic search index |
+| `able/tools/trilium/wiki_lint.py` | Wiki quality checker |
+| `able/core/providers/ane_optimizer.py` | Apple Silicon optimizer |
+| `able/core/federation/compute_mesh.py` | Distributed training mesh |
+
+---
+
 ## What Was Just Shipped (2026-04-04 session 2) — Gemma 4, Hermes patterns, Phoenix dashboard
 
 ### Model Upgrades

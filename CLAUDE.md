@@ -113,7 +113,7 @@ From @SOUL.md — internalize these:
 2. Load identity, objectives, today's daily file, pending queue, recent learnings
 3. Produce status report, then process queue or await instructions
 
-## Distillation Pipeline (Current State — 2026-04-04)
+## Distillation Pipeline (Current State — 2026-04-06)
 
 Full end-to-end training data pipeline is live. Key files:
 
@@ -202,6 +202,18 @@ Claude and other models emit synthetic declarations that never run — those are
 6. **Growth** — mines learnings + audit failures for improvement areas
 
 Research is cumulative: loads past 10 reports, extracts explored topics, deduplicates, builds on high-value threads.
+
+### Research Pipeline Enhancements
+- **XCrawl extraction** (`able/tools/xcrawl/client.py`): Full structured content for high-priority findings (replaces snippet-only)
+- **Source grounding** (`able/core/evolution/source_grounder.py`): Feynman pattern — URL verification + cross-verification of claims → `#verified`/`#broken-link`/`#contested` tags
+- **Knowledge graph** (`able/tools/graphify/builder.py`): NetworkX + Louvain community detection → interactive D3 HTML + mermaid diagrams for Trilium
+- **Semantic search index** (`able/memory/research_index.py`): FTS5 + BM25 + recency boost — scales wiki queries without loading index into context (OMEGA pattern)
+- **Wiki lint** (`able/tools/trilium/wiki_lint.py`): Weekly quality check — orphans, stale notes, duplicates, missing sources, low confidence → filed to Trilium
+- **Deep research skill** (`able/skills/library/deep-research/SKILL.md`): Multi-agent with source grounding, XCrawl, knowledge graph, Trilium filing
+
+### Edge Inference & Distributed Compute
+- **ANE optimizer** (`able/core/providers/ane_optimizer.py`): Per-chip profiles (M1-M4), battery-aware routing (ANE prefill + GPU decode), Modelfile generation
+- **Compute mesh** (`able/core/federation/compute_mesh.py`): mDNS discovery, capability reporting, idle-aware job scheduling for distributed training
 
 ## Interaction Auditor Enhancements
 

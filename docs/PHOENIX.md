@@ -42,6 +42,35 @@ Then set the endpoint for ABLE:
 export PHOENIX_COLLECTOR_ENDPOINT="http://localhost:6006/v1/traces"
 ```
 
+### Historical Replay (Idempotent)
+
+Replay historical data (interaction logs, traces, evolution cycles) into Phoenix:
+
+```bash
+# Replay only new data since last run (idempotent)
+python -m able.core.observability.phoenix_replay
+
+# Force re-send everything
+python -m able.core.observability.phoenix_replay --force
+
+# Wipe Phoenix project and replay from scratch
+python -m able.core.observability.phoenix_replay --clear-project
+```
+
+State tracked in `data/.phoenix_replay_state.json` — re-running is safe (0 duplicates).
+
+### Cron Job Tracing
+
+Cron scheduler auto-initializes the Phoenix tracer at startup. Every cron job execution produces a span:
+
+```
+cron.nightly-research    — research scout runs
+cron.interaction-audit   — scoring pass
+cron.wiki-lint           — Trilium quality check
+```
+
+If Phoenix is unavailable at cron start, a WARNING is logged and spans silently go to a no-op tracer.
+
 ### Fallback: JSONL Mode
 
 When Phoenix is unavailable (Docker not running, network issues), traces fall back to local JSONL files:

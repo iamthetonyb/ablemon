@@ -45,25 +45,35 @@ def _ensure_initialized():
 
     try:
         from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider as SDKTracerProvider
+
         provider = trace.get_tracer_provider()
-        # Check if a real provider is registered (not the default no-op)
-        if hasattr(provider, "get_tracer"):
+        # Check if a REAL SDK provider is registered (not the default no-op proxy).
+        # The default ProxyTracerProvider always has get_tracer but emits nothing.
+        if isinstance(provider, SDKTracerProvider):
             _initialized = True
             return True
 
-        # No provider registered — try to register one ourselves
+        # Also check for wrapped providers (some Phoenix versions wrap SDK provider)
+        inner = getattr(provider, "_proxy_tracer_provider", None)
+        if inner and isinstance(inner, SDKTracerProvider):
+            _initialized = True
+            return True
+
+        # No real provider registered — try to register one ourselves
         from arize_phoenix.otel import register
         endpoint = os.environ.get(
             "PHOENIX_COLLECTOR_ENDPOINT", "http://localhost:6006/v1/traces"
         )
         register(project_name="able", endpoint=endpoint)
         _initialized = True
+        logger.info("Phoenix tracer self-registered at %s", endpoint)
         return True
     except ImportError:
-        logger.debug("OTel/Phoenix not installed — tracing disabled")
+        logger.warning("OTel/Phoenix not installed — cron spans will be dropped")
         return False
     except Exception as e:
-        logger.debug("Phoenix tracer init failed: %s", e)
+        logger.warning("Phoenix tracer init failed (spans will be dropped): %s", e)
         return False
 
 

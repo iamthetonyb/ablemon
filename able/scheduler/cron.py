@@ -427,6 +427,18 @@ class CronScheduler:
         """
         self._running = True
         tz = _get_tz()
+
+        # Initialize Phoenix tracer so cron spans actually reach the collector.
+        # Without this, trace_operation() falls through to _NoOpTracer and all
+        # cron spans are silently dropped.
+        try:
+            from able.core.observability.tracer import _ensure_initialized
+            if _ensure_initialized():
+                logger.info("Phoenix tracer initialized for cron scheduler")
+            else:
+                logger.warning("Phoenix unavailable — cron spans will not be traced")
+        except Exception as e:
+            logger.debug("Phoenix init skipped: %s", e)
         logger.info(f"⏰ Cron scheduler started ({len(self.jobs)} jobs, tz={tz}, persistent DB active)")
 
         # Daily DB cleanup at startup
@@ -888,6 +900,25 @@ def register_default_jobs(
         description="Weekly deep scan — AI ecosystem, Claude updates, agentic systems, improvements",
         timeout=600.0,
         max_retries=2,
+    )
+
+    # ── Wiki Lint — Sundays at 11am (after weekly research) ──────
+    async def run_wiki_lint():
+        from able.tools.trilium.wiki_lint import wiki_lint
+        report = await wiki_lint(file_to_trilium=True)
+        return {
+            "notes_checked": report.total_notes_checked,
+            "issues_found": report.issue_count,
+            "summary": report.summary,
+        }
+
+    scheduler.add_job(
+        "wiki-lint",
+        "0 11 * * 0",
+        run_wiki_lint,
+        description="Weekly Trilium knowledge base quality check",
+        timeout=120.0,
+        max_retries=1,
     )
 
     # ── AutoPilot — daily at 5am ─────────────────────────────────

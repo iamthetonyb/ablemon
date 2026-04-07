@@ -134,6 +134,21 @@ skills:
     created: "2026-02-03"
     use_count: 0
 
+  deep-research:
+    description: "Multi-agent research with source grounding, XCrawl extraction, knowledge graphs, and Trilium filing. Use for thorough investigations requiring verified citations."
+    triggers:
+      - "deep research"
+      - "investigate thoroughly"
+      - "research report on"
+      - "deep dive into"
+      - "comprehensive analysis of"
+    type: "hybrid"
+    trust_level: "L3_ACT"
+    tools_used: [web_search, xcrawl, source_grounder, graphify, trilium]
+    requires_approval: false
+    created: "2026-04-06"
+    use_count: 0
+
   document-analysis:
     description: "Analyze documents for key information, summarize, extract data"
     triggers:

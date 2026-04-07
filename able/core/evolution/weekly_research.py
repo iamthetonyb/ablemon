@@ -157,12 +157,21 @@ class WeeklyResearchScout:
 
             report.total_findings = len(report.findings)
 
+            # Phase 2.5: XCrawl deep extraction for high-priority findings
+            await self._xcrawl_enrich(report)
+
             # Phase 3: LLM analysis — turn raw findings into actionable intelligence
             if report.findings:
                 await self._analyze_findings(report)
 
+            # Phase 3.5: Source verification (Feynman pattern)
+            await self._verify_sources(report)
+
+            # Phase 3.7: Build knowledge graph from findings
+            await self._build_knowledge_graph(report)
+
             # Save report
-            self._save_report(report)
+            await self._save_report(report)
 
             span.set_attribute("research.total_findings", report.total_findings)
             span.set_attribute("research.high_priority", len(report.high_priority))
@@ -568,6 +577,117 @@ class WeeklyResearchScout:
 
         return frontier
 
+    async def _xcrawl_enrich(self, report: WeeklyResearchReport):
+        """
+        Use XCrawl to get full structured content for high-priority findings.
+
+        Addresses the "partial context problem" — instead of relying on search
+        snippets, we get the full document content for important findings.
+        """
+        try:
+            from able.tools.xcrawl.client import XCrawlClient
+        except ImportError:
+            return
+
+        async with XCrawlClient() as client:
+            if not client.is_available:
+                return
+
+            enriched = 0
+            for finding in report.high_priority[:5]:
+                if not finding.url:
+                    continue
+                try:
+                    result = await client.scrape(finding.url)
+                    if result.markdown and not result.error:
+                        # Extend summary with full content (capped)
+                        full_text = result.markdown[:2000]
+                        if len(full_text) > len(finding.summary) * 2:
+                            finding.summary = full_text
+                            enriched += 1
+                except Exception as e:
+                    logger.debug("XCrawl enrich failed for %s: %s", finding.url, e)
+
+            if enriched:
+                logger.info("XCrawl enriched %d high-priority findings", enriched)
+
+    async def _verify_sources(self, report: WeeklyResearchReport):
+        """
+        Feynman source-grounding: verify all high-priority finding citations.
+
+        Tags findings with #verified, #unverified, #broken-link, or #contested.
+        """
+        try:
+            from able.core.evolution.source_grounder import SourceGrounder
+        except ImportError:
+            return
+
+        grounder = SourceGrounder()
+        findings_dicts = [
+            {
+                "title": f.title,
+                "summary": f.summary,
+                "url": f.url,
+                "relevance": f.relevance,
+                "tags": f.tags,
+            }
+            for f in report.high_priority
+        ]
+
+        if not findings_dicts:
+            return
+
+        try:
+            verifications = await grounder.verify_findings(findings_dicts)
+            # Apply verification tags back to findings
+            for finding, vr in zip(report.high_priority, verifications):
+                if vr.verification_tag not in finding.tags:
+                    finding.tags.append(f"#{vr.verification_tag}")
+
+            verified = sum(1 for v in verifications if v.verification_tag == "verified")
+            broken = sum(1 for v in verifications if v.verification_tag == "broken-link")
+            logger.info(
+                "Source verification: %d verified, %d broken-link, %d total",
+                verified, broken, len(verifications),
+            )
+        except Exception as e:
+            logger.debug("Source verification failed: %s", e)
+
+    async def _build_knowledge_graph(self, report: WeeklyResearchReport):
+        """Build and export knowledge graph from research findings."""
+        try:
+            from able.tools.graphify.builder import build_research_graph
+        except ImportError:
+            return
+
+        findings_dicts = [
+            {
+                "title": f.title,
+                "summary": f.summary,
+                "url": f.url,
+                "source": f.source,
+                "tags": f.tags,
+                "relevance": f.relevance,
+                "action": f.action,
+            }
+            for f in (report.high_priority + report.findings)
+        ]
+
+        if len(findings_dicts) < 3:
+            return
+
+        try:
+            export = await build_research_graph(findings_dicts)
+            if export and export.stats:
+                logger.info(
+                    "Knowledge graph: %d nodes, %d edges, %d communities",
+                    export.stats.get("node_count", 0),
+                    export.stats.get("edge_count", 0),
+                    export.stats.get("community_count", 0),
+                )
+        except Exception as e:
+            logger.debug("Knowledge graph build failed: %s", e)
+
     async def _deep_research_phase(self, report: WeeklyResearchReport):
         """
         Use Claude Code SDK (Max subscription) for deep research.
@@ -941,7 +1061,7 @@ RULES:
 
         return "\n".join(lines).rstrip() + "\n"
 
-    def _save_report(self, report: WeeklyResearchReport):
+    async def _save_report(self, report: WeeklyResearchReport):
         """Save report JSON plus an operator-facing markdown summary."""
         date_str = datetime.now().strftime("%Y-%m-%d")
         payload = self._report_payload(report)
@@ -972,57 +1092,206 @@ RULES:
             self.operator_report_dir / "latest.md",
         )
 
-        # File findings to TriliumNext knowledge base
-        self._file_to_trilium(report, date_str)
+        # Index findings for OMEGA-style semantic search (scales wiki queries)
+        self._index_findings(report, date_str)
 
-    def _file_to_trilium(self, report: WeeklyResearchReport, date_str: str):
-        """File each high-priority finding as a child note in Trilium."""
+        # File findings to TriliumNext knowledge base (with rich note types)
+        await self._file_to_trilium(report, date_str, payload)
+
+    def _index_findings(self, report: WeeklyResearchReport, date_str: str):
+        """Index all findings in the research semantic search index."""
+        try:
+            from able.memory.research_index import ResearchIndex
+            index = ResearchIndex()
+            all_findings = report.high_priority + report.findings
+            for f in all_findings:
+                index.add_finding(
+                    title=f.title,
+                    summary=f.summary,
+                    url=f.url,
+                    tags=f.tags,
+                    date_added=date_str,
+                    source=f.source,
+                    relevance=f.relevance,
+                )
+            logger.info("Indexed %d findings in research search index", len(all_findings))
+        except Exception as e:
+            logger.debug("Research index update failed (non-fatal): %s", e)
+
+    async def _file_to_trilium(
+        self, report: WeeklyResearchReport, date_str: str, payload: dict
+    ):
+        """
+        File research findings to Trilium with rich note types.
+
+        Creates:
+        1. Individual finding notes with cross-references
+        2. Mermaid topic-relationship diagram
+        3. Summary dashboard note
+        Uses wiki_ingest_research() for full cross-referencing + web clipper linking.
+        """
         try:
             from able.tools.trilium.client import TriliumClient, KNOWN_PARENTS
+            from able.tools.trilium.wiki_skill import wiki_ingest_research
 
             parent_id = KNOWN_PARENTS.get("weekly_research")
             if not parent_id:
                 logger.debug("TRILIUM_WEEKLY_RESEARCH not set, skipping Trilium filing")
                 return
 
-            async def _file():
-                async with TriliumClient() as client:
-                    if not await client.is_available():
-                        logger.debug("Trilium not available, skipping filing")
-                        return
+            async with TriliumClient() as client:
+                if not await client.is_available():
+                    logger.debug("Trilium not available, skipping filing")
+                    return
 
-                    # Create a summary note for this week's research
-                    findings = report.high_priority + report.findings
-                    if not findings:
-                        return
+                findings = report.high_priority + report.findings
+                if not findings:
+                    return
 
-                    for f in report.high_priority[:10]:
-                        html = (
-                            f"<h3>{f.title}</h3>"
-                            f"<p>{f.summary}</p>"
-                            f"<p><strong>Source:</strong> {f.source}</p>"
-                            f"<p><strong>Relevance:</strong> {f.relevance}</p>"
+                # 1. Use wiki_ingest_research for structured ingestion with
+                #    cross-references, relation building, and web clipper linking
+                ingest_data = {
+                    "findings": [
+                        {
+                            "title": f.title,
+                            "summary": f.summary,
+                            "url": f.url,
+                            "action": f.action,
+                            "tags": f.tags,
+                            "relevance": f.relevance,
+                            "source": f.source,
+                        }
+                        for f in findings[:20]
+                    ],
+                    "high_priority_count": len(report.high_priority),
+                    "search_queries_run": report.search_queries_run,
+                }
+                result = await wiki_ingest_research(ingest_data, date_str)
+                logger.info("Trilium ingestion: %s", result)
+
+                # 2. Generate mermaid topic-relationship diagram
+                mermaid = self._generate_topic_mermaid(findings, date_str)
+                if mermaid:
+                    try:
+                        await client.create_note(
+                            parent_id,
+                            f"Topic Map — {date_str}",
+                            mermaid,
+                            note_type="mermaid",
+                            mime="text/mermaid",
                         )
-                        if f.url:
-                            html += f'<p><a href="{f.url}">{f.url}</a></p>'
-                        if f.action:
-                            html += f"<p><strong>Action:</strong> {f.action}</p>"
+                        logger.info("Created Trilium mermaid topic map")
+                    except Exception as e:
+                        logger.debug("Mermaid note creation failed: %s", e)
 
-                        await client.file_research_finding(
-                            title=f"[{date_str}] {f.title[:80]}",
-                            html_content=html,
-                            source=f.source,
-                            tags=f.tags,
-                            relevance={"high": 0.9, "medium": 0.6, "low": 0.3}.get(f.relevance, 0.5),
-                        )
+                # 3. Create summary dashboard note
+                dashboard_html = self._generate_dashboard_html(payload, date_str)
+                try:
+                    await client.create_note(
+                        parent_id,
+                        f"Dashboard — {date_str}",
+                        dashboard_html,
+                    )
+                except Exception as e:
+                    logger.debug("Dashboard note creation failed: %s", e)
 
-                    logger.info("Filed %d findings to Trilium", min(len(report.high_priority), 10))
-
-            asyncio.run(_file())
         except ImportError:
             logger.debug("Trilium client not available, skipping filing")
         except Exception as e:
             logger.warning("Trilium filing failed (non-fatal): %s", e)
+
+    def _generate_topic_mermaid(
+        self, findings: list, date_str: str
+    ) -> str:
+        """Generate a mermaid flowchart showing topic relationships from findings."""
+        if not findings:
+            return ""
+
+        # Build tag → findings mapping
+        tag_findings: Dict[str, List[str]] = {}
+        for f in findings:
+            tags = f.tags if hasattr(f, "tags") else []
+            for tag in tags:
+                tag_findings.setdefault(tag, []).append(
+                    f.title[:40] if hasattr(f, "title") else str(f)[:40]
+                )
+
+        if not tag_findings:
+            return ""
+
+        lines = [f"graph TD"]
+        lines.append(f'    R["Research {date_str}"]')
+
+        node_id = 0
+        tag_nodes = {}
+        for tag, titles in tag_findings.items():
+            tag_node = f"T{node_id}"
+            tag_nodes[tag] = tag_node
+            safe_tag = tag.replace('"', "'")
+            count = len(titles)
+            lines.append(f'    {tag_node}["{safe_tag} ({count})"]')
+            lines.append(f"    R --> {tag_node}")
+            node_id += 1
+
+            for title in titles[:3]:
+                finding_node = f"F{node_id}"
+                safe_title = title.replace('"', "'").replace("\n", " ")
+                lines.append(f'    {finding_node}["{safe_title}"]')
+                lines.append(f"    {tag_node} --> {finding_node}")
+                node_id += 1
+
+        # Cross-link tags that share findings
+        tag_list = list(tag_findings.keys())
+        for i, t1 in enumerate(tag_list):
+            for t2 in tag_list[i + 1:]:
+                shared = set(tag_findings[t1]) & set(tag_findings[t2])
+                if shared:
+                    lines.append(
+                        f"    {tag_nodes[t1]} -.-> {tag_nodes[t2]}"
+                    )
+
+        return "\n".join(lines)
+
+    def _generate_dashboard_html(self, payload: dict, date_str: str) -> str:
+        """Generate an HTML summary dashboard for Trilium."""
+        findings = payload.get("findings", [])
+        high = sum(1 for f in findings if f.get("relevance") == "high")
+        medium = sum(1 for f in findings if f.get("relevance") == "medium")
+        low = sum(1 for f in findings if f.get("relevance") == "low")
+
+        # Category breakdown
+        categories: Dict[str, int] = {}
+        for f in findings:
+            for tag in f.get("tags", []):
+                categories[tag] = categories.get(tag, 0) + 1
+
+        cat_rows = "".join(
+            f"<tr><td>{cat}</td><td>{cnt}</td></tr>"
+            for cat, cnt in sorted(categories.items(), key=lambda x: -x[1])
+        )
+
+        action_items = payload.get("action_items", [])
+        action_rows = "".join(
+            f"<tr><td>{a.get('action', '')[:100]}</td>"
+            f"<td>{a.get('impact', '?')}</td>"
+            f"<td>{a.get('effort', '?')}</td></tr>"
+            for a in action_items[:10]
+        )
+
+        return f"""<h2>Research Dashboard — {date_str}</h2>
+<h3>Summary</h3>
+<table>
+<tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Total Findings</td><td>{payload.get('total_findings', 0)}</td></tr>
+<tr><td>High Priority</td><td>{high}</td></tr>
+<tr><td>Medium</td><td>{medium}</td></tr>
+<tr><td>Low</td><td>{low}</td></tr>
+<tr><td>Queries Run</td><td>{payload.get('search_queries_run', 0)}</td></tr>
+<tr><td>Errors</td><td>{len(payload.get('errors', []))}</td></tr>
+</table>
+<h3>By Category</h3>
+<table><tr><th>Category</th><th>Findings</th></tr>{cat_rows}</table>
+{"<h3>Action Items</h3><table><tr><th>Action</th><th>Impact</th><th>Effort</th></tr>" + action_rows + "</table>" if action_rows else ""}"""
 
     def format_telegram(self, report: WeeklyResearchReport, mode: str = "weekly") -> str:
         """Format report for Telegram — actionable intelligence, not link dumps."""
