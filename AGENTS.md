@@ -49,6 +49,26 @@ User (Telegram) → Gateway → TrustGate → Scanner → Enricher → Complexit
 - `config/scorer_weights.yaml` — Complexity scoring weights (M2.7-tunable)
 - `able/.env` / `able/.env.example` — All env vars (API keys, tokens)
 
+## What Was Just Shipped (2026-04-07) — Execution Monitor, RustPython Research
+
+### Execution Monitor (PentAGI-Inspired)
+
+- **New file**: `able/core/gateway/execution_monitor.py` — pure heuristic progress analysis for the tool loop
+- **Wired into gateway.py**: Records every tool call, analyzes after each iteration, injects targeted intervention messages
+- Detects: spinning (same tool+args 3x), thrashing (A-B-A-B 4x), output repetition (>70% Jaccard similarity), error loops (3+ consecutive failures)
+- When `should_terminate`: breaks the tool loop immediately (spinning >8 iters, errors >10 iters)
+- Complements Hermes budget pressure — monitor is targeted ("you're stuck on web_search"), budget is blunt ("stop calling tools")
+
+### RustPython WASM Research
+
+- Investigated RustPython for sandboxed skill execution (WASM + WASI target)
+- Key finding: WASI + wasmtime gives memory caps, CPU fuel limits, no filesystem/network unless explicitly mapped
+- RustPython supports `Interpreter::without_stdlib()` for zero-capability builds, feature flags gate `os`/`socket`/`subprocess`
+- Performance: ~5-15x slower than CPython for tight loops, adequate for sandboxed skill scripts
+- Practical path: compile RustPython to WASI → run from Python 3.14 via wasmtime-py
+
+---
+
 ## What Was Just Shipped (2026-04-06) — Research Pipeline, Knowledge Base, Security Hardening, Edge Compute
 
 ### Research Pipeline Overhaul (Karpathy LLM Wiki + Feynman + OMEGA)

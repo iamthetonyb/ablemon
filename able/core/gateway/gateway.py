@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, AsyncIterator, Dict, List, Optional, Union
 from pathlib import Path
 from urllib.parse import unquote
 
+from able.core.gateway.execution_monitor import ExecutionMonitor
+
 # Project root is 4 levels up from this file (able/core/gateway/gateway.py → ABLE/)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
@@ -1076,6 +1078,7 @@ class ABLEGateway:
             logger.info(f"[PIPELINE] Step 6 — AI call: {_history_count} history msgs, {len(authorized_tools)} tools{_enriched_tag}")
 
             _used_tools = False
+            _execution_monitor = ExecutionMonitor()
             for loop_iteration in range(15):
                 _iter_start = _time.monotonic()
                 # ── Trace span for provider call ──
@@ -1174,6 +1177,17 @@ class ABLEGateway:
                         # Execute the tool
                         tool_output = await self._handle_tool_call(tool_call, update, user_id, msgs)
 
+                        # Record for execution monitor (PentAGI-inspired progress analysis)
+                        _tc_args = tool_call.arguments if isinstance(tool_call.arguments, dict) else {}
+                        _tc_success = not str(tool_output).lower().startswith("error")
+                        _execution_monitor.record(
+                            tool_name=tool_call.name,
+                            tool_args=_tc_args,
+                            tool_output=str(tool_output),
+                            iteration=loop_iteration,
+                            success=_tc_success,
+                        )
+
                         # Notify the user on Telegram that a tool was executed
                         if update and update.message:
                             try:
@@ -1201,6 +1215,30 @@ class ABLEGateway:
                             name=tool_call.name,
                             tool_call_id=tool_call.id
                         ))
+
+                    # ── Execution monitor analysis (PentAGI-inspired) ──────────
+                    # Detects spinning, thrashing, output repetition, error loops
+                    # More targeted than generic budget pressure — analyzes progress
+                    _monitor_verdict = _execution_monitor.analyze(
+                        original_task=text_content if isinstance(text_content, str) else ""
+                    )
+                    if _monitor_verdict.should_intervene:
+                        logger.warning(
+                            f"[PIPELINE] ExecutionMonitor: pattern={_monitor_verdict.pattern} "
+                            f"confidence={_monitor_verdict.confidence:.2f} — {_monitor_verdict.details}"
+                        )
+                        # Inject verdict into the last tool output msg (same pattern as budget_pressure)
+                        if msgs and hasattr(msgs[-1], 'role') and msgs[-1].role == Role.TOOL:
+                            _last = msgs[-1]
+                            msgs[-1] = Message(
+                                role=_last.role,
+                                content=_last.content + _monitor_verdict.message,
+                                name=_last.name,
+                                tool_call_id=_last.tool_call_id,
+                            )
+                    if _monitor_verdict.should_terminate:
+                        logger.warning("[PIPELINE] ExecutionMonitor: TERMINATING tool loop — unproductive pattern detected")
+                        break
                     continue
 
                 _total_ms = (_time.monotonic() - _pipeline_start) * 1000

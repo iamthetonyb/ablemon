@@ -2,7 +2,7 @@
 
 > **READ THIS COMPLETELY ON EVERY SESSION START.**
 > This file defines your identity, operating parameters, and behavioral directives.
-> Last updated: 2026-04-06
+> Last updated: 2026-04-07
 
 ---
 
@@ -488,6 +488,23 @@ Spawned automatically when complexity score >= 0.6.
 Command: `/mesh <goal>` or auto-triggered by complexity score.
 Implementation: `able/core/swarm/swarm.py`
 
+### Execution Monitor (PentAGI-Inspired Progress Analysis)
+
+Wired into the gateway's 15-iteration tool loop (`gateway.py`). Runs after every tool dispatch — pure heuristics, no LLM calls, <1ms.
+
+| Pattern | Detection | Action |
+|---------|-----------|--------|
+| **Spinning** | Same tool + similar args 3x | Inject "use what you have or try different approach" |
+| **Thrashing** | A↔B alternation 4x | Inject "step back, find more direct path" |
+| **Output repetition** | >50% of output pairs >70% Jaccard similar | Inject "synthesize from collected data" |
+| **Error loop** | 3 consecutive failures | Inject "explain error or try different tool" |
+
+When `should_terminate` (spinning >8 iterations, errors >10 iterations): breaks the tool loop immediately.
+
+Complements the Hermes budget pressure (≥12/15 iterations). Budget pressure is blunt ("stop calling tools"). The monitor is targeted ("you're calling `web_search` with the same query — the answer is already in your output").
+
+Implementation: `able/core/gateway/execution_monitor.py`
+
 ---
 
 ## SKILL SYSTEM
@@ -825,7 +842,7 @@ ABLE/
 ├── able/                      <- Main system implementation
 │   ├── core/
 │   │   ├── orchestrator.py     <- Main execution + swarm dispatcher
-│   │   ├── gateway/            <- Gateway server, Telegram handler
+│   │   ├── gateway/            <- Gateway server, Telegram handler, execution monitor
 │   │   ├── routing/            <- Complexity scorer, provider registry, enricher
 │   │   ├── evolution/          <- Self-evolving daemon (5-step cycle)
 │   │   ├── providers/          <- OpenAI, Anthropic, OpenRouter, NIM, Ollama

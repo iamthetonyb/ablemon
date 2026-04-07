@@ -215,6 +215,24 @@ Research is cumulative: loads past 10 reports, extracts explored topics, dedupli
 - **ANE optimizer** (`able/core/providers/ane_optimizer.py`): Per-chip profiles (M1-M4), battery-aware routing (ANE prefill + GPU decode), Modelfile generation
 - **Compute mesh** (`able/core/federation/compute_mesh.py`): mDNS discovery, capability reporting, idle-aware job scheduling for distributed training
 
+## Execution Monitor (PentAGI-Inspired)
+
+`able/core/gateway/execution_monitor.py` — wired into the gateway's 15-iteration tool loop.
+Analyzes WHETHER PROGRESS IS BEING MADE, not just how many iterations have passed.
+
+**Detection patterns:**
+- **Spinning**: Same tool called 3+ times with similar args (stuck in a loop)
+- **Thrashing**: A-B-A-B alternating between 2 tools without forward progress
+- **Output repetition**: Tool outputs >70% similar (getting same results repeatedly)
+- **Error loop**: 3+ consecutive failures without changing approach
+
+**Integration**: After each tool dispatch in `gateway.py`, the monitor records the call.
+After all tool calls in an iteration complete, `analyze()` returns a `MonitorVerdict`.
+If `should_intervene`: targeted message injected into last tool output (same pattern as budget pressure).
+If `should_terminate`: tool loop breaks immediately.
+
+Complements (not replaces) the iteration budget pressure at ≥12/15 iterations.
+
 ## Interaction Auditor Enhancements
 
 `able/core/distillation/interaction_auditor.py` judge prompt includes:
