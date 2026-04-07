@@ -1179,7 +1179,13 @@ class ABLEGateway:
 
                         # Record for execution monitor (PentAGI-inspired progress analysis)
                         _tc_args = tool_call.arguments if isinstance(tool_call.arguments, dict) else {}
-                        _tc_success = not str(tool_output).lower().startswith("error")
+                        _tc_output_str = str(tool_output).lower()
+                        _tc_success = not (
+                            _tc_output_str.startswith("error")
+                            or _tc_output_str.startswith("⚠️ tool error")
+                            or _tc_output_str.startswith("❌")
+                            or "failed:" in _tc_output_str[:100]
+                        )
                         _execution_monitor.record(
                             tool_name=tool_call.name,
                             tool_args=_tc_args,
@@ -1238,7 +1244,23 @@ class ABLEGateway:
                             )
                     if _monitor_verdict.should_terminate:
                         logger.warning("[PIPELINE] ExecutionMonitor: TERMINATING tool loop — unproductive pattern detected")
-                        break
+                        # Synthesize a response from the last available content instead of
+                        # falling through to the generic "exceeded iterations" error message.
+                        _total_ms = (_time.monotonic() - _pipeline_start) * 1000
+                        _monitor_summary = _execution_monitor.get_summary()
+                        logger.info(
+                            f"[PIPELINE] ── MONITOR STOP ── iterations={loop_iteration + 1} "
+                            f"pattern={_monitor_verdict.pattern} total={_total_ms:.0f}ms"
+                        )
+                        # Use the last model response if available, else explain termination
+                        _last_content = result.content if result and result.content else ""
+                        if _last_content:
+                            return _last_content
+                        return (
+                            f"I wasn't able to complete this task — my tool calls were "
+                            f"{_monitor_verdict.pattern} ({_monitor_verdict.details}). "
+                            f"Could you rephrase or break this into smaller steps?"
+                        )
                     continue
 
                 _total_ms = (_time.monotonic() - _pipeline_start) * 1000
