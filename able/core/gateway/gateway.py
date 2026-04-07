@@ -675,6 +675,11 @@ class ABLEGateway:
         # SSE subscribers: list of asyncio.Queue for live event streaming
         self._sse_subscribers: list = []
 
+        # Event bus for component decoupling
+        from able.core.gateway.event_bus import EventBus, SSEBridge
+        self.event_bus = EventBus()
+        self.sse_bridge = SSEBridge(self.event_bus)
+
         # Interaction DB path (used by metrics handlers)
         self._interaction_db_path: str = "data/interaction_log.db"
 
@@ -2587,10 +2592,36 @@ class ABLEGateway:
         from able.core.routing.metrics_queries import get_budget_metrics
         return web.json_response(get_budget_metrics(hours, self._interaction_db_path))
 
+    async def _metrics_prometheus_handler(self, request: web.Request) -> web.Response:
+        """GET /metrics/prometheus — Prometheus text format exposition."""
+        if not self._verify_service_token(request):
+            return self._unauthorized_response()
+        from able.core.routing.prometheus_exporter import export_prometheus
+        # Pass provider health if available from last smoke test
+        provider_health = None
+        if hasattr(self, '_last_smoke_results'):
+            provider_health = {
+                n: s.get("healthy", False)
+                for n, s in self._last_smoke_results.items()
+            }
+        text = export_prometheus(
+            db_path=self._interaction_db_path,
+            provider_health=provider_health,
+        )
+        return web.Response(
+            text=text,
+            content_type="text/plain; version=0.0.4; charset=utf-8",
+        )
+
     # ── SSE real-time event stream ────────────────────────────────────────────
 
     async def _push_event(self, event_type: str, data: dict) -> None:
-        """Push an event to all active SSE subscribers."""
+        """Push an event to event bus + legacy SSE subscribers."""
+        # Emit through the typed event bus (new subscribers use this)
+        if hasattr(self, 'event_bus'):
+            await self.event_bus.emit(event_type, data, source="gateway")
+
+        # Legacy direct SSE path (backward compat until fully migrated)
         if not self._sse_subscribers:
             return
         payload = _json.dumps({
@@ -2748,6 +2779,7 @@ class ABLEGateway:
         app.router.add_get("/metrics/corpus", self._metrics_corpus_handler)
         app.router.add_get("/metrics/evolution", self._metrics_evolution_handler)
         app.router.add_get("/metrics/budget", self._metrics_budget_handler)
+        app.router.add_get("/metrics/prometheus", self._metrics_prometheus_handler)
         # SSE event stream
         app.router.add_get("/events", self._events_handler)
         # Studio chat through gateway
@@ -2971,6 +3003,10 @@ class ABLEGateway:
             except Exception as e:
                 print(f"Failed to start bot for {client_id}: {e}")
 
+        # Start event bus + SSE bridge
+        await self.event_bus.start()
+        self.sse_bridge.start()
+
         provider_count = len(self.provider_chain.providers)
         print(f"🚀 ABLE v2 Gateway running | {provider_count} AI provider(s) active")
 
@@ -2981,6 +3017,7 @@ class ABLEGateway:
                     self.provider_registry.smoke_test_providers(),
                     timeout=10.0 * max(len(self.provider_registry.available_providers), 1),
                 )
+                self._last_smoke_results = smoke_results  # Prometheus endpoint reads this
                 healthy = [n for n, s in smoke_results.items() if s.get("healthy")]
                 unhealthy = [n for n, s in smoke_results.items() if not s.get("healthy")]
                 if healthy:

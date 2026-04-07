@@ -1,6 +1,7 @@
 """Validate and merge incoming federated contributions into the local store.
 
 Security layers (defense in depth):
+0. Ed25519 signature verification — reject untrusted signers
 1. TrustGate — 52+ injection patterns
 2. Scaffolding stripping — defense-in-depth even though contributor already stripped
 3. Quality re-validation — reject suspiciously short or low-quality pairs
@@ -18,7 +19,7 @@ import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from able.core.federation.models import IngestResult
 
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_INBOX = Path.home() / ".able" / "federation" / "inbox"
 _DEFAULT_PROCESSED = Path.home() / ".able" / "federation" / "processed"
+_DEFAULT_TRUSTED_PEERS = Path(__file__).resolve().parents[3] / "config" / "trusted_peers.yaml"
 
 # Minimum trust score from TrustGate for accepting a pair
 _MIN_TRUST_SCORE = 0.7
@@ -36,6 +38,112 @@ _MIN_TRUST_SCORE = 0.7
 # Minimum text lengths for quality re-validation
 _MIN_PROMPT_LEN = 20
 _MIN_RESPONSE_LEN = 50
+
+
+# ── Trusted peers and verification policy ────────────────────────────
+
+
+def _load_trusted_peers(
+    config_path: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Load trusted_peers.yaml. Returns dict with 'verification_policy' and 'trusted_peers'."""
+    path = config_path or _DEFAULT_TRUSTED_PEERS
+    if not path.exists():
+        return {"verification_policy": "open", "trusted_peers": []}
+    try:
+        import yaml
+
+        with open(path, "r") as f:
+            data = yaml.safe_load(f)
+        if not isinstance(data, dict):
+            return {"verification_policy": "open", "trusted_peers": []}
+        return {
+            "verification_policy": data.get("verification_policy", "open"),
+            "trusted_peers": data.get("trusted_peers") or [],
+        }
+    except ImportError:
+        # Fallback: parse simple lines
+        policy = "open"
+        try:
+            for line in path.read_text().splitlines():
+                line = line.strip()
+                if line.startswith("verification_policy:"):
+                    val = line.split(":", 1)[1].strip().strip("'\"")
+                    if val in ("open", "verified", "trusted_only"):
+                        policy = val
+        except Exception:
+            pass
+        return {"verification_policy": policy, "trusted_peers": []}
+    except Exception as e:
+        logger.warning("Federation: failed to load trusted_peers.yaml: %s", e)
+        return {"verification_policy": "open", "trusted_peers": []}
+
+
+def _verify_signature(
+    meta: Dict[str, Any],
+    pair_lines: List[str],
+    peers_config: Dict[str, Any],
+) -> Optional[bool]:
+    """Verify the Ed25519 signature on a contribution.
+
+    Returns:
+        True  — signature valid
+        False — signature present but invalid, or policy violation
+        None  — unsigned contribution
+    """
+    sig_b64 = meta.get("signature")
+    pub_b64 = meta.get("public_key")
+
+    if not sig_b64 or not pub_b64:
+        return None  # unsigned
+
+    try:
+        from able.core.federation.crypto import (
+            decode_b64,
+            fingerprint,
+            is_available,
+            verify_contribution,
+        )
+
+        if not is_available():
+            logger.warning(
+                "Federation: crypto unavailable — cannot verify signature, treating as unsigned"
+            )
+            return None
+
+        signature = decode_b64(sig_b64)
+        pub_bytes = decode_b64(pub_b64)
+
+        # Reconstruct the exact payload that was signed (pairs only, newline-joined)
+        payload_bytes = "\n".join(pair_lines).encode("utf-8")
+
+        if not verify_contribution(pub_bytes, signature, payload_bytes):
+            fp = fingerprint(pub_bytes)
+            logger.warning(
+                "Federation: INVALID signature from key %s", fp
+            )
+            return False
+
+        fp = fingerprint(pub_bytes)
+        logger.info("Federation: valid signature from key %s", fp)
+
+        # Check trusted_only policy
+        policy = peers_config.get("verification_policy", "open")
+        if policy == "trusted_only":
+            trusted = peers_config.get("trusted_peers") or []
+            trusted_fps = {p.get("fingerprint") for p in trusted if isinstance(p, dict)}
+            if fp not in trusted_fps:
+                logger.warning(
+                    "Federation: signer %s not in trusted_peers list — rejecting (policy: trusted_only)",
+                    fp,
+                )
+                return False
+
+        return True
+
+    except Exception as e:
+        logger.warning("Federation: signature verification error: %s", e)
+        return False
 
 
 def _validate_pair(pair: dict) -> Optional[str]:
@@ -79,6 +187,7 @@ def ingest_contribution(
     filepath: Path,
     store: DistillationStore,
     local_domains: Optional[list[str]] = None,
+    trusted_peers_path: Optional[Path] = None,
 ) -> IngestResult:
     """Process a single contribution JSONL file.
 
@@ -86,6 +195,7 @@ def ingest_contribution(
         filepath: Path to the JSONL contribution file.
         store: Local distillation store to merge into.
         local_domains: This instance's top domains (for affinity boost).
+        trusted_peers_path: Override path to trusted_peers.yaml (for testing).
     """
     from able.core.distillation.harvesters.base import BaseHarvester
     from able.core.distillation.models import DistillationPair
@@ -103,6 +213,7 @@ def ingest_contribution(
         return result
 
     # First line is metadata — validate it
+    meta: Dict[str, Any] = {}
     try:
         meta = json.loads(lines[0])
         if meta.get("type") != "able_network_contribution":
@@ -120,6 +231,49 @@ def ingest_contribution(
 
     # Process pair lines (skip metadata line)
     pair_lines = lines[1:] if lines else []
+
+    # ── Layer 0: Ed25519 signature verification ──────────────────
+    peers_config = _load_trusted_peers(trusted_peers_path)
+    policy = peers_config.get("verification_policy", "open")
+
+    # Strip empty lines for signature verification (match what contributor signed)
+    raw_pair_lines = [l for l in pair_lines if l.strip()]
+    sig_result = _verify_signature(meta, raw_pair_lines, peers_config)
+
+    if sig_result is None:
+        # Unsigned contribution
+        if policy == "verified":
+            logger.warning(
+                "Federation: rejecting unsigned contribution %s (policy: verified)",
+                filepath.name,
+            )
+            result.errors = 1
+            return result
+        if policy == "trusted_only":
+            logger.warning(
+                "Federation: rejecting unsigned contribution %s (policy: trusted_only)",
+                filepath.name,
+            )
+            result.errors = 1
+            return result
+        logger.info(
+            "Federation: unsigned contribution %s — accepting (policy: open)",
+            filepath.name,
+        )
+    elif sig_result is False:
+        # Invalid signature or untrusted signer
+        logger.warning(
+            "Federation: rejecting contribution %s — signature verification failed",
+            filepath.name,
+        )
+        result.errors = 1
+        return result
+    else:
+        # sig_result is True — valid signature
+        logger.info(
+            "Federation: verified contribution %s — signature valid",
+            filepath.name,
+        )
 
     for line_num, line in enumerate(pair_lines, start=2):
         line = line.strip()

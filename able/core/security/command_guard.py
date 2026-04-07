@@ -145,6 +145,8 @@ class CommandGuard:
     def __init__(self, trust_tier: int = 1):
         self.trust_tier = trust_tier  # 1-4, higher = more permissions
         self._yaml_permissions = self._load_yaml_permissions()
+        # Enhanced policy engine (supports priority ordering, globs, scopes)
+        self._policy_engine = self._load_policy_engine()
 
     @staticmethod
     def _load_yaml_permissions() -> Optional[dict]:
@@ -166,8 +168,35 @@ class CommandGuard:
             )
             return None
 
+    @staticmethod
+    def _load_policy_engine():
+        """Load the enhanced policy engine if available."""
+        try:
+            from able.core.security.policy_engine import PolicyEngine
+            yaml_path = Path(__file__).parent.parent.parent.parent / "config" / "tool_permissions.yaml"
+            return PolicyEngine.from_yaml(yaml_path)
+        except Exception:
+            return None
+
     def _yaml_verdict(self, command: str) -> Optional[CommandVerdict]:
-        """Check YAML permissions first. Returns verdict or None to fall through."""
+        """Check YAML permissions first. Returns verdict or None to fall through.
+
+        Uses the enhanced PolicyEngine if available (supports priority ordering
+        and glob patterns). Falls back to legacy 3-tier list matching.
+        """
+        # Try enhanced policy engine first
+        if self._policy_engine:
+            from able.core.security.policy_engine import PolicyAction
+            verdict = self._policy_engine.evaluate(command)
+            if verdict.matched:
+                action_map = {
+                    PolicyAction.ALLOW: CommandVerdict.ALLOWED,
+                    PolicyAction.DENY: CommandVerdict.DENIED,
+                    PolicyAction.REQUIRE_APPROVAL: CommandVerdict.REQUIRES_APPROVAL,
+                }
+                return action_map.get(verdict.action)
+
+        # Legacy fallback: simple list matching
         if not self._yaml_permissions:
             return None
 

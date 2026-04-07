@@ -157,7 +157,7 @@ def export_contribution(
     filename = f"contribution-{ts.strftime('%Y%m%d-%H%M%S')}-{instance_id[:8]}.jsonl"
     filepath = out / filename
 
-    metadata = {
+    metadata: dict = {
         "type": "able_network_contribution",
         "version": 1,
         "instance_id": instance_id,
@@ -166,10 +166,34 @@ def export_contribution(
         "created_at": ts.isoformat(),
     }
 
+    # Build payload lines (pairs only — metadata is added after signing)
+    payload_lines = [json.dumps(record) for record in scrubbed]
+    payload_bytes = "\n".join(payload_lines).encode("utf-8")
+
+    # Sign the payload
+    try:
+        from able.core.federation.crypto import (
+            encode_b64,
+            is_available,
+            load_or_create_keypair,
+            sign_contribution as _sign,
+        )
+
+        if is_available():
+            private_key, pub_bytes = load_or_create_keypair()
+            signature = _sign(private_key, payload_bytes)
+            metadata["signature"] = encode_b64(signature)
+            metadata["public_key"] = encode_b64(pub_bytes)
+            logger.info("Federation: contribution signed with Ed25519")
+        else:
+            logger.warning("Federation: crypto unavailable — contribution is unsigned")
+    except Exception as e:
+        logger.warning("Federation: signing failed (%s) — contribution is unsigned", e)
+
     with open(filepath, "w") as f:
         f.write(json.dumps(metadata) + "\n")
-        for record in scrubbed:
-            f.write(json.dumps(record) + "\n")
+        for line in payload_lines:
+            f.write(line + "\n")
 
     logger.info(
         "Federation: exported %d pairs across %d domains to %s",

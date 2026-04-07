@@ -1,0 +1,11 @@
+# Trusted federation peers — only contributions signed by these keys are ingested
+# Add peer public key fingerprints here after key exchange
+trusted_peers:
+  # - name: "peer-1"
+  #   fingerprint: "sha256:abc123..."
+  #   public_key: "base64-encoded-ed25519-public-key"
+  #   added: "2026-04-07"
+  #   notes: "Tony's second instance"
+
+# Policy: "open" (accept all, verify if signed), "verified" (reject unsigned), "trusted_only" (reject if not in list)
+verification_policy: "open"
