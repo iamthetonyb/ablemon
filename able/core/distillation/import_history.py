@@ -72,14 +72,16 @@ _PLATFORM_HINTS = {
     "manus": {
         "name": "Manus",
         "export_paths": [
-            "~/.manus/sessions/",
-            "~/Documents/Manus/",
+            "~/.able/external_sessions/manus_export.jsonl",
+            "~/.able/external_sessions/manus_*.jsonl",
             "~/Downloads/manus-export/",
+            "~/.manus/sessions/",
         ],
         "api_exportable": True,
         "export_instructions": (
-            "If you have the Manus desktop app, sessions are auto-discovered. "
-            "Otherwise: export from manus.app → Settings → Export History"
+            "Run: python scripts/manus-api-export.py --api-key YOUR_KEY "
+            "(get key from manus.im → Settings → API). "
+            "Auth header: x-manus-api-key"
         ),
     },
     "gemini": {

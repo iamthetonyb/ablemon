@@ -12,7 +12,7 @@ import json
 import logging
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -169,9 +169,61 @@ class OpenCLIHarvester(BaseHarvester):
         if not data:
             return []
 
-        # For JSONL session files (e.g. Codex), records are individual events.
-        # Collect message-bearing records into a single conversation.
+        # For JSONL files: two modes depending on message_path.
+        # - With message_path (e.g. Manus): each line is a conversation
+        #   with a nested messages array → extract per-line conversations.
+        # - Without message_path (e.g. Codex): each line is a single
+        #   event record → collect into one conversation.
         if path.suffix == ".jsonl":
+            # Check if any of the first 3 records have a message_path key —
+            # if so, this is per-line conversation format (Manus, ChatGPT export)
+            has_nested_messages = message_path and any(
+                isinstance(r, dict) and message_path in r
+                for r in data[:3]
+            )
+            if has_nested_messages:
+                results: list[HarvestedConversation] = []
+                file_mtime = datetime.fromtimestamp(
+                    path.stat().st_mtime, tz=timezone.utc
+                )
+                for idx, item in enumerate(data):
+                    try:
+                        if not isinstance(item, dict):
+                            continue
+                        raw_messages = self._extract_messages(item, message_path)
+                        messages = self._normalise_roles(raw_messages, role_map)
+                        messages = self._clean_messages(messages)
+                        if not messages or self._is_meta_conversation(messages):
+                            continue
+                        thinking: list[str] = []
+                        if thinking_field:
+                            think_val = item.get(thinking_field, "")
+                            if think_val:
+                                thinking.append(str(think_val))
+                        # Derive ID from session_id if available, else content hash
+                        sid = item.get("session_id", item.get("id", ""))
+                        convo_id = str(uuid.uuid5(
+                            uuid.NAMESPACE_URL,
+                            f"{platform}:{sid or f'{path}:{idx}'}",
+                        ))
+                        results.append(
+                            HarvestedConversation(
+                                id=convo_id,
+                                source=f"opencli:{platform}",
+                                messages=messages,
+                                model=model_name,
+                                timestamp=file_mtime,
+                                domain=self._detect_domain(messages),
+                                thinking_blocks=thinking,
+                                metadata={"file": str(path), "platform": platform,
+                                          "title": item.get("title", "")},
+                            )
+                        )
+                    except Exception:
+                        logger.debug("Skipped malformed record %d in %s", idx, path)
+                return results
+
+            # Flat event-per-line format (Codex, etc.)
             messages, thinking = self._collect_jsonl_session(
                 data, role_map, thinking_field,
             )

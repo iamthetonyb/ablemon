@@ -1,14 +1,17 @@
 platform: manus
-description: "Extract Manus AI assistant conversations from session logs"
+description: "Extract Manus AI agent conversations from API export or session logs"
 model_name: "manus"
 harvest_method: "file"
 file_patterns:
+  - "~/.able/external_sessions/manus_*.jsonl"
+  - "~/Downloads/manus-export/*.json"
+  - "~/Downloads/manus-export/*.jsonl"
   - "~/.manus/sessions/*.json"
   - "~/.manus/sessions/*.jsonl"
-  - "~/Documents/Manus/*.json"
-message_path: ""
+message_path: "messages"
 role_mapping:
   user: user
   assistant: assistant
+  tool: tool
   system: system
 thinking_field: null
