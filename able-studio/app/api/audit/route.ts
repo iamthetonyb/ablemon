@@ -39,8 +39,9 @@ export async function GET(req: NextRequest) {
       total: rows.length,
     });
   } catch (error) {
+    console.error("Failed to load audit logs:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load audit logs" },
+      { error: "Failed to load audit logs" },
       { status: 500 }
     );
   }
@@ -49,10 +50,10 @@ export async function GET(req: NextRequest) {
 // Gateway writes audit events here
 export async function POST(req: NextRequest) {
   try {
-    // Verify internal service token
+    // Verify internal service token (unconditional — reject if env var not set)
     const serviceToken = req.headers.get("x-able-service-token");
-    const expectedToken = process.env.ABLE_SERVICE_TOKEN;
-    if (expectedToken && serviceToken !== expectedToken) {
+    const expectedToken = process.env.ABLE_SERVICE_TOKEN || "";
+    if (!expectedToken || serviceToken !== expectedToken) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
 
@@ -103,7 +104,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, id: inserted.id });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to create audit log" },
+      { error: "Failed to create audit log" },
       { status: 500 }
     );
   }

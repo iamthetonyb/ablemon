@@ -24,8 +24,9 @@ export async function GET() {
       })),
     });
   } catch (error) {
+    console.error("Failed to load clients:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load clients" },
+      { error: "Failed to load clients" },
       { status: 500 }
     );
   }
@@ -62,9 +63,12 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : "Failed to create client";
-    const status = msg.includes("unique") ? 409 : 500;
-    return NextResponse.json({ error: msg }, { status });
+    console.error("Failed to create client:", error);
+    const isConflict = error instanceof Error && error.message.includes("unique");
+    return NextResponse.json(
+      { error: isConflict ? "A client with that slug already exists" : "Failed to create client" },
+      { status: isConflict ? 409 : 500 }
+    );
   }
 }
 
@@ -105,8 +109,9 @@ export async function PUT(req: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    console.error("Failed to update API keys:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to update API keys" },
+      { error: "Failed to update API keys" },
       { status: 500 }
     );
   }

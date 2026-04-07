@@ -91,7 +91,7 @@ export async function GET() {
     });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load dashboard" },
+      { error: "Failed to load dashboard" },
       { status: 500 }
     );
   }

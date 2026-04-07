@@ -187,7 +187,8 @@ def get_evolution_metrics(hours: int = 168, db_path: str = DEFAULT_DB_PATH) -> D
                     "updated_at": cycle_data.get("last_updated"),
                     "updated_by": cycle_data.get("updated_by"),
                 })
-            except Exception:
+            except Exception as e:
+                logger.debug("Failed to parse evolution cycle %s: %s", f.name, e)
                 continue
 
     current_weights: Dict[str, Any] = {}
@@ -196,8 +197,8 @@ def get_evolution_metrics(hours: int = 168, db_path: str = DEFAULT_DB_PATH) -> D
         try:
             with open(weights_path) as f:
                 current_weights = yaml.safe_load(f) or {}
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to load scorer weights: %s", e)
 
     since = since_iso(hours)
     drift = db_query(
@@ -247,8 +248,8 @@ def get_budget_metrics(hours: int = 24, db_path: str = DEFAULT_DB_PATH) -> Dict[
                 "opus_daily_usd": w.get("opus_daily_budget_usd", 25.0),
                 "opus_monthly_usd": w.get("opus_monthly_budget_usd", 150.0),
             }
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to load budget caps from scorer weights: %s", e)
 
     opus_24h = db_query_one(
         "SELECT ROUND(SUM(cost_usd), 4) as spent FROM interaction_log WHERE selected_tier = 4 AND timestamp >= ?",

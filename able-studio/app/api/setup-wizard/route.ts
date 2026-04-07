@@ -6,8 +6,9 @@ export async function GET() {
     const data = await getSetupWizard();
     return NextResponse.json(data);
   } catch (error) {
+    console.error("Failed to load setup wizard:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load setup wizard" },
+      { error: "Failed to load setup wizard" },
       { status: 502 }
     );
   }

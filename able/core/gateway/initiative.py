@@ -156,6 +156,9 @@ class InitiativeEngine:
             Message(role=Role.USER, content=prompt)
         ]
 
+        if not getattr(self.gateway, 'provider_chain', None):
+            return "⚠️ Provider chain not initialized — skipping LLM call."
+
         try:
             result = await self.gateway.provider_chain.complete(
                 msgs,
@@ -246,7 +249,8 @@ class InitiativeEngine:
             inbound = sum(1 for m in recent if m.get("direction") == "inbound")
             outbound = sum(1 for m in recent if m.get("direction") == "outbound")
             return f"{inbound} user messages, {outbound} ABLE responses (last ~100 messages)"
-        except Exception:
+        except Exception as e:
+            logger.debug("Transcript collection failed: %s", e)
             return "Transcript data unavailable."
 
     def _collect_cron_history(self) -> str:
@@ -264,7 +268,8 @@ class InitiativeEngine:
                 err = f" — {h['error']}" if h.get("error") else ""
                 lines.append(f"  {icon} {ts} {h['name']} {dur}{trigger}{err}")
             return "\n".join(lines)
-        except Exception:
+        except Exception as e:
+            logger.debug("Cron history collection failed: %s", e)
             return "Cron history unavailable."
 
     # ── Scheduled Jobs ────────────────────────────────────────────────────
@@ -323,8 +328,8 @@ class InitiativeEngine:
                     f"- Mood: {needs.mood} | Hunger: {needs.hunger:.0f} | Thirst: {needs.thirst:.0f} | Energy: {needs.energy:.0f}\n"
                     f"- W:{buddy.battles_won} D:{buddy.battles_drawn} L:{buddy.battles_lost} | Eval passes: {buddy.eval_passes}\n"
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Buddy status collection failed: %s", e)
 
         # Load last night's research report (newest file wins)
         research_summary = ""
@@ -364,8 +369,8 @@ class InitiativeEngine:
                     research_summary = "\n".join(lines)
                 else:
                     research_summary = f"\n## Last Night's Research\n- Report from {ts} had 0 findings (search may have failed)"
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Research report collection failed: %s", e)
 
         prompt = f"""Draft the morning briefing based on this REAL system data.
 
@@ -421,8 +426,8 @@ Rules: Be direct. No fluff. Every claim must reference the data above. If someth
                     f"- {buddy.display_emoji} {buddy.name} Lv.{buddy.level} — {needs.mood}\n"
                     f"- Hunger: {needs.hunger:.0f} | Thirst: {needs.thirst:.0f} | Energy: {needs.energy:.0f}\n"
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Evening buddy status collection failed: %s", e)
 
         prompt = f"""Draft my evening check-in based on today's real data.
 

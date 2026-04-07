@@ -11,10 +11,9 @@ export async function GET(_: NextRequest, context: RouteContext) {
     const payload = await getResource(id);
     return NextResponse.json(payload);
   } catch (error) {
+    console.error("Failed to load resource:", error);
     return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : "Failed to load resource",
-      },
+      { error: "Failed to load resource" },
       { status: 502 },
     );
   }
@@ -31,10 +30,9 @@ export async function POST(req: NextRequest, context: RouteContext) {
     );
     return NextResponse.json(payload);
   } catch (error) {
+    console.error("Failed to execute resource action:", error);
     return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : "Failed to execute resource action",
-      },
+      { error: "Failed to execute resource action" },
       { status: 502 },
     );
   }

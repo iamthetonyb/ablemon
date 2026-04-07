@@ -115,7 +115,7 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ success: true });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to update setting" },
+      { error: "Failed to update setting" },
       { status: 500 }
     );
   }

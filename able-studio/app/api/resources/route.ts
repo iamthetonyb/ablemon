@@ -6,8 +6,9 @@ export async function GET() {
     const data = await getResources();
     return NextResponse.json(data);
   } catch (error) {
+    console.error("Failed to load resources:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load resources", resources: [] },
+      { error: "Failed to load resources", resources: [] },
       { status: 502 }
     );
   }

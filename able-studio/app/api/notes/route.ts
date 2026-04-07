@@ -27,8 +27,9 @@ export async function GET(req: NextRequest) {
       })),
     });
   } catch (error) {
+    console.error("Failed to load notes:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load notes" },
+      { error: "Failed to load notes" },
       { status: 500 }
     );
   }
@@ -65,8 +66,9 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error) {
+    console.error("Failed to create note:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to create note" },
+      { error: "Failed to create note" },
       { status: 500 }
     );
   }
@@ -100,8 +102,9 @@ export async function PUT(req: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    console.error("Failed to update note:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to update note" },
+      { error: "Failed to update note" },
       { status: 500 }
     );
   }
@@ -120,8 +123,9 @@ export async function DELETE(req: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    console.error("Failed to delete note:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to delete note" },
+      { error: "Failed to delete note" },
       { status: 500 }
     );
   }

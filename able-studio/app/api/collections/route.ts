@@ -6,8 +6,9 @@ export async function GET() {
     const data = await getCollections();
     return NextResponse.json(data);
   } catch (error) {
+    console.error("Failed to load collections:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load collections", collections: [] },
+      { error: "Failed to load collections", collections: [] },
       { status: 502 }
     );
   }

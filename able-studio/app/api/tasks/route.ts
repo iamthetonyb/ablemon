@@ -28,8 +28,9 @@ export async function GET(req: NextRequest) {
       })),
     });
   } catch (error) {
+    console.error("Failed to load tasks:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load tasks" },
+      { error: "Failed to load tasks" },
       { status: 500 }
     );
   }
@@ -68,8 +69,9 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error) {
+    console.error("Failed to create task:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to create task" },
+      { error: "Failed to create task" },
       { status: 500 }
     );
   }
@@ -103,8 +105,9 @@ export async function PUT(req: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    console.error("Failed to update task:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to update task" },
+      { error: "Failed to update task" },
       { status: 500 }
     );
   }
@@ -123,8 +126,9 @@ export async function DELETE(req: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    console.error("Failed to delete task:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to delete task" },
+      { error: "Failed to delete task" },
       { status: 500 }
     );
   }

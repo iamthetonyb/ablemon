@@ -2973,7 +2973,29 @@ class ABLEGateway:
 
         provider_count = len(self.provider_chain.providers)
         print(f"🚀 ABLE v2 Gateway running | {provider_count} AI provider(s) active")
-        
+
+        # ── Startup smoke test (non-blocking, 10s timeout per provider) ──
+        if hasattr(self, 'provider_registry') and self.provider_registry:
+            try:
+                smoke_results = await asyncio.wait_for(
+                    self.provider_registry.smoke_test_providers(),
+                    timeout=10.0 * max(len(self.provider_registry.available_providers), 1),
+                )
+                healthy = [n for n, s in smoke_results.items() if s.get("healthy")]
+                unhealthy = [n for n, s in smoke_results.items() if not s.get("healthy")]
+                if healthy:
+                    print(f"✅ Smoke test passed: {', '.join(healthy)}")
+                for name in unhealthy:
+                    err = smoke_results[name].get("error", "unknown")
+                    logger.warning("Smoke test FAILED for %s (T%d): %s", name, smoke_results[name].get("tier", 0), err)
+                    print(f"⚠️  Smoke test failed: {name} — {err}")
+            except asyncio.TimeoutError:
+                logger.warning("Smoke test timed out — skipping, providers may be slow")
+                print("⚠️  Smoke test timed out — continuing without verification")
+            except Exception as e:
+                logger.warning("Smoke test error: %s — startup continues", e)
+                print(f"⚠️  Smoke test error: {e} — continuing anyway")
+
         # Start the Persistence Layer (Proactive AGI)
         self.initiative.register_jobs(self.scheduler)
 
@@ -3020,6 +3042,45 @@ class ABLEGateway:
                     await asyncio.sleep(30)
 
         asyncio.create_task(_supervised_scheduler())
+
+        # ── Config hot-reload polling (60s interval) ──────────────────
+        # Detects changes to routing_config.yaml and scorer_weights.yaml,
+        # rebuilds provider chains and scorer weights without restart.
+        _routing_config_path = _PROJECT_ROOT / "config" / "routing_config.yaml"
+        _scorer_weights_path = _PROJECT_ROOT / "config" / "scorer_weights.yaml"
+
+        async def _config_reload_poller():
+            import hashlib
+            _last_scorer_hash = ""
+            try:
+                if _scorer_weights_path.exists():
+                    _last_scorer_hash = hashlib.md5(_scorer_weights_path.read_bytes()).hexdigest()
+            except OSError:
+                pass
+
+            while True:
+                await asyncio.sleep(60)
+                try:
+                    # Check routing_config.yaml for provider changes
+                    if hasattr(self, 'provider_registry') and self.provider_registry:
+                        if self.provider_registry.reload_from_yaml(_routing_config_path):
+                            # Rebuild tier chains from updated registry
+                            for tier in self.provider_registry.tiers:
+                                self.tier_chains[tier] = self.provider_registry.build_chain_for_tier(tier)
+                            self.provider_chain = self.provider_registry.build_provider_chain()
+                            logger.info("Provider chains rebuilt from hot-reloaded config")
+
+                    # Check scorer_weights.yaml for weight changes
+                    if self.complexity_scorer and _scorer_weights_path.exists():
+                        new_hash = hashlib.md5(_scorer_weights_path.read_bytes()).hexdigest()
+                        if new_hash != _last_scorer_hash:
+                            self.complexity_scorer.reload_weights()
+                            _last_scorer_hash = new_hash
+                            logger.info("Scorer weights hot-reloaded (v%d)", self.complexity_scorer.version)
+                except Exception as e:
+                    logger.debug("Config reload check failed: %s", e)
+
+        asyncio.create_task(_config_reload_poller())
 
         # Start the Evolution Daemon (M2.7 background self-improvement)
         try:

@@ -92,6 +92,7 @@ class ProviderRegistry:
     def __init__(self, providers: List[ProviderTierConfig]):
         self._providers: Dict[str, ProviderTierConfig] = {}
         self._by_tier: Dict[int, List[ProviderTierConfig]] = {}
+        self._config_hash: str = ""
 
         for p in providers:
             self._providers[p.name] = p
@@ -133,7 +134,26 @@ class ProviderRegistry:
                 logger.error(f"Invalid provider config entry: {e} — skipping")
 
         logger.info(f"Loaded {len(providers)} providers from {path}")
-        return cls(providers)
+        instance = cls(providers)
+        import hashlib
+        instance._config_hash = hashlib.md5(path.read_bytes()).hexdigest()
+        return instance
+
+    def reload_from_yaml(self, config_path: str | Path) -> bool:
+        """Hot-reload config if file changed. Returns True if config was reloaded."""
+        import hashlib
+        path = Path(config_path)
+        if not path.exists():
+            return False
+        new_hash = hashlib.md5(path.read_bytes()).hexdigest()
+        if new_hash == self._config_hash:
+            return False
+        fresh = ProviderRegistry.from_yaml(path)
+        self._providers = fresh._providers
+        self._by_tier = fresh._by_tier
+        self._config_hash = new_hash
+        logger.info("Provider config hot-reloaded from %s", path)
+        return True
 
     def get_provider_config(self, name: str) -> Optional[ProviderTierConfig]:
         """Get a specific provider config by name."""

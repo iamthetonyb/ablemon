@@ -47,8 +47,9 @@ export async function GET(req: NextRequest) {
       })),
     });
   } catch (error) {
+    console.error("Failed to load CRM data:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to load CRM data" },
+      { error: "Failed to load CRM data" },
       { status: 500 }
     );
   }
@@ -115,8 +116,9 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error) {
+    console.error("Failed to create CRM record:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to create CRM record" },
+      { error: "Failed to create CRM record" },
       { status: 500 }
     );
   }
@@ -146,8 +148,9 @@ export async function PUT(req: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    console.error("Failed to update CRM record:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to update CRM record" },
+      { error: "Failed to update CRM record" },
       { status: 500 }
     );
   }

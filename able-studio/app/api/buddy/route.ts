@@ -7,9 +7,14 @@ const CONTROL_BASE_URL =
 
 export async function GET() {
   try {
+    const headers: Record<string, string> = { Accept: "application/json" };
+    const serviceToken = process.env.ABLE_SERVICE_TOKEN;
+    if (serviceToken) headers["x-able-service-token"] = serviceToken;
+
     const resp = await fetch(`${CONTROL_BASE_URL}/api/buddy`, {
-      headers: { Accept: "application/json" },
+      headers,
       cache: "no-store",
+      signal: AbortSignal.timeout(5000),
     });
 
     if (!resp.ok) {
