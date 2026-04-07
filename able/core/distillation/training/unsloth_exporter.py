@@ -120,9 +120,10 @@ class UnslothExporter:
         ))
 
         # Cell 2: Install Unsloth
+        # %%capture MUST be the first line of the cell for IPython to recognize it
         cells.append(self._code_cell(
-            "# Install Unsloth (takes ~2 minutes on Colab)\n"
             "%%capture\n"
+            "# Install Unsloth (takes ~2 minutes on Colab)\n"
             "!pip install unsloth\n"
             "!pip install --no-deps trl peft accelerate bitsandbytes"
         ))
@@ -153,8 +154,8 @@ class UnslothExporter:
             "from datasets import load_dataset\n"
             "import json\n\n"
             "# Load ABLE distillation corpus (ChatML format)\n"
-            "# Upload train.jsonl to Colab or mount Google Drive\n"
-            f'CORPUS_PATH = "{corpus_path}"\n\n'
+            "# Upload train.jsonl to Colab, or mount Google Drive and update path\n"
+            f'CORPUS_PATH = "train.jsonl"  # Local: {corpus_path}\n\n'
             "def format_chatml(example):\n"
             '    """Format a single training example as ChatML."""\n'
             "    messages = example.get('messages', [])\n"

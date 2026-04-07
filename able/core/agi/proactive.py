@@ -510,9 +510,10 @@ class ClaudeCodeSessionCheck(ProactiveCheck):
         )
         from pathlib import Path
 
-        path = get_new_session_to_harvest()
-        if not path:
+        result = get_new_session_to_harvest()
+        if not result:
             return []
+        path, checked_size = result
 
         try:
             from able.core.distillation.harvesters.claude_code_harvester import (
@@ -524,7 +525,7 @@ class ClaudeCodeSessionCheck(ProactiveCheck):
             harvester = ClaudeCodeHarvester()
             convos = harvester.harvest(source_path=Path(path).parent)
             if not convos:
-                mark_session_harvested(path)
+                mark_session_harvested(path, size=checked_size)
                 return []
 
             formatter = TrainingFormatter()
@@ -538,7 +539,7 @@ class ClaudeCodeSessionCheck(ProactiveCheck):
                 except Exception:
                     pass  # Skip malformed conversations
 
-            mark_session_harvested(path)
+            mark_session_harvested(path, size=checked_size)
 
             if new_count > 0:
                 logger.info(
@@ -704,5 +705,6 @@ def create_default_engine(
     engine.add_check(LearningInsightCheck(memory=memory, collector=collector))
     engine.add_check(SystemHealthCheck(gateway=gateway, rate_limiter=rate_limiter))
     engine.add_check(BuddyNeedsCheck())
+    engine.add_check(ClaudeCodeSessionCheck())
 
     return engine

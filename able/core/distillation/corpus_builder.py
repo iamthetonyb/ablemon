@@ -373,6 +373,16 @@ class CorpusBuilder:
             len(val),
             len(test),
         )
+
+        # Update 'latest' symlink so training scripts can use a stable path
+        link_path = self.corpus_dir / tenant_id / "latest"
+        try:
+            if link_path.is_symlink() or link_path.exists():
+                link_path.unlink()
+            link_path.symlink_to(version_dir.resolve())
+        except OSError as e:
+            logger.warning("Could not create latest symlink: %s", e)
+
         return str(version_dir)
 
     def _write_jsonl(self, path: Path, records: list[dict]) -> None:

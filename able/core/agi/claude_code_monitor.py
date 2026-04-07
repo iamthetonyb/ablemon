@@ -78,29 +78,44 @@ def get_model_info() -> dict:
     return state.get("model", {})
 
 
-def get_new_session_to_harvest() -> Optional[str]:
+def get_new_session_to_harvest() -> tuple[str, int] | None:
     """
-    Return the transcript_path if it hasn't been harvested yet, else None.
+    Return (transcript_path, file_size) if it hasn't been harvested yet or has grown, else None.
 
-    Used by the proactive engine to trigger incremental harvest on session end
-    or session change.
+    Tracks both path AND file size in the marker file. If the same session JSONL
+    has grown since last harvest (new turns appended), it triggers a re-harvest
+    to capture the tail of long sessions.
+
+    Returns the size at check time so callers can pass it to mark_session_harvested()
+    to avoid TOCTOU re-harvest loops.
     """
     path = get_active_session_path()
     if not path:
         return None
     try:
+        current_size = Path(path).stat().st_size
+        marker_key = f"{path}:{current_size}"
         last = _HARVEST_MARKER.read_text().strip() if _HARVEST_MARKER.exists() else ""
-        if last == path:
-            return None  # already harvested
-        return path
+        if last == marker_key:
+            return None  # same path AND same size — nothing new
+        return (path, current_size)
     except OSError:
         return None
 
 
-def mark_session_harvested(path: str) -> None:
-    """Mark a session transcript as harvested so we don't re-process it."""
+def mark_session_harvested(path: str, size: int | None = None) -> None:
+    """Mark a session transcript as harvested with its current file size.
+
+    Args:
+        path: Transcript file path.
+        size: File size at check time. Pass the same value used by
+              get_new_session_to_harvest() to avoid TOCTOU re-harvest loops.
+              If None, reads current size (legacy callers).
+    """
     try:
         _HARVEST_MARKER.parent.mkdir(parents=True, exist_ok=True)
-        _HARVEST_MARKER.write_text(path)
+        if size is None:
+            size = Path(path).stat().st_size if Path(path).exists() else 0
+        _HARVEST_MARKER.write_text(f"{path}:{size}")
     except OSError as e:
         logger.warning("Failed to write harvest marker: %s", e)

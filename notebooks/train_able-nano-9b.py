@@ -3,7 +3,7 @@
 
 Generated: 2026-04-07 07:20 UTC
 Model: Qwen/Qwen3.5-9B (edge)
-Corpus: /Users/abenton333/.able/distillation/corpus/default/v046/train.jsonl
+Corpus: ~/.able/distillation/corpus/default/latest/train.jsonl
 
 Run via VS Code connected to Colab runtime, or directly with a GPU:
     python train_able-nano-9b.py
@@ -18,7 +18,8 @@ from datetime import datetime, timezone
 
 # ── Config ─────────────────────────────────────────────────────
 MODEL_NAME = "Qwen/Qwen3.5-9B"
-CORPUS_PATH = "/Users/abenton333/.able/distillation/corpus/default/v046/train.jsonl"
+import os as _os
+CORPUS_PATH = _os.path.expanduser("~/.able/distillation/corpus/default/latest/train.jsonl")
 MAX_SEQ_LENGTH = 2048
 LORA_R = 16
 LORA_ALPHA = 16

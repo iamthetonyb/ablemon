@@ -14,14 +14,14 @@
 set -euo pipefail
 
 MODEL="Qwen/Qwen3.5-9B-4bit"
-CORPUS_DIR="$(dirname "/Users/abenton333/.able/distillation/corpus/default/v046/train.jsonl")"
+CORPUS_DIR="$(dirname "$HOME/.able/distillation/corpus/default/latest/train.jsonl")"
 ADAPTER_DIR="adapters/able-nano-9b"
 FUSED_DIR="fused/able-nano-9b"
 GGUF_DIR="gguf/able-nano-9b"
 
 echo "══════════════════════════════════════════════════════════"
 echo "  ABLE MLX LoRA Training: Qwen/Qwen3.5-9B"
-echo "  Corpus: /Users/abenton333/.able/distillation/corpus/default/v046/train.jsonl"
+echo "  Corpus: $HOME/.able/distillation/corpus/default/latest/train.jsonl"
 echo "  Iterations: 600 | Batch: 1 | Layers: 8"
 echo "══════════════════════════════════════════════════════════"
 
