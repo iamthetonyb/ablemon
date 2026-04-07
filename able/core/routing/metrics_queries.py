@@ -143,7 +143,8 @@ def get_corpus_metrics(db_path: str = DEFAULT_DB_PATH) -> Dict[str, Any]:
                 })
                 total_pairs += line_count
                 total_size_bytes += size
-            except Exception:
+            except Exception as e:
+                logger.warning("Failed to read %s: %s", jsonl_path.name, e)
                 continue
 
     # Also check distillation store
@@ -152,8 +153,8 @@ def get_corpus_metrics(db_path: str = DEFAULT_DB_PATH) -> Dict[str, Any]:
         from able.core.distillation.store import DistillationStore
         store = DistillationStore()
         store_pairs = len(store.get_pairs(limit=100_000))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("DistillationStore unavailable: %s", e)
 
     effective_pairs = max(total_pairs, store_pairs)
 
@@ -175,6 +176,8 @@ def get_evolution_metrics(hours: int = 168, db_path: str = DEFAULT_DB_PATH) -> D
     cycle_dir = Path("data/evolution_cycles")
     if cycle_dir.exists():
         for f in sorted(cycle_dir.glob("*.yaml"))[-20:]:
+            if not f.resolve().is_relative_to(cycle_dir.resolve()):
+                continue
             try:
                 with open(f) as fh:
                     cycle_data = yaml.safe_load(fh) or {}

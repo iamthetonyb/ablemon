@@ -444,6 +444,8 @@ class CronScheduler:
         # Daily DB cleanup at startup
         self.db.cleanup(max_age_days=90)
 
+        _heartbeat_path = Path("data/.cron_heartbeat")
+
         while self._running:
             now = _now()
             due = [j for j in self.jobs.values() if j.enabled and cron_matches(j.schedule, now)]
@@ -454,6 +456,12 @@ class CronScheduler:
                     continue
                 # Await execution — no fire-and-forget
                 await self._run_job_with_retry(job)
+
+            # Write heartbeat so proactive engine can detect stale scheduler
+            try:
+                _heartbeat_path.write_text(str(time.time()))
+            except OSError:
+                pass
 
             await asyncio.sleep(poll_interval)
 

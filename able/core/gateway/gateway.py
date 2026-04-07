@@ -560,7 +560,10 @@ class ABLEGateway:
         try:
             self.memory = HybridMemory()
         except Exception as e:
-            logger.warning(f"HybridMemory failed to initialize (continuing without it): {e}")
+            logger.error(
+                "HybridMemory init failed: %s: %s — running without memory",
+                type(e).__name__, e, exc_info=True,
+            )
             self.memory = None
 
         # Self-Improvement Engine
@@ -2499,6 +2502,8 @@ class ABLEGateway:
 
     async def _buddy_handler(self, request: web.Request) -> web.Response:
         """GET /api/buddy — Buddy state as structured JSON for Studio dashboard."""
+        if not self._verify_service_token(request):
+            return self._unauthorized_response()
         try:
             from able.core.buddy.model import load_buddy, save_buddy
             buddy = load_buddy()
@@ -2527,12 +2532,14 @@ class ABLEGateway:
             })
         except Exception as e:
             logger.warning("buddy_handler error: %s", e)
-            return web.json_response({"buddy": None, "error": str(e)}, status=500)
+            return web.json_response({"buddy": None, "error": "Failed to load buddy state"}, status=500)
 
     # ── Metrics endpoints (shared logic via metrics_queries) ──────────────────
 
     async def _metrics_summary_handler(self, request: web.Request) -> web.Response:
         """GET /metrics — Overall interaction summary."""
+        if not self._verify_service_token(request):
+            return self._unauthorized_response()
         try:
             hours = int(request.query.get("hours", "24"))
         except (ValueError, TypeError):
@@ -2542,6 +2549,8 @@ class ABLEGateway:
 
     async def _metrics_routing_handler(self, request: web.Request) -> web.Response:
         """GET /metrics/routing — Per-tier routing breakdown."""
+        if not self._verify_service_token(request):
+            return self._unauthorized_response()
         try:
             hours = int(request.query.get("hours", "24"))
         except (ValueError, TypeError):
@@ -2551,11 +2560,15 @@ class ABLEGateway:
 
     async def _metrics_corpus_handler(self, request: web.Request) -> web.Response:
         """GET /metrics/corpus — Distillation corpus stats."""
+        if not self._verify_service_token(request):
+            return self._unauthorized_response()
         from able.core.routing.metrics_queries import get_corpus_metrics
         return web.json_response(get_corpus_metrics(self._interaction_db_path))
 
     async def _metrics_evolution_handler(self, request: web.Request) -> web.Response:
         """GET /metrics/evolution — Evolution daemon history and weights."""
+        if not self._verify_service_token(request):
+            return self._unauthorized_response()
         try:
             hours = int(request.query.get("hours", "168"))
         except (ValueError, TypeError):
@@ -2565,6 +2578,8 @@ class ABLEGateway:
 
     async def _metrics_budget_handler(self, request: web.Request) -> web.Response:
         """GET /metrics/budget — Spend vs budget caps."""
+        if not self._verify_service_token(request):
+            return self._unauthorized_response()
         try:
             hours = int(request.query.get("hours", "24"))
         except (ValueError, TypeError):
@@ -2595,8 +2610,17 @@ class ABLEGateway:
             except ValueError:
                 pass
 
+    _MAX_SSE_SUBSCRIBERS = 100
+
     async def _events_handler(self, request: web.Request) -> web.StreamResponse:
         """GET /events — SSE stream of gateway events for Studio dashboard."""
+        if not self._verify_service_token(request):
+            return self._unauthorized_response()
+        if len(self._sse_subscribers) >= self._MAX_SSE_SUBSCRIBERS:
+            return web.json_response(
+                {"error": "Too many SSE subscribers"},
+                status=429,
+            )
         import asyncio as _asyncio
         resp = web.StreamResponse(headers={
             "Content-Type": "text/event-stream",
@@ -2632,8 +2656,10 @@ class ABLEGateway:
                         datetime.now(timezone.utc).isoformat().encode() +
                         b'"}\n\n'
                     )
-        except (ConnectionResetError, asyncio.CancelledError, Exception):
+        except (ConnectionResetError, asyncio.CancelledError):
             pass
+        except Exception as e:
+            logger.debug("SSE client error: %s", e)
         finally:
             try:
                 self._sse_subscribers.remove(q)
@@ -2644,8 +2670,12 @@ class ABLEGateway:
 
     # ── /api/chat — Studio chat routed through gateway ────────────────────────
 
+    _MAX_CHAT_MSG_LEN = 5000
+
     async def _api_chat_handler(self, request: web.Request) -> web.StreamResponse:
         """POST /api/chat — Studio chat proxied through full gateway pipeline (SSE stream)."""
+        if not self._verify_service_token(request):
+            return self._unauthorized_response()
         try:
             body = await request.json()
         except Exception:
@@ -2654,6 +2684,11 @@ class ABLEGateway:
         message = body.get("message", "").strip()
         if not message:
             return web.Response(text="message required", status=400)
+        if len(message) > self._MAX_CHAT_MSG_LEN:
+            return web.Response(
+                text=f"message exceeds {self._MAX_CHAT_MSG_LEN} chars",
+                status=400,
+            )
 
         session_id = body.get("session_id", "studio")
         channel = body.get("channel", "studio")
@@ -2682,7 +2717,8 @@ class ABLEGateway:
             done_payload = _json.dumps({"type": "done", "text": full_text})
             await resp.write(f"data: {done_payload}\n\n".encode())
         except Exception as e:
-            err_payload = _json.dumps({"type": "error", "error": str(e)})
+            logger.error("api_chat stream error: %s", e, exc_info=True)
+            err_payload = _json.dumps({"type": "error", "error": "Processing error"})
             try:
                 await resp.write(f"data: {err_payload}\n\n".encode())
             except Exception:
@@ -2972,11 +3008,18 @@ class ABLEGateway:
         print(f"🕰️ ABLE Persistent Scheduler started with {len(self.scheduler.jobs)} autonomous missions")
 
         # Recover any jobs missed during downtime (up to 48h lookback)
-        async def _start_scheduler():
-            await self.scheduler.recover_missed_jobs(max_lookback_hours=48)
-            await self.scheduler.run_forever(poll_interval=30.0)
+        async def _supervised_scheduler():
+            while True:
+                try:
+                    await self.scheduler.recover_missed_jobs(max_lookback_hours=48)
+                    await self.scheduler.run_forever(poll_interval=30.0)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.error("Scheduler crashed, restarting in 30s: %s", e, exc_info=True)
+                    await asyncio.sleep(30)
 
-        asyncio.create_task(_start_scheduler())
+        asyncio.create_task(_supervised_scheduler())
 
         # Start the Evolution Daemon (M2.7 background self-improvement)
         try:

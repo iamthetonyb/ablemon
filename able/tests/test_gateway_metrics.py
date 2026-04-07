@@ -96,7 +96,7 @@ class TestMetricsQueries:
         assert "total_pairs" in result
         assert "target_pairs" in result
         assert "progress_pct" in result
-        assert isinstance(result["progress_pct"], float)
+        assert isinstance(result["progress_pct"], (int, float))
 
     def test_get_evolution_metrics_returns_structure(self):
         from able.core.routing.metrics_queries import get_evolution_metrics
