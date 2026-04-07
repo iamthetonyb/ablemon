@@ -1001,8 +1001,12 @@ def register_default_jobs(
             msg = f"👑 {result['name']} unlocked legendary form: {result['legendary']}!"
         elif result.get("leveled_up"):
             msg = f"🐾 {result['name']} leveled up to {result['level']} during self-training!"
-        elif result["mood"] in ("hungry", "neglected"):
-            msg = f"🐾 {result['name']} is {result['mood']}. Run /battle or /evolve to help."
+        elif result.get("auto_fed") and result.get("mood_before") in ("hungry", "neglected"):
+            # Buddy was struggling but auto-care kicked in
+            msg = (
+                f"🐾 {result['name']} was {result['mood_before']} but auto-care restored it. "
+                f"Now {result['mood']}. (Level {result['level']})"
+            )
 
         if msg and send_telegram:
             try:
@@ -1016,7 +1020,7 @@ def register_default_jobs(
         "buddy-walk",
         "0 */2 * * *",
         buddy_walk,
-        description="Buddy autonomous walk — passive XP, needs decay, evolution checks",
+        description="Buddy autonomous walk — auto-care, passive XP, needs decay, evolution checks",
         timeout=30.0,
         max_retries=1,
     )
@@ -1321,5 +1325,43 @@ def register_default_jobs(
         run_batch_trajectories,
         description="Synthetic corpus growth — targets weak audit domains, runs Codex prompt set",
         timeout=1800.0,  # 30 min — 24 prompts × ~45s per provider call
+        max_retries=1,
+    )
+
+    # ── Eval result collection — every 12 hours ─────────────────────
+    async def collect_eval_results():
+        """Collect promptfoo eval results and feed to self-improvement loop.
+
+        Reads promptfoo SQLite DB, extracts pass/fail signals,
+        identifies routing mismatches, and feeds back to improve
+        scoring weights and skill prompts.
+        """
+        try:
+            from able.evals.collect_results import collect_and_feed
+            result = await asyncio.to_thread(collect_and_feed)
+            logger.info("Eval collection: %s", result)
+
+            # Award buddy XP for eval work (each eval pass = training)
+            passes = result.get("passes", 0) if isinstance(result, dict) else 0
+            if passes > 0:
+                try:
+                    from able.core.buddy.xp import award_distillation_xp
+                    award_distillation_xp(new_pairs=passes)
+                except Exception:
+                    pass
+
+            return result
+        except ImportError:
+            return {"skipped": True, "reason": "collect_results not available"}
+        except Exception as e:
+            logger.warning("Eval collection failed: %s", e)
+            return {"error": str(e)}
+
+    scheduler.add_job(
+        "eval-collection",
+        "0 6,18 * * *",  # 6am and 6pm — after evals have had time to run
+        collect_eval_results,
+        description="Collect promptfoo eval results and feed self-improvement loop",
+        timeout=120.0,
         max_retries=1,
     )

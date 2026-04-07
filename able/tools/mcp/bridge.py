@@ -303,6 +303,7 @@ class MCPBridge:
         self.connections: Dict[str, MCPStdioConnection] = {}
         self._tools_cache: Dict[str, MCPTool] = {}
         self._resources_cache: Dict[str, MCPResource] = {}
+        self.sdk = None  # Populated by generate_sdk() after connect_all()
 
     def load_config(self, path: Path = None):
         """Load MCP server configurations from JSON file"""
@@ -355,6 +356,9 @@ class MCPBridge:
 
         # Refresh tool cache
         await self._refresh_cache()
+
+        # Generate typed callable SDK from discovered tools
+        self.generate_sdk()
 
         return results
 
@@ -454,6 +458,28 @@ class MCPBridge:
             })
 
         return tools
+
+    def generate_sdk(self):
+        """Generate typed callable SDK from all discovered MCP tools.
+
+        Called automatically after connect_all(). Can also be called
+        manually to regenerate after tool changes.
+
+        Returns the SDK namespace (also stored as self.sdk).
+        """
+        try:
+            from .sdk_gen import MCPSDKGenerator
+            tools = list(self._tools_cache.values())
+            if tools:
+                self.sdk = MCPSDKGenerator.generate(tools, self)
+                logger.info("MCP SDK generated with %d tools", len(tools))
+            else:
+                self.sdk = None
+                logger.debug("No MCP tools discovered — SDK not generated")
+        except Exception as e:
+            logger.warning("MCP SDK generation failed: %s", e)
+            self.sdk = None
+        return self.sdk
 
     def get_status(self) -> Dict[str, Any]:
         """Get bridge status"""

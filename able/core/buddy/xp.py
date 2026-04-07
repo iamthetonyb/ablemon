@@ -159,6 +159,15 @@ def buddy_autonomous_tick() -> Optional[dict]:
 
     Called every ~2h by the cron scheduler. Applies needs decay, awards a
     small passive XP drip, and checks for evolution / legendary transitions.
+
+    AUTO-CARE: The autonomous tick represents real system activity (cron jobs,
+    research, monitoring). The buddy should reflect that the system is alive
+    and working — not decay to "neglected" just because the user isn't chatting.
+
+    - Always waters thirst (auto_tick +5) — the system IS active
+    - Auto-feeds hunger when below 50 — autonomous work IS training
+    - Always walks energy (self_explore +8) — exploring on its own
+
     Returns a status dict or None if no buddy exists.
     """
     buddy = load_buddy()
@@ -166,15 +175,30 @@ def buddy_autonomous_tick() -> Optional[dict]:
         return None
 
     # Apply time-based needs decay
-    mood = buddy.apply_needs_decay()
+    mood_before = buddy.apply_needs_decay()
 
     # Passive XP drip — buddy is self-training / exploring on its own
     passive_xp = 5
     old_level = buddy.level
     buddy.award_xp(passive_xp)
 
-    # Small energy boost — buddy walked around on its own
+    # ── Auto-care: keep buddy alive during autonomous operation ──
+
+    # Always water — the system ticking IS activity (thirst +5)
+    buddy.water("auto_tick")
+
+    # Auto-feed when hungry — autonomous cron work IS self-training (hunger +12)
+    needs = buddy.get_needs()
+    auto_fed = False
+    if needs.hunger < 50:
+        buddy.feed("auto_care")
+        auto_fed = True
+
+    # Always walk — buddy explored on its own (energy +8)
     buddy.walk("self_explore")
+
+    # Recompute mood after care
+    mood = buddy.mood
 
     # Check for stage evolution and legendary unlock
     new_stage = buddy.check_evolution()
@@ -200,11 +224,19 @@ def buddy_autonomous_tick() -> Optional[dict]:
             buddy.name, buddy.level,
         )
 
+    if auto_fed:
+        logger.info(
+            "Buddy %s auto-fed during tick (hunger was %.1f)",
+            buddy.name, needs.hunger,
+        )
+
     return {
         "name": buddy.name,
         "level": buddy.level,
         "xp": buddy.xp,
         "mood": mood,
+        "mood_before": mood_before,
+        "auto_fed": auto_fed,
         "leveled_up": leveled_up,
         "evolved": new_stage.value if new_stage else None,
         "legendary": legendary_title or None,
@@ -212,7 +244,11 @@ def buddy_autonomous_tick() -> Optional[dict]:
 
 
 def award_evolution_deploy_xp() -> Optional[int]:
-    """Award XP when the evolution daemon deploys new weights."""
+    """Award XP when the evolution daemon deploys new weights.
+
+    Also feeds the buddy — deploying improved weights IS the system
+    eating well (self-improvement = nourishment).
+    """
     buddy = load_buddy()
     if buddy is None:
         return None
@@ -220,6 +256,12 @@ def award_evolution_deploy_xp() -> Optional[int]:
     buddy.evolution_deploys += 1
     xp = 30  # Meaningful — the system improved itself
     buddy.award_xp(xp)
+
+    # Evolution deploy = the system ate well (hunger +15)
+    buddy.feed("evolution_deploy")
+    # Evolution deploy = the system drank deeply (thirst +40)
+    buddy.water("evolve")
+
     legendary_title = buddy.unlock_legendary()
     save_buddy(buddy)
     logger.info("Buddy %s gained %d XP from evolution deploy", buddy.name, xp)
@@ -229,7 +271,11 @@ def award_evolution_deploy_xp() -> Optional[int]:
 
 
 def award_distillation_xp(new_pairs: int = 0) -> Optional[int]:
-    """Award XP when new distillation pairs are harvested."""
+    """Award XP when new distillation pairs are harvested.
+
+    Also waters the buddy — harvesting training data IS the system
+    absorbing knowledge (distillation = watering the roots).
+    """
     buddy = load_buddy()
     if buddy is None:
         return None
@@ -237,6 +283,13 @@ def award_distillation_xp(new_pairs: int = 0) -> Optional[int]:
     buddy.distillation_pairs += new_pairs
     xp = new_pairs * 3  # Each pair is valuable — it's training data
     buddy.award_xp(xp)
+
+    # Distillation = the system absorbed knowledge (thirst +10)
+    buddy.water("distillation")
+    # Harvesting sessions = self-training snack (hunger +8)
+    if new_pairs > 0:
+        buddy.feed("session_harvest")
+
     legendary_title = buddy.unlock_legendary()
     save_buddy(buddy)
     logger.info("Buddy %s gained %d XP from %d new pairs", buddy.name, xp, new_pairs)

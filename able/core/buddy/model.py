@@ -411,13 +411,19 @@ NEED_DECAY_PER_HOUR = {
 # Restoration amounts per action:
 NEED_RESTORE = {
     "hunger": {
-        "battle": 30,         # Running an eval battle feeds it well
-        "eval_pass": 10,      # Each eval pass is a snack
-        "gstack_sprint": 20,  # Completing a gstack sprint skill
+        "battle": 30,           # Running an eval battle feeds it well
+        "eval_pass": 10,        # Each eval pass is a snack
+        "gstack_sprint": 20,    # Completing a gstack sprint skill
+        "auto_care": 12,        # Autonomous system work (cron jobs = self-training)
+        "evolution_deploy": 15, # System deployed new weights = hearty meal
+        "session_harvest": 8,   # Harvesting sessions from external tools
     },
     "thirst": {
-        "evolve": 40,      # Running evolution cycle = big drink
-        "interaction": 3,  # Each interaction is a sip
+        "evolve": 40,        # Running evolution cycle = big drink
+        "interaction": 3,    # Each interaction is a sip
+        "auto_tick": 5,      # Autonomous tick = the system is alive = sip
+        "distillation": 10,  # Harvesting training data = watering the roots
+        "session_ingest": 5, # External session ingested = knowledge absorbed
     },
     "energy": {
         "new_domain": 25,  # Using a domain for the first time today

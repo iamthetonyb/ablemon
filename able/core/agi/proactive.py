@@ -357,8 +357,11 @@ class SystemHealthCheck(ProactiveCheck):
 
 class BuddyNeedsCheck(ProactiveCheck):
     """
-    Check buddy needs every 2 hours and surface nudges to the operator.
-    Maps to Tamagotchi-style care reminders.
+    Check buddy needs every 2 hours and auto-care when needed.
+
+    Instead of just alerting, this check proactively restores needs
+    that are dropping. The system IS running autonomously — that
+    activity should keep the buddy alive without manual intervention.
     """
 
     name = "buddy_needs"
@@ -367,7 +370,36 @@ class BuddyNeedsCheck(ProactiveCheck):
     async def run(self) -> List[ProactiveAction]:
         actions = []
         try:
+            from able.core.buddy.model import load_buddy, save_buddy
             from able.core.buddy.nudge import check_nudge
+
+            buddy = load_buddy()
+            if buddy is None:
+                return actions
+
+            needs = buddy.get_needs()
+            auto_cared = False
+
+            # Auto-care: if any need is critical, restore it
+            if needs.hunger < 30:
+                buddy.feed("auto_care")
+                auto_cared = True
+            if needs.thirst < 30:
+                buddy.water("auto_tick")
+                auto_cared = True
+            if needs.energy < 30:
+                buddy.walk("self_explore")
+                auto_cared = True
+
+            if auto_cared:
+                save_buddy(buddy)
+                logger.info(
+                    "Buddy %s auto-cared: hunger=%.0f thirst=%.0f energy=%.0f",
+                    buddy.name, buddy.get_needs().hunger,
+                    buddy.get_needs().thirst, buddy.get_needs().energy,
+                )
+
+            # Still surface nudge if mood is below content after care
             nudge = check_nudge()
             if nudge:
                 actions.append(ProactiveAction(
@@ -547,6 +579,19 @@ class ClaudeCodeSessionCheck(ProactiveCheck):
                     new_count,
                     Path(path).name,
                 )
+
+                # Auto-route to buddy: every session harvest feeds the buddy
+                try:
+                    from able.core.buddy.xp import award_distillation_xp
+                    xp = award_distillation_xp(new_pairs=new_count)
+                    if xp:
+                        logger.info(
+                            "Buddy gained %d XP from Claude Code session harvest",
+                            xp,
+                        )
+                except Exception as bxp_err:
+                    logger.debug("Buddy XP skip (CC harvest): %s", bxp_err)
+
                 return [
                     ProactiveAction(
                         action_type=ProactiveActionType.OBSERVATION,

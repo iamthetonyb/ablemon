@@ -144,6 +144,8 @@ class SkillExecutor:
                 result = await self._execute_python(skill, args, timeout)
             elif skill.implementation_type == "bash":
                 result = await self._execute_bash(skill, args, timeout)
+            elif skill.implementation_type == "bun":
+                result = await self._execute_bun(skill, args, timeout)
             else:
                 return SkillResult(
                     success=False,
@@ -289,6 +291,56 @@ class SkillExecutor:
         except asyncio.TimeoutError:
             proc.kill()
             raise
+
+    async def _execute_bun(
+        self,
+        skill: Skill,
+        args: Dict[str, Any],
+        timeout: float
+    ) -> SkillResult:
+        """Execute a skill via Bun runtime (TypeScript + shell hybrid)."""
+        from able.tools.shell.bun_shell import BunShell
+
+        if not BunShell.available():
+            return SkillResult(
+                success=False,
+                error="Bun runtime not installed. Install from https://bun.sh"
+            )
+
+        # Read the skill's TypeScript implementation
+        impl_path = skill.implementation_path
+        if impl_path and impl_path.exists():
+            script = impl_path.read_text()
+        else:
+            return SkillResult(
+                success=False,
+                error=f"Bun skill implementation not found: {impl_path}"
+            )
+
+        # Inject args as environment variables
+        env = {f"SKILL_ARG_{k.upper()}": str(v) for k, v in args.items()}
+
+        # Detect mode from file extension or skill metadata
+        mode = "hybrid"
+        if impl_path.suffix == ".sh":
+            mode = "shell"
+        elif impl_path.suffix in (".ts", ".tsx", ".js"):
+            mode = "ts"
+
+        result = await BunShell.run(script, mode=mode, timeout=timeout, env=env)
+
+        if result.exit_code == 0:
+            return SkillResult(
+                success=True,
+                output=result.stdout,
+                logs=[result.stderr] if result.stderr else []
+            )
+        else:
+            return SkillResult(
+                success=False,
+                error=result.stderr or f"Bun exit code: {result.exit_code}",
+                output=result.stdout
+            )
 
     async def validate_args(
         self,

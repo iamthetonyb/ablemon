@@ -114,6 +114,7 @@ Budget caps (source of truth: `config/routing_config.yaml`):
 | POST | `/control/resources/{id}/action` | service token + `approved_by` | Lifecycle action |
 | GET | `/control/collections` | service token | Curated install bundles |
 | GET | `/control/setup-wizard` | service token | First-run validation steps |
+| GET | `/ws` | service token | WebSocket streaming (JSON frames: chunk/done/error) |
 
 Token verification uses `hmac.compare_digest` (timing-safe). Health endpoint exempt.
 
@@ -454,6 +455,36 @@ Training lanes:
     - Added `able/tests/test_telegram_buddy_dispatch.py` to verify Telegram-path tool dispatch hits `buddy_status` rather than `tenant_status`.
     - Added `.github/workflows/gateway-health-smoke.yml` to build the gateway image, start it, verify `/health`, and assert `config/routing_config.yaml` exists inside the container.
 
+## Latest Completed Work (Session 2026-04-07 #2)
+
+33. **Buddy auto-care system** — Fixed "neglected" status issue:
+    - Root cause: `buddy_walk` cron only restored energy (+8), not hunger or thirst
+    - Added new NEED_RESTORE actions: `auto_care` (hunger +12), `auto_tick` (thirst +5), `evolution_deploy` (hunger +15), `distillation` (thirst +10), `session_harvest` (hunger +8), `session_ingest` (thirst +5)
+    - `buddy_autonomous_tick()` now always waters thirst (+5), auto-feeds hunger when <50 (+12), always walks energy (+8)
+    - `award_distillation_xp()` now also waters (+10 distillation) and feeds (+8 session_harvest)
+    - `award_evolution_deploy_xp()` now also feeds (+15 evolution_deploy) and waters (+40 evolve)
+    - `BuddyNeedsCheck` proactive check now auto-cares instead of just alerting
+    - Result: buddy stays alive during autonomous operation without manual intervention
+
+34. **Session auto-routing to buddy** — All session sources now feed buddy:
+    - `ClaudeCodeSessionCheck` (every 5 min) now awards `distillation_xp` on harvest
+    - Buddy gains XP + need restoration from Claude Code, gstack, gateway, and distillation sessions
+    - Every platform interaction auto-routes to buddy without manual push
+
+35. **5 new executor/runtime components**:
+    - **MCP SDK Codegen** (`able/tools/mcp/sdk_gen.py`): Generates typed Python callable wrappers from MCP tool JSON schemas. `sdk.neon.run_sql(sql="...")` instead of raw dict calls. Auto-generated at `MCPBridge.connect_all()`, stored as `bridge.sdk`. 8 tests.
+    - **Bun Shell Backend** (`able/tools/shell/bun_shell.py`): TypeScript + shell execution via Bun. Skills declare `runtime: bun` → `SkillExecutor._execute_bun()`. Three modes: ts, shell, hybrid. CommandGuard enforced. Graceful fallback when Bun absent. 6 tests.
+    - **WebSocket Streaming** (`/ws` endpoint): Gateway streams `stream_message()` output over WebSocket for Studio/API consumers. JSON frame protocol (chunk/done/error). Auth via service token. Max 20 concurrent connections. Rate-limited.
+    - **RustPython Sandbox** (`able/tools/sandbox/rustpython_sandbox.py`): Optional sandboxed eval backend. `eval_code()` fallback chain: RustPython → subprocess sandbox → reject. `ABLE_SANDBOX_BACKEND` env var. 6 tests.
+    - **Callable Tool Catalog SDK** (`tool_registry.generate_callable_sdk()`): Every registered ABLE tool becomes `tools_sdk.web_search(query="...")`. Approval-required tools raise `PermissionError`. Exposed on gateway as `self.tools_sdk`. 5 tests.
+
+36. **Observability wiring**:
+    - Graphify D3 HTML + mermaid now auto-filed to Trilium after research graph builds
+    - Eval result collection added to cron (`eval-collection`, 6am/6pm) — feeds self-improvement loop + buddy XP
+    - Knowledge graph → Trilium visual notes pipeline connected end-to-end
+
+37. **Test results**: 755 passing (91 new + 664 existing), 0 regressions from these changes
+
 ## Next-Run Objectives
 
 ### Priority 0: Live production verification
@@ -516,6 +547,23 @@ Push toward 100+ pairs for H100 fine-tuning:
 
 - Keep billing, channels, ASR, Strix, and federation live sync off the default hot path unless they are explicitly configured or a real operator-facing entrypoint is being shipped.
 - When one of those systems becomes active work again, modernize it on its own merits instead of silently letting it drift back into the startup path.
+
+### Priority 10: Remaining roadmap from executor research
+
+Still on the roadmap (saved for future sessions):
+- **Structured subprocess JSON I/O protocol** — Replace raw stdout parsing with `{ "status": "ok", "data": {...} }` contract on CLI tool invocations
+- **Elicitation/interactive approval flows** — Tools can pause, collect structured user input via forms, then resume (richer than approve/deny)
+- **Python 3.14 JIT streaming for hot paths** — Leverage JIT compilation for hot paths alongside WebSocket improvements
+- **Studio NextAuth session checks** — Proxy routes forward service tokens but don't verify NextAuth sessions yet
+- **Morning briefing double-execution diagnosis** — No code duplication found; may be runtime issue (gateway restarting?)
+
+### Priority 11: End-to-end system hardening
+
+- Verify all cron jobs execute successfully on the production server
+- Confirm Phoenix receives spans from gateway calls (systematic tracing)
+- Validate Trilium receives research findings + knowledge graphs
+- Test eval collection → self-improvement feedback loop end-to-end
+- Ensure buddy auto-care keeps mood above "hungry" without user intervention for 48h+
 
 ## Validation Commands
 

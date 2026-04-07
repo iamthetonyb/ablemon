@@ -300,6 +300,55 @@ class ToolRegistry:
                 pass
         return f"{name}: {str(args)[:200]}"
 
+    def generate_callable_sdk(self):
+        """Generate a typed callable namespace from all registered tools.
+
+        Each tool becomes an async callable:
+            tools_sdk.web_search(query="...", num_results=5)
+
+        Approval-required tools raise ApprovalRequired instead of blocking.
+        Returns SimpleNamespace (also stored as self.sdk).
+        """
+        from types import SimpleNamespace
+
+        async def _make_handler(tool_def: ToolDef, **kwargs):
+            """Create a dispatching callable for a tool."""
+            user_id = kwargs.pop("user_id", "sdk_caller")
+            client_id = kwargs.pop("client_id", "sdk")
+
+            if tool_def.requires_approval:
+                raise PermissionError(
+                    f"Tool '{tool_def.name}' requires approval. "
+                    f"Use the gateway dispatch with an approval workflow."
+                )
+
+            context = ToolContext(user_id=user_id, client_id=client_id)
+
+            # Build a minimal tool_call-like object
+            class _Call:
+                name = tool_def.name
+                arguments = kwargs
+
+            return await self.dispatch(_Call(), context)
+
+        sdk = SimpleNamespace()
+        for name, tool_def in self._tools.items():
+            safe_name = name.replace("-", "_").replace(".", "_")
+
+            # Capture tool_def in closure
+            def make_fn(td=tool_def):
+                async def fn(**kw):
+                    return await _make_handler(td, **kw)
+                fn.__name__ = safe_name
+                fn.__doc__ = td.description
+                return fn
+
+            setattr(sdk, safe_name, make_fn())
+
+        self.sdk = sdk
+        logger.info("Tool catalog SDK generated: %d tools", len(self._tools))
+        return sdk
+
 
 def build_default_registry() -> ToolRegistry:
     """Build the canonical runtime registry used by gateway + control plane."""

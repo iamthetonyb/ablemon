@@ -654,7 +654,13 @@ class WeeklyResearchScout:
             logger.debug("Source verification failed: %s", e)
 
     async def _build_knowledge_graph(self, report: WeeklyResearchReport):
-        """Build and export knowledge graph from research findings."""
+        """Build and export knowledge graph from research findings.
+
+        Generates:
+        - Interactive D3 HTML visualization (data/research_graph.html)
+        - JSON export for semantic indexing (data/research_graph.json)
+        - Files the HTML visualization to Trilium as a visual note
+        """
         try:
             from able.tools.graphify.builder import build_research_graph
         except ImportError:
@@ -685,8 +691,53 @@ class WeeklyResearchScout:
                     export.stats.get("edge_count", 0),
                     export.stats.get("community_count", 0),
                 )
+
+                # File the interactive graph to Trilium as a visual note
+                await self._file_graph_to_trilium(export)
         except Exception as e:
             logger.debug("Knowledge graph build failed: %s", e)
+
+    async def _file_graph_to_trilium(self, export):
+        """Upload graphify D3 HTML visualization + mermaid to Trilium."""
+        try:
+            from able.tools.trilium.client import TriliumClient, KNOWN_PARENTS
+            from pathlib import Path as _Path
+
+            parent_id = KNOWN_PARENTS.get("weekly_research")
+            if not parent_id:
+                return
+
+            async with TriliumClient() as client:
+                if not await client.is_available():
+                    return
+
+                date_str = datetime.now().strftime("%Y-%m-%d")
+
+                # Upload D3 HTML visualization
+                html_path = _Path(__file__).parent.parent.parent.parent / "data" / "research_graph.html"
+                if html_path.exists():
+                    html_content = html_path.read_text(encoding="utf-8")
+                    await client.create_note(
+                        parent_id,
+                        f"Knowledge Graph — {date_str}",
+                        html_content,
+                        note_type="render",
+                        mime="text/html",
+                    )
+                    logger.info("Filed interactive knowledge graph to Trilium")
+
+                # Upload mermaid version for in-note rendering
+                if export.mermaid:
+                    await client.create_note(
+                        parent_id,
+                        f"Graph (Mermaid) — {date_str}",
+                        export.mermaid,
+                        note_type="mermaid",
+                        mime="text/mermaid",
+                    )
+
+        except Exception as e:
+            logger.debug("Graph Trilium filing failed (non-fatal): %s", e)
 
     async def _deep_research_phase(self, report: WeeklyResearchReport):
         """

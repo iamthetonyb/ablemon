@@ -535,6 +535,7 @@ class ABLEGateway:
         self._web_search: object = None
         self.resource_plane = ResourcePlane(_PROJECT_ROOT)
         self.tool_registry = build_default_registry()
+        self.tools_sdk = self.tool_registry.generate_callable_sdk()
 
         # Per-client rate limiter (burst + sustained)
         from able.core.ratelimit.limiter import RateLimiter
@@ -2757,6 +2758,91 @@ class ABLEGateway:
 
         return resp
 
+    # ── /ws — WebSocket streaming for Studio and API consumers ──────────────
+
+    _WS_MAX_CONNECTIONS = int(os.environ.get("ABLE_WS_MAX_CONNECTIONS", "20"))
+    _ws_active: int = 0
+
+    async def _ws_handler(self, request):
+        """WebSocket endpoint streaming stream_message() output as JSON frames.
+
+        Inbound:  {"message": "...", "user_id": "...", "client_id": "..."}
+        Outbound: {"type": "chunk", "content": "..."}
+                  {"type": "done", "timing_ms": 1234}
+                  {"type": "error", "message": "..."}
+        """
+        web = _ensure_aiohttp()
+
+        if not self._verify_service_token(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+
+        if self._ws_active >= self._WS_MAX_CONNECTIONS:
+            return web.json_response(
+                {"error": f"max {self._WS_MAX_CONNECTIONS} connections"},
+                status=429,
+            )
+
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        self._ws_active += 1
+
+        try:
+            async for raw_msg in ws:
+                if raw_msg.type != 1:  # aiohttp.WSMsgType.TEXT
+                    continue
+
+                try:
+                    data = _json.loads(raw_msg.data)
+                except (ValueError, TypeError):
+                    await ws.send_json({"type": "error", "message": "invalid JSON"})
+                    continue
+
+                message = data.get("message", "").strip()
+                if not message:
+                    await ws.send_json({"type": "error", "message": "empty message"})
+                    continue
+
+                if len(message) > self._MAX_CHAT_MSG_LEN:
+                    await ws.send_json({
+                        "type": "error",
+                        "message": f"exceeds {self._MAX_CHAT_MSG_LEN} chars",
+                    })
+                    continue
+
+                user_id = data.get("user_id", "ws_user")
+                session_id = data.get("session_id", f"ws_{user_id}")
+
+                import time as _time
+                t0 = _time.monotonic()
+
+                try:
+                    async for chunk in self.stream_message(
+                        message,
+                        session_id=session_id,
+                        channel="websocket",
+                        history=[],
+                    ):
+                        await ws.send_json({"type": "chunk", "content": chunk})
+
+                    elapsed_ms = (_time.monotonic() - t0) * 1000
+                    await ws.send_json({
+                        "type": "done",
+                        "timing_ms": round(elapsed_ms, 1),
+                    })
+                except Exception as stream_err:
+                    logger.error("WS stream error: %s", stream_err, exc_info=True)
+                    await ws.send_json({
+                        "type": "error",
+                        "message": "Processing error",
+                    })
+
+        except Exception:
+            pass  # Client disconnected
+        finally:
+            self._ws_active -= 1
+
+        return ws
+
     async def start_health_server(self, port: int = 8080, *, quiet: bool = False):
         """Start lightweight HTTP health check server"""
         web = _ensure_aiohttp()
@@ -2784,6 +2870,8 @@ class ABLEGateway:
         app.router.add_get("/events", self._events_handler)
         # Studio chat through gateway
         app.router.add_post("/api/chat", self._api_chat_handler)
+        # WebSocket streaming for Studio / API consumers
+        app.router.add_get("/ws", self._ws_handler)
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", port)
