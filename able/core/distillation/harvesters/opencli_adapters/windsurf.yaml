@@ -1,0 +1,15 @@
+platform: windsurf
+description: "Extract Windsurf (Codeium) AI IDE conversations from session logs"
+model_name: "windsurf"
+harvest_method: "file"
+file_patterns:
+  - "~/.codeium/windsurf/sessions/*.json"
+  - "~/.codeium/windsurf/sessions/*.jsonl"
+  - "~/.windsurf/sessions/*.json"
+  - "~/Library/Application Support/Windsurf/sessions/*.json"
+message_path: ""
+role_mapping:
+  user: user
+  assistant: assistant
+  system: system
+thinking_field: null

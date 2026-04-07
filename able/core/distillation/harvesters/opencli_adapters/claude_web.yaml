@@ -1,0 +1,14 @@
+platform: claude_web
+description: "Extract Claude.ai web conversations from browser exports"
+model_name: "claude"
+harvest_method: "file"
+file_patterns:
+  - "~/Downloads/claude-conversations*.json"
+  - "~/Downloads/claude-export/*.json"
+  - "~/Downloads/claude_*.json"
+message_path: ""
+role_mapping:
+  human: user
+  assistant: assistant
+  system: system
+thinking_field: "thinking"

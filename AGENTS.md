@@ -49,7 +49,7 @@ User (Telegram) → Gateway → TrustGate → Scanner → Enricher → Complexit
 - `config/scorer_weights.yaml` — Complexity scoring weights (M2.7-tunable)
 - `able/.env` / `able/.env.example` — All env vars (API keys, tokens)
 
-## What Was Just Shipped (2026-04-07) — Execution Monitor, RustPython Research
+## What Was Just Shipped (2026-04-07) — Distillation Sprint, Execution Monitor, Harvest Expansion
 
 ### Execution Monitor (PentAGI-Inspired)
 
@@ -58,6 +58,25 @@ User (Telegram) → Gateway → TrustGate → Scanner → Enricher → Complexit
 - Detects: spinning (same tool+args 3x), thrashing (A-B-A-B 4x), output repetition (>70% Jaccard similarity), error loops (3+ consecutive failures)
 - When `should_terminate`: breaks the tool loop immediately (spinning >8 iters, errors >10 iters)
 - Complements Hermes budget pressure — monitor is targeted ("you're stuck on web_search"), budget is blunt ("stop calling tools")
+
+### Distillation Corpus Built + Unsloth Notebooks Generated
+
+- **Corpus v046 built**: 579 total pairs → 339 eligible → 153 domain-balanced training pairs (train=133, val=13, test=7)
+- **Domain balance working**: behavioral-profiling capped from 45% to 16%, coding from 35% to 39%
+- **Unsloth notebooks generated**: `notebooks/unsloth_finetune_able-nano-9b.ipynb` (Colab T4), `notebooks/train_mlx_able-nano-9b.sh` (MLX Apple Silicon), `notebooks/train_able-nano-9b.py` (standalone)
+- **Next step**: Run Colab T4 notebook → register fine-tuned GGUF in Ollama as T5
+
+### Harvest Expansion (6 New OpenCLI Adapters)
+
+- Added adapters for: Manus, Gemini, Cursor, Windsurf, Perplexity, Claude.ai web exports
+- Total adapters now: 11 platforms (was 5) — all auto-discovered via YAML, zero code changes
+- Drop-zone pattern: export conversations from any AI tool → `~/.able/external_sessions/`
+
+### Claude Code Session Monitor
+
+- **New file**: `able/core/agi/claude_code_monitor.py` — reads statusline state, rate limit gating, incremental harvest triggers
+- **New check**: `ClaudeCodeSessionCheck` in `proactive.py` — every 5 min, auto-harvests new Claude Code sessions
+- State bridge: `~/.able/claude_code_state.json` (cost, rate limits, context window, model)
 
 ### RustPython WASM Research
 

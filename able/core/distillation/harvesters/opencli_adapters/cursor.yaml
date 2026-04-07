@@ -1,0 +1,15 @@
+platform: cursor
+description: "Extract Cursor AI IDE conversations from session logs"
+model_name: "cursor"
+harvest_method: "file"
+file_patterns:
+  - "~/.cursor/sessions/*.json"
+  - "~/.cursor/sessions/*.jsonl"
+  - "~/.config/Cursor/sessions/*.json"
+  - "~/Library/Application Support/Cursor/sessions/*.json"
+message_path: ""
+role_mapping:
+  user: user
+  assistant: assistant
+  system: system
+thinking_field: "thinking"

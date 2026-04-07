@@ -304,7 +304,7 @@ Run: `scripts/run-evals.sh` | Config: `able/evals/`
 
 ## DISTILLATION PIPELINE (H100 Fine-Tuning)
 
-Data accumulation phase — building T4-quality training pairs for custom local models. The federated distillation network automatically ingests high-quality pairs from other ABLE instances and supplements the local corpus.
+Live training pipeline — 579 total pairs collected, 339 eligible, corpus v046 built with 153 domain-balanced training-ready pairs. The federated distillation network automatically ingests high-quality pairs from other ABLE instances and supplements the local corpus.
 
 ### Base Models (Unsloth Dynamic 2.0 Quants)
 
@@ -315,10 +315,10 @@ Data accumulation phase — building T4-quality training pairs for custom local 
 | Edge (balanced) | Qwen 3.5 9B | UD-Q4_K_XL | 5.97GB | When device has more room |
 
 ### Pipeline
-1. **Harvest**: 8 harvesters collect training data from all channels (CLI, Claude Code, Codex, external tools, etc.)
+1. **Harvest**: 13 harvesters collect training data from all channels (Claude Code, Codex, ChatGPT, Grok, Cursor, Windsurf, Gemini, Manus, Perplexity, claude.ai exports, ABLE interactions, external tools, batch trajectories)
 2. **Federation**: Network pairs from other ABLE instances ingested via nightly sync (3:30am cron)
-3. **Export**: Distillation JSONL pairs (`data/distillation_*.jsonl`) — ChatML format
-4. **Train**: Unsloth fine-tuning via Colab notebooks (9B on free T4, 27B on H100). `UnslothExporter` generates ready-to-run notebooks and VS Code scripts.
+3. **Export**: Distillation JSONL pairs (`~/.able/distillation/corpus/`) — ChatML format, domain-balanced (30% cap)
+4. **Train**: Unsloth fine-tuning via Colab notebooks (9B on free T4, 27B on H100). `UnslothExporter` generates Colab notebooks, MLX scripts (Apple Silicon), and standalone Python training scripts.
 5. **Requant**: Export to GGUF via Unsloth Dynamic 2.0 quants (Q4_K_XL, IQ2_M)
 6. **Deploy**: Register fine-tuned models in Ollama, swap into T5 (then promote to T1)
 
@@ -335,12 +335,38 @@ ollama create qwen3.5-9b-edge -f config/ollama/Modelfile.9b-edge
 ollama create qwen3.5-9b-balanced -f config/ollama/Modelfile.9b-balanced
 ```
 
-### Current State
-- ~20 pairs collected, need 100-200 before GPU run
-- H100 cluster access available (~10-20 hours per session)
-- Schedule: weekly/bi-weekly fine-tuning after data accumulation
+### Current State (2026-04-07)
+- 579 total pairs, 339 corpus-eligible (quality ≥ 0.8)
+- Corpus v046 built: 153 domain-balanced pairs (train=133, val=13, test=7)
+- Domain distribution: coding 59, copywriting 47, behavioral-profiling 24, devops 16, data 5, security 1, general 1
+- Unsloth notebooks generated: `notebooks/unsloth_finetune_able-nano-9b.ipynb` (Colab T4), `notebooks/train_mlx_able-nano-9b.sh` (Apple Silicon MLX)
+- **Next step**: Run Colab notebook on free T4, register fine-tuned GGUF in Ollama as T5
 - Base models: Qwen 3.5 27B + 9B with Unsloth Dynamic quants
 - Modelfiles: `config/ollama/Modelfile.{27b,9b-edge,9b-balanced}`
+
+### Harvest Sources (13 adapters)
+
+| Source | Harvester | Session Path |
+|--------|-----------|-------------|
+| Claude Code | ClaudeCodeHarvester | `~/.claude/projects/**/*.jsonl` |
+| Codex | OpenCLI (codex.yaml) | `~/.codex/sessions/**/*.jsonl` |
+| ChatGPT | OpenCLI (chatgpt.yaml) | `~/Downloads/chatgpt-export/*.json` |
+| Claude.ai | OpenCLI (claude_web.yaml) | `~/Downloads/claude-conversations*.json` |
+| Gemini | OpenCLI (gemini.yaml) | `~/.gemini/sessions/*.jsonl` |
+| Grok | OpenCLI (grok.yaml) | `~/Downloads/grok-export/*.json` |
+| Cursor | OpenCLI (cursor.yaml) | `~/.cursor/sessions/*.json` |
+| Windsurf | OpenCLI (windsurf.yaml) | `~/.codeium/windsurf/sessions/*.json` |
+| Manus | OpenCLI (manus.yaml) | `~/.manus/sessions/*.json` |
+| Perplexity | OpenCLI (perplexity.yaml) | `~/Downloads/perplexity-export/*.json` |
+| ABLE interactions | ABLEInteractionHarvester | `data/interaction_log.db` |
+| External tools | ExternalToolHarvester | `~/.able/external_sessions/` |
+| Batch trajectories | BatchTrajectoryHarvester | `data/trajectories/` |
+
+### Incremental Claude Code Harvest
+- `ClaudeCodeSessionCheck` in proactive engine (every 5 min)
+- Compares active `transcript_path` to `~/.able/last_harvested_session.txt`
+- Auto-harvests new sessions without full sweep
+- State bridge: `~/.able/claude_code_state.json` (rate limits, cost, model info)
 
 ---
 

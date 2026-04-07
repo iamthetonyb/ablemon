@@ -1,0 +1,14 @@
+platform: perplexity
+description: "Extract Perplexity AI research conversations from exports"
+model_name: "perplexity"
+harvest_method: "file"
+file_patterns:
+  - "~/Downloads/perplexity-export/*.json"
+  - "~/.perplexity/history/*.json"
+  - "~/Downloads/perplexity_*.json"
+message_path: ""
+role_mapping:
+  user: user
+  assistant: assistant
+  system: system
+thinking_field: null

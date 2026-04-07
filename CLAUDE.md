@@ -113,19 +113,19 @@ From @SOUL.md — internalize these:
 2. Load identity, objectives, today's daily file, pending queue, recent learnings
 3. Produce status report, then process queue or await instructions
 
-## Distillation Pipeline (Current State — 2026-04-06)
+## Distillation Pipeline (Current State — 2026-04-07)
 
-Full end-to-end training data pipeline is live. Key files:
+Corpus v046 live: 579 pairs → 339 eligible → 153 domain-balanced training pairs. Unsloth notebooks generated.
 
 | File | Role |
 |------|------|
+| `able/core/distillation/corpus_builder.py` | Domain-balanced corpus builder (30% cap), train/val/test splits |
+| `able/core/distillation/harvest_runner.py` | `run_harvest(since_hours, tenant_id)` — runs all 13 harvesters + corpus build |
+| `able/core/distillation/training/unsloth_exporter.py` | Generates Colab notebooks, MLX scripts, standalone Python trainers |
 | `able/core/distillation/confidence_scorer.py` | Response confidence 0–1 (real logprobs for Ollama, proxy for others) |
-| `able/core/distillation/conversation_evaluator.py` | Session-level eval + multi-turn DPO pairs |
 | `able/core/distillation/interaction_auditor.py` | Per-interaction scoring (formatter + judge + GEval metrics) |
-| `able/core/distillation/dpo_builder.py` | Turn-level + conversation-chain DPO pair export |
-| `able/core/routing/interaction_log.py` | Schema: `guidance_needed`, `tools_called`, `conversation_depth`, `response_confidence` |
-| `able/core/buddy/xp.py` | `seed_buddy_level_from_harvest()` — first-install XP from existing AI history |
-| `able/core/federation/contributor.py` | Includes `response_confidence` in network contributions |
+| `able/core/agi/claude_code_monitor.py` | Statusline bridge — rate limits, incremental session harvest |
+| `able/core/distillation/harvesters/opencli_adapters/*.yaml` | 11 platform adapters (codex, chatgpt, grok, manus, gemini, cursor, windsurf, perplexity, claude_web, cowork, antigravity) |
 
 **Cron schedule:**
 - `interaction-audit` every 4h at `0 */4` — scores interactions, backfills confidence

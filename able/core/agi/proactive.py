@@ -491,6 +491,79 @@ class DistillationReadinessCheck(ProactiveCheck):
         return actions
 
 
+class ClaudeCodeSessionCheck(ProactiveCheck):
+    """
+    Every 5 min: harvest any new Claude Code session not yet in corpus.
+
+    Compares the active transcript_path to the last-harvested marker.
+    When a new/changed session is detected, triggers a targeted harvest
+    of just that JSONL file — no full-sweep needed.
+    """
+
+    name = "claude_code_session"
+    interval_seconds = 300  # 5 minutes
+
+    async def run(self) -> List[ProactiveAction]:
+        from able.core.agi.claude_code_monitor import (
+            get_new_session_to_harvest,
+            mark_session_harvested,
+        )
+        from pathlib import Path
+
+        path = get_new_session_to_harvest()
+        if not path:
+            return []
+
+        try:
+            from able.core.distillation.harvesters.claude_code_harvester import (
+                ClaudeCodeHarvester,
+            )
+            from able.core.distillation.formatter import TrainingFormatter
+            from able.core.distillation.store import DistillationStore
+
+            harvester = ClaudeCodeHarvester()
+            convos = harvester.harvest(source_path=Path(path).parent)
+            if not convos:
+                mark_session_harvested(path)
+                return []
+
+            formatter = TrainingFormatter()
+            store = DistillationStore()
+            new_count = 0
+            for convo in convos:
+                try:
+                    pair = formatter.normalize(convo)
+                    if store.save_training_pair(pair):
+                        new_count += 1
+                except Exception:
+                    pass  # Skip malformed conversations
+
+            mark_session_harvested(path)
+
+            if new_count > 0:
+                logger.info(
+                    "Claude Code session harvested: %d new pairs from %s",
+                    new_count,
+                    Path(path).name,
+                )
+                return [
+                    ProactiveAction(
+                        action_type=ProactiveActionType.OBSERVATION,
+                        title="Claude Code session harvested",
+                        description=(
+                            f"Ingested {new_count} new training pairs "
+                            f"from {Path(path).name}"
+                        ),
+                        urgency=2,
+                        data={"pairs": new_count, "source": path},
+                    )
+                ]
+        except Exception as e:
+            logger.warning("Claude Code session harvest failed: %s", e)
+
+        return []
+
+
 class ProactiveEngine:
     """
     Runs all proactive checks and dispatches actions.

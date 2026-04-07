@@ -1,0 +1,15 @@
+platform: gemini
+description: "Extract Google Gemini CLI and web export conversations"
+model_name: "gemini-2.5-pro"
+harvest_method: "file"
+file_patterns:
+  - "~/.gemini/sessions/*.jsonl"
+  - "~/.gemini/conversations/*.json"
+  - "~/Downloads/gemini-export/*.json"
+  - "~/Downloads/Takeout/Gemini Apps/**/*.json"
+message_path: ""
+role_mapping:
+  user: user
+  model: assistant
+  system: system
+thinking_field: "thought"
