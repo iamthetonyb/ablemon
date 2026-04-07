@@ -1,7 +1,7 @@
 # ABLE — Code Handoff
 
-Date: 2026-04-02
-Branch: `main` is the current production baseline. `codex/runtime-boundary-cleanup` is the active working branch for the runtime-first refactor audit pass.
+Date: 2026-04-07
+Branch: `main` is the current production baseline.
 Git state: always verify with `git log --oneline -10` before starting work.
 
 ## Source Of Truth
@@ -179,6 +179,61 @@ Training lanes:
 - **9B**: T4-first default, seq_len=2048, micro_batch=1, fp16, checkpoint every 100 steps
 
 ## What Was Just Completed
+
+### Session 2026-04-07 — Studio API layer, gateway metrics/SSE/buddy/chat
+
+33. **Complete Studio API layer — all pages now functional (10 new routes)**:
+    - `app/api/dashboard/route.ts` — DB aggregate (auditLogs, organizations, featureFlags) + gateway resources proxy; returns shape dashboard page already expected
+    - `app/api/audit/route.ts` — GET with `?limit/severity/run_id/since/until/status` filters + POST (gateway writes audit events, service-token gated)
+    - `app/api/tasks/route.ts` — full CRUD (GET/POST/PUT/DELETE); PUT accepts status/title/priority
+    - `app/api/notes/route.ts` — full CRUD with `?category` filter + pinned ordering
+    - `app/api/crm/route.ts` — contacts and deals in a single GET; POST distinguishes by `type`; PUT updates stage/probability
+    - `app/api/clients/route.ts` — GET list + POST create org+clientSettings; PUT updates API keys via `encrypt()` from `@/lib/encryption`
+    - `app/api/settings/route.ts` — GET proxies gateway `/control/tools/catalog` merged with DB featureFlags overrides (shape consumed by `fetch_tool_settings()` in gateway.py); PUT UPSERTs featureFlags — tool toggles now actually persist and propagate
+    - `app/api/collections/route.ts`, `app/api/resources/route.ts`, `app/api/setup-wizard/route.ts` — pure gateway proxies via `lib/control-plane.ts`
+    - `app/api/buddy/route.ts` — proxy to gateway `/api/buddy`
+    - `app/api/metrics/[metric]/route.ts` — proxy to gateway `/metrics/[metric]` with allowlist validation
+
+34. **Gateway buddy + metrics endpoints added** (`able/core/gateway/gateway.py`):
+    - `/api/buddy` — loads buddy via `load_buddy()`, applies needs decay, returns structured JSON (name, species, level, xp, xp_to_next, stage, wins/losses/draws, hunger/thirst/energy, mood, badges)
+    - `/metrics` — total interactions, success rate, cost, tokens (24h window)
+    - `/metrics/routing` — per-tier + per-domain breakdown
+    - `/metrics/corpus` — scans distillation JSONL + DistillationStore, returns total_pairs, target_pairs, progress_pct
+    - `/metrics/evolution` — cycle history + current weights from YAML
+    - `/metrics/budget` — cost by tier + Opus daily/monthly spend vs caps
+    - All metric queries extracted into `able/core/routing/metrics_queries.py` (shared with WebhookServer, no duplication)
+
+35. **Real-time SSE event stream** (`/events` on gateway, `use-live-events.ts` in Studio):
+    - Gateway: `_sse_subscribers: list[asyncio.Queue]` pattern; `_push_event()` pushes to all; `_events_handler()` sends keepalive pings every 25s
+    - Events pushed at: `interaction_logger.log()` → `routing_decision`; `award_interaction_xp()` → `buddy_xp`
+    - Studio: `useLiveEvents` hook with exponential backoff reconnect (up to 30s); auto-refreshes dashboard on `routing_decision` events
+    - Dashboard live feed shows last 10 events with routing tier/provider/score and buddy level/mood
+
+36. **Studio buddy dashboard page** (`app/buddy/page.tsx`):
+    - Species header with color-coded borders, XP progress bar, needs bars (hunger/thirst/energy)
+    - Battle record (wins/draws/losses + win rate bar), badges grid, care instructions
+    - Nav item added to `layout.tsx`
+
+37. **Studio chat wired through ABLE gateway** (`app/api/chat/route.ts` + `ChatPanel.tsx`):
+    - Chat route tries `ABLE_GATEWAY_URL/api/chat` first; falls back to OpenRouter if unreachable
+    - SSE chunk bridging: gateway → `createTextStreamResponse({ textStream })` → Vercel AI SDK
+    - Gateway `/api/chat` endpoint calls `stream_message()` and SSE-encodes chunks as `{"type":"chunk","text":"..."}`
+    - ChatPanel is now a real interactive chat UI (was static informational text) using `TextStreamChatTransport`
+    - Studio chat now goes through TrustGate → enricher → interaction_log → distillation pipeline
+
+38. **Dashboard enhancements** (`app/page.tsx`):
+    - 5th metric card "Corpus Pairs" showing total pairs and `progress_pct`% toward training threshold
+    - Grid expanded from `grid-cols-2 md:grid-cols-4` to `grid-cols-2 md:grid-cols-3 xl:grid-cols-5`
+    - Live Events feed in sidebar (last 10, real-time via SSE)
+
+39. **`able/core/routing/metrics_queries.py`** — new shared module:
+    - `db_query()`, `db_query_one()`, `since_iso()` helpers
+    - `get_metrics_summary()`, `get_routing_metrics()`, `get_corpus_metrics()`, `get_evolution_metrics()`, `get_budget_metrics()`
+    - Handles missing DB (returns empty/zero results) — safe for fresh installs
+
+40. **Test suite**: `able/tests/test_gateway_metrics.py` — 11 tests (metrics_queries unit tests with in-memory SQLite, gateway source signature checks, route registration checks). All 11 pass; 134 total pass (1 pre-existing unrelated failure in test_federation.py).
+
+### Previous sessions (preserved)
 
 1. **All four learning feedback loops are now closed:**
    - **Eval → Self-Improvement**: `auto_improve.py` maps skill/content failures into approval-gated SKILL.md updates via `SelfImprovementEngine`.
@@ -409,9 +464,9 @@ Run the now-hardened deploy path against production and verify the real operator
 - send a real Telegram buddy query (`How's <buddy>?`) and verify it dispatches the buddy tool path
 - confirm the new CI smoke stays green on PRs and main pushes
 
-### Priority 1: Studio dashboard buddy integration
+### Priority 1: Studio fully wired ✓ (completed 2026-04-07)
 
-The buddy system works across all channels (CLI, Telegram, API, cron) but the Studio web dashboard doesn't display buddy state yet. Wire buddy status, operator profile, roster/backpack progress, badges, and battle history into the Studio API.
+All 10 Studio API routes built and operational. Gateway has `/api/buddy`, `/metrics/*`, `/events` (SSE), and `/api/chat`. Studio chat now routes through TrustGate → enricher → interaction_log → distillation. Corpus metric card and live events feed on dashboard.
 
 ### Priority 2: ASR backend configuration
 
@@ -478,6 +533,7 @@ python3 -m pytest able/tests/test_package_layout.py able/tests/test_runtime_boun
 python3 -m pytest able/tests/test_buddy.py -q
 python3 -m pytest able/tests/test_weekly_research.py -x
 python3 -m pytest able/tests/test_control_plane.py able/tests/test_resource_tools.py able/tests/test_learning_loops.py able/tests/test_collect_results.py able/tests/test_evolution_cycle.py -x
+python3 -m pytest able/tests/test_gateway_metrics.py -x
 python3 -m pytest able/tests/ -x --ignore=able/tests/test_routing.py --ignore=able/tests/test_gateway.py -q
 cd able-studio && pnpm build
 bash -n deploy-to-server.sh

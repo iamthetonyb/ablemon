@@ -667,6 +667,12 @@ class ABLEGateway:
         self.evolution_daemon = None
         self._health_runner: Optional[web.AppRunner] = None
 
+        # SSE subscribers: list of asyncio.Queue for live event streaming
+        self._sse_subscribers: list = []
+
+        # Interaction DB path (used by metrics handlers)
+        self._interaction_db_path: str = "data/interaction_log.db"
+
     def _get_voice_transcriber(self):
         """Instantiate ASR only when explicitly configured and first needed."""
         if self.voice_transcriber is not None:
@@ -1005,6 +1011,14 @@ class ABLEGateway:
                     session_id=user_id,
                 )
                 interaction_id = self.interaction_logger.log(record)
+                # Push routing decision to SSE subscribers
+                asyncio.ensure_future(self._push_event("routing_decision", {
+                    "tier": record.selected_tier,
+                    "provider": record.selected_provider,
+                    "domain": record.domain,
+                    "score": round(record.complexity_score, 3),
+                    "channel": record.channel,
+                }))
             except Exception as e:
                 logger.warning(f"Interaction logging failed: {e}")
 
@@ -1367,6 +1381,7 @@ class ABLEGateway:
                 # ── Buddy XP + needs (system-wide, all channels) ──
                 try:
                     from able.core.buddy.xp import award_interaction_xp
+                    from able.core.buddy.model import load_buddy
                     _complexity = scoring_result.score if scoring_result else 0.5
                     _domain = scoring_result.domain if scoring_result else "default"
                     award_interaction_xp(
@@ -1375,6 +1390,15 @@ class ABLEGateway:
                         domain=_domain,
                         selected_tier=scoring_result.selected_tier if scoring_result else None,
                     )
+                    # Push buddy XP event to SSE subscribers
+                    _buddy = load_buddy()
+                    if _buddy:
+                        asyncio.ensure_future(self._push_event("buddy_xp", {
+                            "name": _buddy.name,
+                            "level": _buddy.level,
+                            "xp": _buddy.xp,
+                            "mood": _buddy.mood,
+                        }))
                 except Exception:
                     pass  # Buddy is optional — never block the pipeline
 
@@ -1621,6 +1645,7 @@ class ABLEGateway:
         # Buddy XP (system-wide)
         try:
             from able.core.buddy.xp import award_interaction_xp
+            from able.core.buddy.model import load_buddy
             _complexity = scoring_result.score if scoring_result else 0.5
             _domain = scoring_result.domain if scoring_result else "default"
             award_interaction_xp(
@@ -1629,6 +1654,14 @@ class ABLEGateway:
                 domain=_domain,
                 selected_tier=scoring_result.selected_tier if scoring_result else None,
             )
+            _buddy = load_buddy()
+            if _buddy:
+                asyncio.ensure_future(self._push_event("buddy_xp", {
+                    "name": _buddy.name,
+                    "level": _buddy.level,
+                    "xp": _buddy.xp,
+                    "mood": _buddy.mood,
+                }))
         except Exception:
             pass
 
@@ -2402,6 +2435,201 @@ class ABLEGateway:
         except Exception as e:
             return web.Response(text=str(e), status=500, content_type="text/plain")
 
+    # ── Buddy REST endpoint ───────────────────────────────────────────────────
+
+    async def _buddy_handler(self, request: web.Request) -> web.Response:
+        """GET /api/buddy — Buddy state as structured JSON for Studio dashboard."""
+        try:
+            from able.core.buddy.model import load_buddy, save_buddy
+            buddy = load_buddy()
+            if buddy is None:
+                return web.json_response({"buddy": None})
+            buddy.apply_needs_decay()
+            save_buddy(buddy)
+            return web.json_response({
+                "buddy": {
+                    "name": buddy.name,
+                    "species": buddy.species.value,
+                    "level": buddy.level,
+                    "xp": buddy.xp,
+                    "xp_to_next": buddy.xp_to_next_level,
+                    "stage": buddy.stage.value,
+                    "wins": buddy.wins,
+                    "losses": buddy.losses,
+                    "draws": buddy.draws,
+                    "hunger": round(buddy.hunger, 2),
+                    "thirst": round(buddy.thirst, 2),
+                    "energy": round(buddy.energy, 2),
+                    "mood": buddy.mood,
+                    "badges": list(buddy.badges) if buddy.badges else [],
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            })
+        except Exception as e:
+            logger.warning("buddy_handler error: %s", e)
+            return web.json_response({"buddy": None, "error": str(e)}, status=500)
+
+    # ── Metrics endpoints (shared logic via metrics_queries) ──────────────────
+
+    async def _metrics_summary_handler(self, request: web.Request) -> web.Response:
+        """GET /metrics — Overall interaction summary."""
+        try:
+            hours = int(request.query.get("hours", "24"))
+        except (ValueError, TypeError):
+            hours = 24
+        from able.core.routing.metrics_queries import get_metrics_summary
+        return web.json_response(get_metrics_summary(hours, self._interaction_db_path))
+
+    async def _metrics_routing_handler(self, request: web.Request) -> web.Response:
+        """GET /metrics/routing — Per-tier routing breakdown."""
+        try:
+            hours = int(request.query.get("hours", "24"))
+        except (ValueError, TypeError):
+            hours = 24
+        from able.core.routing.metrics_queries import get_routing_metrics
+        return web.json_response(get_routing_metrics(hours, self._interaction_db_path))
+
+    async def _metrics_corpus_handler(self, request: web.Request) -> web.Response:
+        """GET /metrics/corpus — Distillation corpus stats."""
+        from able.core.routing.metrics_queries import get_corpus_metrics
+        return web.json_response(get_corpus_metrics(self._interaction_db_path))
+
+    async def _metrics_evolution_handler(self, request: web.Request) -> web.Response:
+        """GET /metrics/evolution — Evolution daemon history and weights."""
+        try:
+            hours = int(request.query.get("hours", "168"))
+        except (ValueError, TypeError):
+            hours = 168
+        from able.core.routing.metrics_queries import get_evolution_metrics
+        return web.json_response(get_evolution_metrics(hours, self._interaction_db_path))
+
+    async def _metrics_budget_handler(self, request: web.Request) -> web.Response:
+        """GET /metrics/budget — Spend vs budget caps."""
+        try:
+            hours = int(request.query.get("hours", "24"))
+        except (ValueError, TypeError):
+            hours = 24
+        from able.core.routing.metrics_queries import get_budget_metrics
+        return web.json_response(get_budget_metrics(hours, self._interaction_db_path))
+
+    # ── SSE real-time event stream ────────────────────────────────────────────
+
+    async def _push_event(self, event_type: str, data: dict) -> None:
+        """Push an event to all active SSE subscribers."""
+        if not self._sse_subscribers:
+            return
+        payload = _json.dumps({
+            "type": event_type,
+            "data": data,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        })
+        dead = []
+        for q in list(self._sse_subscribers):
+            try:
+                q.put_nowait(payload)
+            except Exception:
+                dead.append(q)
+        for q in dead:
+            try:
+                self._sse_subscribers.remove(q)
+            except ValueError:
+                pass
+
+    async def _events_handler(self, request: web.Request) -> web.StreamResponse:
+        """GET /events — SSE stream of gateway events for Studio dashboard."""
+        import asyncio as _asyncio
+        resp = web.StreamResponse(headers={
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
+        })
+        await resp.prepare(request)
+
+        q: asyncio.Queue = asyncio.Queue(maxsize=100)
+        self._sse_subscribers.append(q)
+
+        # Send an initial connected event
+        try:
+            await resp.write(
+                b'data: {"type":"connected","ts":"' +
+                datetime.now(timezone.utc).isoformat().encode() +
+                b'"}\n\n'
+            )
+        except Exception:
+            self._sse_subscribers.remove(q)
+            return resp
+
+        try:
+            while True:
+                try:
+                    payload = await asyncio.wait_for(q.get(), timeout=25)
+                    await resp.write(f"data: {payload}\n\n".encode())
+                except asyncio.TimeoutError:
+                    # Keepalive ping
+                    await resp.write(
+                        b'data: {"type":"ping","ts":"' +
+                        datetime.now(timezone.utc).isoformat().encode() +
+                        b'"}\n\n'
+                    )
+        except (ConnectionResetError, asyncio.CancelledError, Exception):
+            pass
+        finally:
+            try:
+                self._sse_subscribers.remove(q)
+            except ValueError:
+                pass
+
+        return resp
+
+    # ── /api/chat — Studio chat routed through gateway ────────────────────────
+
+    async def _api_chat_handler(self, request: web.Request) -> web.StreamResponse:
+        """POST /api/chat — Studio chat proxied through full gateway pipeline (SSE stream)."""
+        try:
+            body = await request.json()
+        except Exception:
+            return web.Response(text="Invalid JSON", status=400)
+
+        message = body.get("message", "").strip()
+        if not message:
+            return web.Response(text="message required", status=400)
+
+        session_id = body.get("session_id", "studio")
+        channel = body.get("channel", "studio")
+
+        resp = web.StreamResponse(headers={
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
+        })
+        await resp.prepare(request)
+
+        try:
+            full_text = ""
+            async for chunk in self.stream_message(
+                message,
+                session_id=session_id,
+                channel=channel,
+                history=[],
+            ):
+                full_text += chunk
+                payload = _json.dumps({"type": "chunk", "text": chunk})
+                await resp.write(f"data: {payload}\n\n".encode())
+
+            # Final done event
+            done_payload = _json.dumps({"type": "done", "text": full_text})
+            await resp.write(f"data: {done_payload}\n\n".encode())
+        except Exception as e:
+            err_payload = _json.dumps({"type": "error", "error": str(e)})
+            try:
+                await resp.write(f"data: {err_payload}\n\n".encode())
+            except Exception:
+                pass
+
+        return resp
+
     async def start_health_server(self, port: int = 8080, *, quiet: bool = False):
         """Start lightweight HTTP health check server"""
         web = _ensure_aiohttp()
@@ -2416,6 +2644,18 @@ class ABLEGateway:
         app.router.add_get("/control/setup-wizard", self._control_setup_wizard_handler)
         app.router.add_get("/api/reports/research/latest", self._research_report_handler)
         app.router.add_get("/api/reports/research/latest.md", self._research_report_md_handler)
+        # Buddy
+        app.router.add_get("/api/buddy", self._buddy_handler)
+        # Metrics
+        app.router.add_get("/metrics", self._metrics_summary_handler)
+        app.router.add_get("/metrics/routing", self._metrics_routing_handler)
+        app.router.add_get("/metrics/corpus", self._metrics_corpus_handler)
+        app.router.add_get("/metrics/evolution", self._metrics_evolution_handler)
+        app.router.add_get("/metrics/budget", self._metrics_budget_handler)
+        # SSE event stream
+        app.router.add_get("/events", self._events_handler)
+        # Studio chat through gateway
+        app.router.add_post("/api/chat", self._api_chat_handler)
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", port)

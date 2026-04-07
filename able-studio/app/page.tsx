@@ -1,7 +1,9 @@
 "use client";
 
 import useSWR from "swr";
-import { Activity, Briefcase, Zap, DollarSign } from "lucide-react";
+import { useState, useCallback } from "react";
+import { Activity, Briefcase, Zap, DollarSign, Database } from "lucide-react";
+import { useLiveEvents, type GatewayEvent } from "@/lib/use-live-events";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
@@ -26,7 +28,19 @@ const PLAN_BADGE: Record<string, string> = {
 };
 
 export default function DashboardPage() {
-  const { data, error, isLoading } = useSWR("/api/dashboard", fetcher, { refreshInterval: 30000 });
+  const { data, error, isLoading, mutate } = useSWR("/api/dashboard", fetcher, { refreshInterval: 30000 });
+  const { data: corpusData } = useSWR("/api/metrics/corpus", fetcher, { refreshInterval: 60000 });
+  const [liveEvents, setLiveEvents] = useState<GatewayEvent[]>([]);
+
+  const handleLiveEvent = useCallback((event: GatewayEvent) => {
+    if (event.type === "routing_decision") {
+      // Refresh dashboard data when new interactions arrive
+      mutate();
+    }
+    setLiveEvents((prev) => [event, ...prev].slice(0, 10));
+  }, [mutate]);
+
+  useLiveEvents(handleLiveEvent);
 
   if (isLoading) {
     return (
@@ -53,11 +67,15 @@ export default function DashboardPage() {
   const costDollars = (m.totalCostCents / 100).toFixed(2);
   const totalTokensK = ((m.totalInputTokens + m.totalOutputTokens) / 1000).toFixed(1);
 
+  const corpusPairs = corpusData?.total_pairs ?? 0;
+  const corpusPct = corpusData?.progress_pct ?? 0;
+
   const metrics = [
     { label: "Organizations", value: String(m.organizations), sub: "Active tenants", icon: Briefcase, border: "border-t-info" },
     { label: "Active Tools", value: String(m.enabledTools), sub: "MCP skills enabled", icon: Zap, border: "border-t-gold-400" },
     { label: "Audit Events", value: String(m.auditEvents24h), sub: "Last 24 hours", icon: Activity, border: "border-t-success" },
     { label: "Token Usage", value: `${totalTokensK}k`, sub: `$${costDollars} total cost`, icon: DollarSign, border: "border-t-warning" },
+    { label: "Corpus Pairs", value: String(corpusPairs), sub: `${corpusPct}% to training threshold`, icon: Database, border: "border-t-purple-400" },
   ];
 
   return (
@@ -74,7 +92,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Top metrics */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 mb-8">
         {metrics.map((metric) => {
           const Icon = metric.icon;
           return (
@@ -155,9 +173,46 @@ export default function DashboardPage() {
             </a>
           </div>
 
+          {/* Live Events */}
+          {liveEvents.length > 0 && (
+            <>
+              <h3 className="text-[13px] font-semibold text-gold-400 uppercase tracking-wider mb-4 mt-8">Live Events</h3>
+              <div className="space-y-1.5">
+                {liveEvents.map((ev, i) => (
+                  <div key={i} className="glass-card p-2.5 flex items-center gap-2.5">
+                    <span className="status-dot status-dot-active shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      {ev.type === "routing_decision" && (
+                        <p className="text-[12px] text-text-secondary truncate">
+                          T{ev.tier} → <span className="text-text-primary">{ev.provider ?? ev.domain}</span>
+                          {ev.score !== undefined && <span className="text-text-muted"> ({ev.score})</span>}
+                        </p>
+                      )}
+                      {ev.type === "buddy_xp" && (
+                        <p className="text-[12px] text-text-secondary truncate">
+                          {ev.name} Lv{ev.level} • {ev.mood}
+                        </p>
+                      )}
+                      {ev.type !== "routing_decision" && ev.type !== "buddy_xp" && (
+                        <p className="text-[12px] text-text-secondary truncate">{ev.type}</p>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-text-muted shrink-0">
+                      {ev.ts ? new Date(ev.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
           {/* Quick Actions */}
           <h3 className="text-[13px] font-semibold text-gold-400 uppercase tracking-wider mb-4 mt-8">Quick Actions</h3>
           <div className="space-y-2">
+            <a href="/buddy" className="block glass-card p-4 hover:border-gold-400/30 transition-colors">
+              <p className="text-[14px] text-text-primary">Buddy Status</p>
+              <p className="text-[11px] text-text-muted mt-0.5">Companion needs, level, battles</p>
+            </a>
             <a href="/settings" className="block glass-card p-4 hover:border-gold-400/30 transition-colors">
               <p className="text-[14px] text-text-primary">Agent Controls</p>
               <p className="text-[11px] text-text-muted mt-0.5">Toggle tools & approval gates</p>

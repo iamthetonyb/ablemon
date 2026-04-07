@@ -18,6 +18,7 @@ import {
   Server,
   Boxes,
   Wrench,
+  Heart,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -25,6 +26,7 @@ const NAV_ITEMS = [
   { href: "/projects", label: "Projects", icon: Kanban },
   { href: "/timeline", label: "Timeline", icon: CalendarRange },
   { href: "/tracking", label: "Tracking", icon: Brain },
+  { href: "/buddy", label: "Buddy", icon: Heart },
   { href: "/crm", label: "CRM", icon: Contact },
   { href: "/clients", label: "Clients", icon: Users },
   { href: "/audit", label: "Audit Logs", icon: ScrollText },
