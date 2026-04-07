@@ -72,7 +72,7 @@ echo ""
 echo "▸ Converting to GGUF..."
 mkdir -p "$GGUF_DIR"
 
-if command -v python3 -c "import llama_cpp" &>/dev/null || [ -d "llama.cpp" ]; then
+if python3 -c "import llama_cpp" &>/dev/null || [ -d "llama.cpp" ]; then
     # If llama.cpp is available locally
     python3 llama.cpp/convert_hf_to_gguf.py "$FUSED_DIR" \
         --outfile "$GGUF_DIR/able-nano-9b-f16.gguf" \

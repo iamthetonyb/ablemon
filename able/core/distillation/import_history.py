@@ -228,13 +228,20 @@ async def import_all(
     if path:
         return await _import_from_path(path, dry_run)
 
-    # Scan what's available
+    # Scan what's available, filtering by platform if specified
     available = scan_available_history()
+    if platform:
+        available = {k: v for k, v in available.items() if k == platform}
     if not available:
         print("No AI conversation history found on this system.")
-        print("\nTo import history, export from your AI tools:")
-        for plat, hints in _PLATFORM_HINTS.items():
-            print(f"  {hints['name']}: {hints['export_instructions']}")
+        if platform:
+            hints = _PLATFORM_HINTS.get(platform)
+            if hints:
+                print(f"\n  {hints['name']}: {hints['export_instructions']}")
+        else:
+            print("\nTo import history, export from your AI tools:")
+            for plat, hints in _PLATFORM_HINTS.items():
+                print(f"  {hints['name']}: {hints['export_instructions']}")
         return {"total": 0, "platforms": {}}
 
     # Show what we found
