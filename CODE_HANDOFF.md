@@ -220,7 +220,24 @@ Training lanes:
     - Wired into `self_pentest.py`: `_run_optional_deepteam_scan()` gated by `ABLE_ENABLE_DEEPTEAM=1` env var + `deepteam` package availability
     - Weekly cron: `weekly-deepteam` at `0 4 * * 0` (Sunday 4am), 10 attacks/category, 900s timeout, awards buddy XP
 
-49. **Test results**: 651 passing, 1 pre-existing failure (`test_runtime_boundaries` — `build_parser` missing in `__main__`).
+49. **Test results after Items 1-3**: 651 passing → identified 3 pre-existing test failures.
+
+50. **Phase 2 Partial: Durable Task Framework** (39ef60a, Plan Item 6):
+    - NEW `able/core/execution/__init__.py` + `durable_task.py` (~270 lines): `DurableTask` ABC with `TaskCheckpoint`, `TaskResult`, `TaskContext` (checkpoint/retry/waitpoint), `TaskStore` (SQLite in `data/durable_tasks.db`), `TaskRunner`. Buddy XP awarded on checkpoint (+5), completion (+15), resume (+10).
+    - NEW `able/core/execution/overnight_loop.py` (~200 lines): `OvernightLoop` orchestrator — iteration-commit-rollback, 3-consecutive-failure abort, exponential backoff (60s × 2^(N-1)), cross-iteration `notes.md`, per-run metadata in `data/overnight_runs/`.
+
+51. **Phase 2 Partial: Buddy Gamification Wiring** (39ef60a):
+    - `model.py`: 8 new XP constants (XP_DURABLE_TASK_CHECKPOINT through XP_BENCHMARK_PASS), 7 new badges (death-spiral-survivor, night-owl, red-team-leader, context-master, multi-agent, architect, safe-hands), 8 new need restoration sources (red_team_scan, overnight_iteration, durable_task, context_compact, overnight_cycle, tool_persist, edge_inference, monitor_recovery).
+    - `xp.py`: 7 new award functions — `award_pentest_xp()`, `award_durable_task_xp()`, `award_overnight_xp()`, `award_managed_agent_xp()`, `award_monitor_recovery_xp()`, `award_benchmark_xp()`.
+    - `battle.py`: 3 new battle functions — `run_deepteam_battle()`, `run_benchmark_battle()`, `log_benchmark_as_battle()`.
+    - `renderer.py`: `render_compact_status()` — one-line widget format `[emoji Name L12 H:▓▓▓░ T:▓▓▓▓ E:▓▓░░]`.
+
+52. **Phase 2 Partial: SSRF Hardening + Test Fixes** (39ef60a, Plan Item 8a):
+    - `egress_inspector.py`: CGNAT range detection (100.64.0.0/10 — Python's `is_private` misses this), cloud metadata blocking (169.254.169.254, metadata.google.internal), `check_archive_traversal()` for tar/zip `../` paths, `validate_redirect_target()` for redirect re-validation.
+    - `unsloth_exporter.py`: KV-sharing runtime guard — `warnings.warn()` when exporting Gemma 4 notebooks without Unsloth.
+    - `__main__.py`: Public `build_parser()` wrapper for test access.
+    - 3 test fixes: `test_registry_has_all_models` (count ≥4 + Gemma 4 assertions), `test_run_success_qwen` (individual modes vs `mode="all"`), `test_save_report` (async `_save_report` via `asyncio.run()`).
+    - **Test results**: 828 passing, 0 failures.
 
 ---
 
@@ -250,16 +267,15 @@ Training lanes:
 
 ## Next-Run Objectives
 
-### Priority 0: Phase 2 Architecture — Durable Tasks + Managed Agents (Plan Items 6-10)
+### Priority 0: Phase 2 Architecture — Remaining Items (Plan Items 7, 9, 10)
 
 Phase 0 (gateway robustness), Phase 1 Items 1-5 (TurboQuant, Gemma 4, DeepTeam, Hermes quick wins) — ALL DONE.
+Phase 2 partial DONE: Item 6 (durable tasks), Item 8a (SSRF hardening), buddy gamification wiring.
 
-Next phase from the plan:
-- **Item 6**: Durable task execution framework — `able/core/execution/durable_task.py` + `overnight_loop.py`. Iteration-commit-rollback from gnhf. SQLite checkpoints.
-- **Item 7**: Managed Agents provider — `able/core/providers/managed_agent_provider.py`. SSE streaming, $0.08/session-hr, stream-first pattern.
-- **Item 8**: SSRF hardening — CGNAT block, tar traversal detection, cloud metadata endpoints, DNS rebinding note.
-- **Item 9**: Structured handoffs — Three Man Team file-based artifacts in swarm.
-- **Item 10**: Self-diagnosing behavioral benchmarks — per-model-family execution guidance.
+Remaining Phase 2 items:
+- **Item 7**: Managed Agents provider — `able/core/providers/managed_agent_provider.py`. SSE streaming, $0.08/session-hr, stream-first pattern. Beta header: `managed-agents-2026-04-01`.
+- **Item 9**: Structured handoffs — Three Man Team file-based artifacts in swarm. PLANNER → PLAN-BRIEF.md, CODER → BUILD-LOG.md, REVIEWER → REVIEW-FEEDBACK.md.
+- **Item 10**: Self-diagnosing behavioral benchmarks — per-model-family execution guidance. 10 standardized prompts, classify 5 failure modes.
 
 ### Priority 1: Live production verification
 

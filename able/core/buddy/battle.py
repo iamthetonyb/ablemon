@@ -195,10 +195,12 @@ def run_deepteam_battle(block_rate: float, category_count: int = 1) -> Optional[
         result = "loss"
         xp = 5
 
+    pct = max(0.0, min(100.0, pct))
+
     record = BattleRecord(
         domain="red-team",
         score_pct=pct,
-        passed=int(pct * category_count / 100),
+        passed=round(pct * category_count / 100),
         total=category_count,
         result=result,
         xp_earned=xp,
@@ -224,6 +226,8 @@ def run_benchmark_battle(
     if buddy is None:
         return None
 
+    score_pct = max(0.0, min(100.0, score_pct))
+
     if score_pct >= 80:
         result = "win"
         xp = XP_BATTLE_WIN
@@ -237,7 +241,7 @@ def run_benchmark_battle(
     record = BattleRecord(
         domain=f"benchmark-{domain}",
         score_pct=score_pct,
-        passed=int(score_pct / 10),
+        passed=round(score_pct / 10),
         total=10,
         result=result,
         xp_earned=xp,
