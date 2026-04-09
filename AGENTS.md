@@ -72,43 +72,37 @@ User (Telegram/CLI/Studio) -> Gateway -> TrustGate -> Scanner -> Enricher -> Com
 
 ## What Was Just Shipped (2026-04-09)
 
-### Phase 0/1 Gateway Robustness (8 components)
+### Plan Items 1-3: TurboQuant + Gemma 4 Distillation + DeepTeam (aeac30f)
 
-All wired into the gateway tool loop (`gateway.py` lines ~1090-1620):
+1. **TurboQuant KV cache** — q4_0 KV + flash_attention on all Gemma 4 Modelfiles (~2x context at same VRAM). `kv_cache_config.py` recommender generates strategy per model/VRAM. Turbo variant Modelfile for aggressive KV.
+2. **Gemma 4 distillation** — `able-gemma4-31b` (server, 22GB QLoRA) and `able-gemma4-e4b` (edge, 10GB QLoRA on free T4) in MODEL_REGISTRY. Unsloth LoRA defaults (r=8, alpha=8), GGUF quant targets, start_of_turn/end_of_turn chat template in quantizer + exporter.
+3. **DeepTeam red teaming** — `deepteam_bridge.py` wraps ABLE gateway as `model_callback` for 50+ vulnerability categories (prompt injection, PII leakage, excessive agency, SSRF, etc.). Wired into `self_pentest.py` (gated by `ABLE_ENABLE_DEEPTEAM=1`) + weekly cron at Sunday 4am.
 
-1. **Context compactor wired** — Before each LLM call, checks token count vs `max_context`. At 80%, runs `compact_if_needed()`. Strip-thinking recovery tries removing `<think>` blocks first (cheaper). Death spiral prevention: max 3 attempts, verifies reduction.
-2. **Tool result persistence** — NEW FILE `tool_result_storage.py`. 3-layer defense: >4000 tokens saved to `data/tool_results/`, inline replaced with pointer. `read_file` exempt (prevents loops).
-3. **Activity-based timeout** — Replaced fixed 15-iter budget with 20-iter activity-aware. Tracks `_last_activity_ts`. Hard pressure at 17/20, idle pressure at >60s + iter>=8.
-4. **Repeated call guard** — `_args_fingerprint()` blocks last 2 identical tool calls.
-5. **Thinking prefill** — Model produces thinking but no text -> retry max 2x.
-6. **Background notifications** — `CronScheduler.completion_queue` + `_drain_completion_queue()`.
-7. **413 auto-compress** — `is_context_length_error()` catches disconnects + 413s -> auto-compact + retry.
-8. **Disconnect reclassification** — `RemoteProtocolError`, `ServerDisconnectedError`, `ReadTimeout` treated as context-length errors.
+### Phase 0/1 Gateway Robustness (8 components, 8430245)
 
-### Test results: 823 passing, 0 regressions.
+All wired into the gateway tool loop (`gateway.py` lines ~1090-1620). Context compactor, tool result persistence, activity timeout, repeated call guard, thinking prefill, background notifications, 413 auto-compress, disconnect reclassification.
 
-## What's Next (Priority Order)
+### Test results: 651 passing, 1 pre-existing failure (test_runtime_boundaries — unrelated CLI test).
 
-### P0 — Continue Phase 1 (Plan Items 1-3)
+### P0 — Phase 1 Item 5: Background Process Notifications
 
-- **TurboQuant KV cache**: Update Modelfile with `flash_attention on`, `cache_type_k q4_0`, `cache_type_v q4_0`. Create `kv_cache_config.py`.
-- **Gemma 4 distillation target**: Add `ABLE_GEMMA4_31B` and `ABLE_GEMMA4_E4B` to model_configs.py, update unsloth_exporter for `<|turn>` chat template.
-- **DeepTeam red teaming**: `deepteam_bridge.py` wrapping ABLE gateway as model callback, wire into self_pentest.py, weekly deep scan cron.
+- Already shipped as part of gateway robustness stack
+- `CronScheduler.completion_queue` + `_drain_completion_queue()` in gateway
 
-### P1 — Production verification
+### P1 — Phase 2 Architecture (Plan Items 6-10)
+
+- Durable task execution framework (iteration-commit-rollback from gnhf)
+- Managed Agents provider ($0.08/session-hr, SSE streaming)
+- SSRF hardening (CGNAT, tar traversal, DNS rebinding, cloud metadata)
+- Structured agent handoffs (Three Man Team file-based artifacts)
+- Self-diagnosing behavioral benchmarks (per-model-family guidance)
+
+### P2 — Production verification
 
 - Confirm deployed container sees `/home/able/.able/auth.json`
 - Confirm T1 resolves to `gpt-5.4-mini` on live server
 - Send a real Telegram buddy query and verify dispatch
 - Confirm CI smoke stays green
-
-### P2 — Phase 2 Architecture (Plan Items 6-10)
-
-- Durable task execution framework
-- Managed Agents provider ($0.08/session-hr)
-- SSRF hardening (CGNAT, tar traversal, DNS rebinding)
-- Structured agent handoffs (Three Man Team artifacts)
-- Self-diagnosing behavioral benchmarks
 
 Full plan: see `adaptive-purring-kernighan.md` in `.claude/plans/`
 

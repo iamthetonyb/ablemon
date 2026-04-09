@@ -185,6 +185,8 @@ Pinned sizes — do not change without re-measuring.
 
 - `able-student-27b`: `UD-Q4_K_XL` = 17.6 GB | `Q5_K_M` = 19.6 GB | `Q8_0` = 28.6 GB
 - `able-nano-9b`: `UD-IQ2_M` = 3.65 GB | `UD-Q4_K_XL` = 5.97 GB | `Q5_K_M` = 6.58 GB
+- `able-gemma4-31b`: `UD-Q4_K_XL` = 18.8 GB | `Q5_K_M` = 21.0 GB | `Q8_0` = 31.0 GB
+- `able-gemma4-e4b`: `UD-Q4_K_XL` = 3.2 GB | `UD-IQ2_M` = 1.8 GB
 
 Config source of truth:
 - `config/distillation/able_student_27b.yaml`
@@ -194,8 +196,35 @@ Config source of truth:
 Training lanes:
 - **27B**: H100-only, seq_len=8192, micro_batch=1, bf16
 - **9B**: T4-first default, seq_len=2048, micro_batch=1, fp16, checkpoint every 100 steps
+- **Gemma 4 31B**: A100/H100, seq_len=8192, micro_batch=1, bf16, Unsloth LoRA r=8/alpha=8
+- **Gemma 4 E4B**: Free T4 Colab (10GB QLoRA), seq_len=4096, micro_batch=2, fp16, Unsloth mandatory (KV-sharing bug)
 
-## Latest Completed Work (Session 2026-04-09)
+## Latest Completed Work (Session 2026-04-09, continued)
+
+46. **Plan Item 1: TurboQuant KV Cache** (aeac30f):
+    - Added `flash_attention on`, `cache_type_k q4_0`, `cache_type_v q4_0` to `config/ollama/Modelfile.gemma4-31b` — ~2x usable context at same VRAM
+    - NEW `config/ollama/Modelfile.gemma4-31b-turbo` — aggressive KV variant with `num_predict 16384`
+    - NEW `config/ollama/Modelfile.gemma4-e4b` — edge model, 32K context, Gemma 4 chat template
+    - NEW `able/core/distillation/training/kv_cache_config.py` — `recommend_kv_strategy(model_name, vram_gb, target_context)` returns optimal K/V cache types. 4-tier VRAM-based recommendations (f16 → q8_0/q4_0 → q4_0/q4_0 → reduced context)
+
+47. **Plan Item 2: Gemma 4 Distillation Targets** (aeac30f):
+    - `ABLE_GEMMA4_31B` (server, 22GB QLoRA on A100/H100) and `ABLE_GEMMA4_E4B` (edge, 10GB QLoRA on free T4) added to `MODEL_REGISTRY`
+    - Unsloth LoRA defaults: r=8, alpha=8, `finetune_vision_layers=False` — WARNING: `use_cache=False` + gradient checkpointing corrupts KV-sharing on Gemma 4, must use Unsloth's fix
+    - Chat template: `<start_of_turn>user/model<end_of_turn>` (not ChatML). Updated in `unsloth_exporter.py`, `quantizer.py`, all Modelfiles
+    - Runtime profiles: t4_colab (default for E4B), l4_session, a100_session, local (2048 seq, fp16)
+    - Aliases: `gemma4`, `gemma4-31b`, `gemma4-e4b`, `e4b` all resolve in MODEL_REGISTRY
+
+48. **Plan Item 3: DeepTeam Red Teaming Bridge** (aeac30f):
+    - NEW `able/security/deepteam_bridge.py` (~260 lines) — `DeepTeamBridge` class wraps ABLE gateway as `model_callback`. 16 vulnerability categories mapped to ABLE security layers (trust_gate, secret_isolation, command_guard, egress_inspector, etc.)
+    - `ScanResult` with `block_rate` + `passed` (≥80%) properties. `DeepTeamReport.to_pentest_checks()` for PentestReport integration
+    - Wired into `self_pentest.py`: `_run_optional_deepteam_scan()` gated by `ABLE_ENABLE_DEEPTEAM=1` env var + `deepteam` package availability
+    - Weekly cron: `weekly-deepteam` at `0 4 * * 0` (Sunday 4am), 10 attacks/category, 900s timeout, awards buddy XP
+
+49. **Test results**: 651 passing, 1 pre-existing failure (`test_runtime_boundaries` — `build_parser` missing in `__main__`).
+
+---
+
+## Previous Work (same session, earlier)
 
 42. **Phase 0 Critical Fixes — Gateway Robustness** (Plan Items 0b, 0c):
     - **Context compactor wired into gateway** (`gateway.py`): Before each LLM call in the tool loop, messages are checked against the provider's `max_context` limit. When at 80% capacity, `ContextCompactor.compact_if_needed()` runs extractive summarization on the oldest 60%.
@@ -221,12 +250,16 @@ Training lanes:
 
 ## Next-Run Objectives
 
-### Priority 0: Continue Phase 1 — TurboQuant + Gemma 4 + DeepTeam (Plan Items 1-3)
+### Priority 0: Phase 2 Architecture — Durable Tasks + Managed Agents (Plan Items 6-10)
 
-Phase 0 critical fixes and Phase 1 Hermes quick wins (Items 4a-4e, 5) are done. Next items from the plan:
-- **Item 1**: TurboQuant KV cache — update Modelfile.gemma4-31b with `flash_attention on`, `cache_type_k q4_0`, `cache_type_v q4_0`. Create turbo variant Modelfile. Create `kv_cache_config.py`.
-- **Item 2**: Gemma 4 as distillation target — add `ABLE_GEMMA4_31B` and `ABLE_GEMMA4_E4B` to model_configs.py, update unsloth_exporter for Gemma 4 chat template (`<|turn>` tags), create `Modelfile.gemma4-e4b`.
-- **Item 3**: DeepTeam red teaming bridge — `deepteam_bridge.py` wrapping ABLE gateway as model callback, wire into `self_pentest.py`, add weekly deep scan to cron.
+Phase 0 (gateway robustness), Phase 1 Items 1-5 (TurboQuant, Gemma 4, DeepTeam, Hermes quick wins) — ALL DONE.
+
+Next phase from the plan:
+- **Item 6**: Durable task execution framework — `able/core/execution/durable_task.py` + `overnight_loop.py`. Iteration-commit-rollback from gnhf. SQLite checkpoints.
+- **Item 7**: Managed Agents provider — `able/core/providers/managed_agent_provider.py`. SSE streaming, $0.08/session-hr, stream-first pattern.
+- **Item 8**: SSRF hardening — CGNAT block, tar traversal detection, cloud metadata endpoints, DNS rebinding note.
+- **Item 9**: Structured handoffs — Three Man Team file-based artifacts in swarm.
+- **Item 10**: Self-diagnosing behavioral benchmarks — per-model-family execution guidance.
 
 ### Priority 1: Live production verification
 
@@ -263,11 +296,14 @@ Configure the `able-network-corpus` GitHub repo and `GITHUB_TOKEN` for live fede
 ### Priority 6: First Colab training run
 
 Run the first real Unsloth fine-tuning using the current corpus:
-- Export a notebook: `UnslothExporter().export_notebook("9b", corpus_path, hf_repo="able-nano-9b")`
+- **Recommended target**: Gemma 4 E4B (10GB QLoRA fits free T4 perfectly)
+- Export a notebook: `UnslothExporter().export_notebook("able-gemma4-e4b", corpus_path)`
 - Upload to Colab, connect free T4 runtime, execute all cells
+- Quantize to UD-IQ2_M (1.8GB) for deployment on M2 8GB
 - Validate GGUF output loads in Ollama
-- Compare fine-tuned model vs base on reasoning + tools eval configs
+- Compare fine-tuned E4B vs base on reasoning + tools eval configs
 - Document real training time and memory usage for the handoff
+- Alternative: `export_notebook("9b", ...)` for Qwen 3.5 9B (12GB, still fits T4)
 
 ### Priority 7: Distillation corpus growth
 
