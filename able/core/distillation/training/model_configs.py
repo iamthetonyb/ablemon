@@ -172,9 +172,140 @@ ABLE_NANO_9B = StudentModelConfig(
     },
 )
 
+ABLE_GEMMA4_31B = StudentModelConfig(
+    name="able-gemma4-31b",
+    base_model="google/gemma-4-31b-it",
+    role="server",
+    lora_r=8,            # Unsloth docs: r=8 for Gemma 4
+    lora_alpha=8,         # Unsloth docs: alpha >= r
+    sequence_len=8192,
+    micro_batch_size=1,
+    gradient_accumulation=8,
+    learning_rate=1e-4,   # Slightly lower for Gemma 4 per Unsloth
+    min_gpu_memory_gb=22, # 31B QLoRA fits in 22GB
+    quantization_targets=["UD-Q4_K_XL", "Q5_K_M", "Q8_0"],
+    description=(
+        "Gemma 4 31B server model. Apache 2.0. QLoRA in 22GB VRAM. "
+        "WARNING: use_cache=False with gradient checkpointing causes "
+        "KV-sharing corruption on Gemma 4. MUST use Unsloth's fix."
+    ),
+    default_gpu_class="a100_session",
+    default_runtime="colab",
+    supported_gpu_classes=["a100_session", "h100_session", "l4_session"],
+    checkpointing=True,
+    resume_first=True,
+    runtime_profiles={
+        "a100_session": {
+            "runtime": "colab",
+            "sequence_len": 8192,
+            "micro_batch_size": 1,
+            "gradient_accumulation": 8,
+            "gradient_checkpointing": True,
+            "bf16": True,
+            "fp16": False,
+            "save_strategy": "steps",
+            "save_steps": 100,
+        },
+        "h100_session": {
+            "runtime": "cloud",
+            "sequence_len": 8192,
+            "micro_batch_size": 1,
+            "gradient_accumulation": 8,
+            "gradient_checkpointing": True,
+            "bf16": True,
+            "fp16": False,
+            "save_strategy": "epoch",
+            "save_steps": 250,
+        },
+        "l4_session": {
+            "runtime": "colab",
+            "sequence_len": 4096,
+            "micro_batch_size": 1,
+            "gradient_accumulation": 16,
+            "gradient_checkpointing": True,
+            "bf16": True,
+            "fp16": False,
+            "save_strategy": "steps",
+            "save_steps": 50,
+        },
+    },
+)
+
+ABLE_GEMMA4_E4B = StudentModelConfig(
+    name="able-gemma4-e4b",
+    base_model="google/gemma-4-E4B-it",
+    role="edge",
+    lora_r=8,
+    lora_alpha=8,
+    sequence_len=4096,
+    micro_batch_size=2,
+    gradient_accumulation=4,
+    learning_rate=2e-4,
+    min_gpu_memory_gb=10,  # E4B QLoRA fits on free Colab T4
+    quantization_targets=["UD-Q4_K_XL", "UD-IQ2_M"],
+    description=(
+        "Gemma 4 E4B edge model. 5.1B total / 4.5B effective via PLE architecture. "
+        "Apache 2.0. Fits on free Colab T4 (~10GB). "
+        "Could replace Qwen 3.5 9B as edge target if evals confirm."
+    ),
+    default_gpu_class="t4_colab",
+    default_runtime="colab",
+    supported_gpu_classes=["t4_colab", "l4_session", "a100_session", "local"],
+    checkpointing=True,
+    resume_first=True,
+    runtime_profiles={
+        "t4_colab": {
+            "runtime": "colab",
+            "sequence_len": 4096,
+            "micro_batch_size": 2,
+            "gradient_accumulation": 4,
+            "gradient_checkpointing": True,
+            "bf16": False,
+            "fp16": True,
+            "save_strategy": "steps",
+            "save_steps": 100,
+        },
+        "l4_session": {
+            "runtime": "colab",
+            "sequence_len": 4096,
+            "micro_batch_size": 2,
+            "gradient_accumulation": 4,
+            "gradient_checkpointing": True,
+            "bf16": True,
+            "fp16": False,
+            "save_strategy": "steps",
+            "save_steps": 100,
+        },
+        "a100_session": {
+            "runtime": "colab",
+            "sequence_len": 8192,
+            "micro_batch_size": 4,
+            "gradient_accumulation": 2,
+            "gradient_checkpointing": True,
+            "bf16": True,
+            "fp16": False,
+            "save_strategy": "steps",
+            "save_steps": 100,
+        },
+        "local": {
+            "runtime": "local",
+            "sequence_len": 2048,
+            "micro_batch_size": 1,
+            "gradient_accumulation": 8,
+            "gradient_checkpointing": True,
+            "bf16": False,
+            "fp16": True,
+            "save_strategy": "steps",
+            "save_steps": 100,
+        },
+    },
+)
+
 MODEL_REGISTRY: dict[str, StudentModelConfig] = {
     "able-student-27b": ABLE_STUDENT_27B,
     "able-nano-9b": ABLE_NANO_9B,
+    "able-gemma4-31b": ABLE_GEMMA4_31B,
+    "able-gemma4-e4b": ABLE_GEMMA4_E4B,
 }
 
 # GPU fallback chains — when the preferred GPU class is unavailable or
@@ -183,6 +314,8 @@ MODEL_REGISTRY: dict[str, StudentModelConfig] = {
 GPU_FALLBACK_CHAINS: dict[str, list[str]] = {
     "able-student-27b": ["h100_session", "a100_session", "l4_session"],
     "able-nano-9b": ["t4_colab", "l4_session", "a100_session", "h100_session", "local"],
+    "able-gemma4-31b": ["a100_session", "h100_session", "l4_session"],
+    "able-gemma4-e4b": ["t4_colab", "l4_session", "a100_session", "local"],
 }
 
 
@@ -193,7 +326,14 @@ def resolve_models(name: str) -> list[StudentModelConfig]:
     if name in MODEL_REGISTRY:
         return [MODEL_REGISTRY[name]]
 
-    aliases = {"27b": "able-student-27b", "9b": "able-nano-9b"}
+    aliases = {
+        "27b": "able-student-27b",
+        "9b": "able-nano-9b",
+        "gemma4": "able-gemma4-31b",
+        "gemma4-31b": "able-gemma4-31b",
+        "gemma4-e4b": "able-gemma4-e4b",
+        "e4b": "able-gemma4-e4b",
+    }
     if name in aliases:
         return [MODEL_REGISTRY[aliases[name]]]
 

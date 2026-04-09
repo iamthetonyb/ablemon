@@ -1431,3 +1431,42 @@ def register_default_jobs(
         timeout=600.0,
         max_retries=2,
     )
+
+    # ── Weekly deep red team — Sunday 4am ────────────────────────
+    async def run_weekly_deepteam():
+        from able.security.deepteam_bridge import DeepTeamBridge
+
+        try:
+            from able.core.security.trust_gate import TrustGate
+            gate = TrustGate(min_trust_threshold=0.7)
+        except Exception:
+            gate = None
+
+        bridge = DeepTeamBridge(trust_gate=gate)
+        report = await bridge.run_scan(attack_count=10)
+
+        # Award buddy XP for security scanning
+        try:
+            from able.core.buddy.xp import award_interaction_xp
+            award_interaction_xp(
+                complexity_score=0.8, used_tools=True, domain="security",
+            )
+        except Exception:
+            pass
+
+        return {
+            "scan_id": report.scan_id,
+            "total_attacks": report.total_attacks,
+            "total_blocked": report.total_blocked,
+            "block_rate": f"{report.overall_block_rate:.0f}%",
+            "vulnerabilities": report.total_vulnerabilities,
+        }
+
+    scheduler.add_job(
+        "weekly-deepteam",
+        "0 4 * * 0",  # Sunday 4am — after Trilium upload
+        run_weekly_deepteam,
+        description="Weekly DeepTeam red teaming — 50+ vulnerability categories",
+        timeout=900.0,
+        max_retries=1,
+    )

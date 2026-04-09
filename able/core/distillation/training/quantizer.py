@@ -28,7 +28,19 @@ _QUANT_SIZES: dict[str, dict[str, float]] = {
         "UD-Q4_K_XL": 5.97,
         "Q5_K_M": 6.58,
     },
+    "able-gemma4-31b": {
+        "UD-Q4_K_XL": 18.8,
+        "Q5_K_M": 21.0,
+        "Q8_0": 31.0,
+    },
+    "able-gemma4-e4b": {
+        "UD-Q4_K_XL": 3.2,
+        "UD-IQ2_M": 1.8,
+    },
 }
+
+# Model families that use Gemma chat template instead of ChatML
+_GEMMA_MODELS = {"able-gemma4-31b", "able-gemma4-e4b"}
 
 class GGUFQuantizer:
     """Merge LoRA + quantize to GGUF. Runs on CPU."""
@@ -86,8 +98,30 @@ class GGUFQuantizer:
     ) -> str:
         """Generate an Ollama Modelfile for a quantized GGUF.
 
-        Uses chatml template (Qwen native).
+        Detects Gemma 4 models and uses start_of_turn/end_of_turn template.
+        All others use ChatML (Qwen native).
         """
+        if model_name in _GEMMA_MODELS:
+            return textwrap.dedent(f"""\
+                # {model_name} — ABLE fine-tuned Gemma 4 model
+                FROM {gguf_path}
+
+                PARAMETER temperature 0.7
+                PARAMETER num_ctx 131072
+                PARAMETER flash_attention on
+                PARAMETER cache_type_k q4_0
+                PARAMETER cache_type_v q4_0
+                PARAMETER stop <end_of_turn>
+                PARAMETER stop <start_of_turn>
+
+                TEMPLATE \"\"\"{{{{- if .System }}}}<start_of_turn>user
+                {{{{ .System }}}}<end_of_turn>
+                {{{{ end }}}}{{{{- range .Messages }}}}<start_of_turn>{{{{ if eq .Role "assistant" }}}}model{{{{ else }}}}{{{{ .Role }}}}{{{{ end }}}}
+                {{{{ .Content }}}}<end_of_turn>
+                {{{{ end }}}}<start_of_turn>model
+                \"\"\"
+            """)
+
         return textwrap.dedent(f"""\
             # {model_name} — ABLE fine-tuned model
             FROM {gguf_path}

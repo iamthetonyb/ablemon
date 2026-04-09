@@ -27,6 +27,13 @@ PARAMETER num_ctx 131072
 PARAMETER stop <end_of_turn>
 PARAMETER stop <start_of_turn>
 
+# KV cache quantization — ~2x effective context at same VRAM
+# Keys need more precision than values (up to 182x norm difference per TurboQuant paper)
+# Upgrade path: switch to tq3/tq4 when Ollama adds TurboQuant support
+PARAMETER flash_attention on
+PARAMETER cache_type_k q4_0
+PARAMETER cache_type_v q4_0
+
 # Gemma 4 uses a different chat template than ChatML.
 # Uses <start_of_turn>role\ncontent<end_of_turn> format.
 TEMPLATE """{{- if .System }}<start_of_turn>user

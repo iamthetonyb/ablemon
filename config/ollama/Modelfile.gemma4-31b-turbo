@@ -1,0 +1,33 @@
+# Gemma 4 31B Turbo — Aggressive KV cache compression for max context
+# Same model, heavier quantization on KV cache for longer conversations.
+#
+# vs standard Modelfile.gemma4-31b:
+#   - q4_0 KV cache (standard) → q4_0 K / q4_0 V (same for now)
+#   - TurboQuant upgrade: when Ollama adds tq3/tq4, use K=tq4, V=tq3
+#     (values tolerate heavier compression per Google Research paper)
+#   - num_predict raised to 16384 for longer generations
+#
+# Usage:
+#   ollama create gemma4-31b-turbo -f config/ollama/Modelfile.gemma4-31b-turbo
+#   ollama run gemma4-31b-turbo
+
+FROM ./models/gemma-4-31B-it-UD-Q4_K_XL.gguf
+
+PARAMETER temperature 0.7
+PARAMETER num_ctx 131072
+PARAMETER num_predict 16384
+PARAMETER stop <end_of_turn>
+PARAMETER stop <start_of_turn>
+
+# Aggressive KV cache quantization
+PARAMETER flash_attention on
+PARAMETER cache_type_k q4_0
+PARAMETER cache_type_v q4_0
+
+# Gemma 4 chat template (start_of_turn/end_of_turn, not ChatML)
+TEMPLATE """{{- if .System }}<start_of_turn>user
+{{ .System }}<end_of_turn>
+{{ end }}{{- range .Messages }}<start_of_turn>{{ if eq .Role "assistant" }}model{{ else }}{{ .Role }}{{ end }}
+{{ .Content }}<end_of_turn>
+{{ end }}<start_of_turn>model
+"""

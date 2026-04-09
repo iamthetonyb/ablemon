@@ -1,0 +1,31 @@
+# Gemma 4 E4B — Edge model (5.1B total, ~4.5B effective via PLE)
+# Lightweight distillation target for ABLE T5 edge lane.
+# Apache 2.0 license. Fits on free Colab T4 for QLoRA training (~10GB).
+#
+# PLE (Partial Layer Embedding) architecture: only 2.3-4.5B active params
+# per forward pass, so it punches above its weight vs similarly sized models.
+#
+# Setup:
+#   ollama pull gemma4:E4B
+#   # or fine-tuned:
+#   ollama create gemma4-e4b -f config/ollama/Modelfile.gemma4-e4b
+
+FROM ./models/gemma-4-E4B-it-UD-Q4_K_XL.gguf
+
+PARAMETER temperature 0.7
+PARAMETER num_ctx 32768
+PARAMETER stop <end_of_turn>
+PARAMETER stop <start_of_turn>
+
+# KV cache quantization for edge — maximize context in limited VRAM
+PARAMETER flash_attention on
+PARAMETER cache_type_k q4_0
+PARAMETER cache_type_v q4_0
+
+# Gemma 4 chat template (shared across all Gemma 4 variants)
+TEMPLATE """{{- if .System }}<start_of_turn>user
+{{ .System }}<end_of_turn>
+{{ end }}{{- range .Messages }}<start_of_turn>{{ if eq .Role "assistant" }}model{{ else }}{{ .Role }}{{ end }}
+{{ .Content }}<end_of_turn>
+{{ end }}<start_of_turn>model
+"""

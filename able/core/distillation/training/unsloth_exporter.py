@@ -61,13 +61,56 @@ _UNSLOTH_LORA_DEFAULTS = {
         "max_seq_length": 4096,
         "load_in_4bit": True,
     },
+    # Gemma 4 models — r=8, alpha=8 per Unsloth docs
+    # WARNING: use_cache=False with gradient checkpointing causes KV-sharing
+    # corruption on Gemma 4 E2B/E4B. MUST use Unsloth's fix.
+    "able-gemma4-31b": {
+        "r": 8,
+        "target_modules": [
+            "q_proj", "k_proj", "v_proj", "o_proj",
+            "gate_proj", "up_proj", "down_proj",
+        ],
+        "lora_alpha": 8,
+        "lora_dropout": 0,
+        "use_gradient_checkpointing": "unsloth",
+        "max_seq_length": 8192,
+        "load_in_4bit": True,
+        "finetune_vision_layers": False,
+        "finetune_language_layers": True,
+        "finetune_attention_modules": True,
+        "finetune_mlp_modules": True,
+    },
+    "able-gemma4-e4b": {
+        "r": 8,
+        "target_modules": [
+            "q_proj", "k_proj", "v_proj", "o_proj",
+            "gate_proj", "up_proj", "down_proj",
+        ],
+        "lora_alpha": 8,
+        "lora_dropout": 0,
+        "use_gradient_checkpointing": "unsloth",
+        "max_seq_length": 4096,
+        "load_in_4bit": True,
+        "finetune_vision_layers": False,
+        "finetune_language_layers": True,
+        "finetune_attention_modules": True,
+        "finetune_mlp_modules": True,
+    },
 }
 
 # GGUF quant targets per model
 _GGUF_QUANTS = {
     "able-nano-9b": ["q4_k_m", "iq2_m", "q8_0"],
     "able-student-27b": ["q4_k_m", "q5_k_m", "q8_0"],
+    "able-gemma4-31b": ["q4_k_m", "q5_k_m", "q8_0"],
+    "able-gemma4-e4b": ["q4_k_m", "iq2_m"],
 }
+
+# Gemma 4 uses <|turn> tags, not ChatML. For train_on_responses_only:
+#   instruction_part = "<|turn>user\n"
+#   response_part = "<|turn>model\n"
+# The tokenizer adds <bos> prefix — remove with removeprefix('<bos>')
+_GEMMA4_MODELS = {"able-gemma4-31b", "able-gemma4-e4b"}
 
 
 class UnslothExporter:
@@ -242,23 +285,50 @@ class UnslothExporter:
             "After downloading the GGUF file to your local machine:"
         ))
 
+        # Gemma 4 uses start_of_turn/end_of_turn, Qwen uses ChatML
+        is_gemma4 = model_name in _GEMMA4_MODELS
+        if is_gemma4:
+            modelfile_template = (
+                f"# Generate Ollama Modelfile (Gemma 4 chat template)\n"
+                f"MODELFILE = '''\n"
+                f"FROM ./outputs/{model_name}-gguf/unsloth.Q4_K_M.gguf\n"
+                f"TEMPLATE \"\"\"{{{{- if .System }}}}<start_of_turn>user\n"
+                f"{{{{ .System }}}}<end_of_turn>\n"
+                f"{{{{ end }}}}{{{{- range .Messages }}}}<start_of_turn>{{{{ if eq .Role \"assistant\" }}}}model{{{{ else }}}}{{{{ .Role }}}}{{{{ end }}}}\n"
+                f"{{{{ .Content }}}}<end_of_turn>\n"
+                f"{{{{ end }}}}<start_of_turn>model\n"
+                f"\"\"\"\n"
+                f'PARAMETER temperature 0.7\n'
+                f'PARAMETER flash_attention on\n'
+                f'PARAMETER cache_type_k q4_0\n'
+                f'PARAMETER cache_type_v q4_0\n'
+                f"PARAMETER stop \"<end_of_turn>\"\n"
+                f"PARAMETER stop \"<start_of_turn>\"\n"
+                f"SYSTEM You are ABLE, an autonomous AI agent.\n"
+                f"'''\n\n"
+            )
+        else:
+            modelfile_template = (
+                f"# Generate Ollama Modelfile (ChatML template)\n"
+                f"MODELFILE = '''\n"
+                f"FROM ./outputs/{model_name}-gguf/unsloth.Q4_K_M.gguf\n"
+                f"TEMPLATE \"\"\"{{{{- if .System }}}}<|im_start|>system\n"
+                f"{{{{ .System }}}}<|im_end|>\n"
+                f"{{{{- end }}}}<|im_start|>user\n"
+                f"{{{{ .Prompt }}}}<|im_end|>\n"
+                f"<|im_start|>assistant\n"
+                f"{{{{ .Response }}}}<|im_end|>\"\"\"\n"
+                f'PARAMETER temperature 0.7\n'
+                f'PARAMETER top_p 0.9\n'
+                f"PARAMETER stop \"<|im_end|>\"\n"
+                f"PARAMETER stop \"<|im_start|>\"\n"
+                f"SYSTEM You are ABLE, an autonomous AI agent.\n"
+                f"'''\n\n"
+            )
+
         cells.append(self._code_cell(
-            f"# Generate Ollama Modelfile\n"
-            f"MODELFILE = '''\n"
-            f"FROM ./outputs/{model_name}-gguf/unsloth.Q4_K_M.gguf\n"
-            f"TEMPLATE \"\"\"{{{{- if .System }}}}<|im_start|>system\n"
-            f"{{{{ .System }}}}<|im_end|>\n"
-            f"{{{{- end }}}}<|im_start|>user\n"
-            f"{{{{ .Prompt }}}}<|im_end|>\n"
-            f"<|im_start|>assistant\n"
-            f"{{{{ .Response }}}}<|im_end|>\"\"\"\n"
-            f'PARAMETER temperature 0.7\n'
-            f'PARAMETER top_p 0.9\n'
-            f"PARAMETER stop \"<|im_end|>\"\n"
-            f"PARAMETER stop \"<|im_start|>\"\n"
-            f"SYSTEM You are ABLE, an autonomous AI agent.\n"
-            f"'''\n\n"
-            f'with open("Modelfile", "w") as f:\n'
+            modelfile_template
+            + f'with open("Modelfile", "w") as f:\n'
             f"    f.write(MODELFILE)\n\n"
             f'print("Modelfile generated. Run locally:")\n'
             f'print(f"  ollama create {model_name} -f Modelfile")\n'
