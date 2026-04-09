@@ -14,11 +14,17 @@ Simple questions hit GPT 5.4 Mini through your ChatGPT subscription — $0 per t
 **It learns from your real interactions.**  
 Every conversation is evaluated, scored, and turned into training data. Wins get reinforced. Corrections get captured. Over time it builds a fine-tuned local model that sounds like your actual use case.
 
+**It doesn't crash when conversations get long.**  
+A 8-layer robustness stack handles context overflow, stuck tool loops, and provider disconnects automatically. Context gets compacted, large outputs get persisted to disk, idle agents get pressure, spinning agents get killed. You don't notice any of it.
+
 **It has a companion that grows with it.**  
 Your buddy starts at a level based on how you already use AI. Feed it, train it, watch it evolve. It's not decorative — it reflects real system activity.
 
 **It shares (safely) and gets shared with.**  
 A federation network exchanges anonymized high-quality pairs between ABLE instances. Your system benefits from everyone's best conversations. PII is stripped before anything leaves.
+
+**It secures itself.**  
+Every message scores through a TrustGate before execution. Commands go through a CommandGuard with YAML-configurable policies. Egress inspection catches data exfiltration. Tool permissions are three-tier: always allow, ask first, never allow.
 
 ---
 
@@ -83,7 +89,8 @@ ABLE turns your conversations into training data automatically.
 - Builds DPO training pairs: chosen responses vs rejected ones
 
 **Every night at 2am:**
-- Harvests conversations from CLI, Claude Code, Codex, ChatGPT, and any tool you've connected
+- Harvests conversations from 13 sources — Claude Code, Codex, ChatGPT, Gemini, Grok, Cursor, Windsurf, Manus, Perplexity, claude.ai exports, and more
+- Drop any AI tool's export into `~/.able/external_sessions/` and it gets picked up automatically
 - Builds a distillation corpus with deduplication and quality filtering
 
 **Weekly research scout (Karpathy LLM Wiki pattern):**
@@ -186,8 +193,49 @@ able/
 ├── tools/trilium/       TriliumNext knowledge base (wiki, research ingestion)
 ├── tools/xcrawl/        Structured web scraping for deep research
 ├── tools/graphify/      Knowledge graph builder (D3 + mermaid)
-└── tools/               Browser, search, GitHub, DigitalOcean, Vercel, codex audit
+├── tools/               Browser, search, GitHub, DigitalOcean, Vercel, codex audit
+└── skills/              25+ auto-triggered skills (copywriting, security, deploy, research)
 ```
+
+---
+
+## The gateway — what happens when you send a message
+
+23 tools registered. Every request runs through:
+
+```
+Message -> TrustGate (safety score) -> Scanner -> Enricher (expands vague prompts)
+    -> ComplexityScorer (<5ms, no LLM call) -> Provider chain -> Tool dispatch
+         -> ExecutionMonitor (detects stuck loops) -> ContextCompactor (prevents overflow)
+```
+
+If the model gets stuck calling the same tool — killed. If context fills up — compacted. If the provider disconnects on a large payload — auto-retried with compression. If a tool produces 50KB of output — persisted to disk, replaced with a summary.
+
+You don't manage any of this.
+
+---
+
+## Studio dashboard
+
+```bash
+cd able-studio && pnpm dev
+```
+
+Web dashboard at `localhost:3000` — buddy status, metrics, live event stream, chat routed through the full ABLE pipeline. Built on Next.js 16.2 + Neon Postgres.
+
+---
+
+## Security
+
+| Layer | What it does |
+|-------|-------------|
+| TrustGate | Scores every message 0.0-1.0. Below 0.4 = blocked |
+| CommandGuard | YAML-configured tool permissions (allow/ask/deny) |
+| Egress Inspector | Catches URLs, S3 paths, git remotes before shell execution |
+| Malware Scanner | Scans new skills before registration |
+| Codex Cross-Audit | 3-layer code review (codex -> claude -> rule-based) |
+
+Config: `config/tool_permissions.yaml`
 
 ---
 
