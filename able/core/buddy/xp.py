@@ -19,6 +19,14 @@ from .model import (
     XP_TOOL_EXECUTION,
     XP_APPROVAL_GRANTED,
     XP_DOMAIN_BONUS,
+    XP_DURABLE_TASK_CHECKPOINT,
+    XP_DURABLE_TASK_COMPLETE,
+    XP_DURABLE_TASK_RESUME,
+    XP_MANAGED_AGENT_SESSION,
+    XP_RED_TEAM_SCAN,
+    XP_OVERNIGHT_ITERATION,
+    XP_MONITOR_RECOVERY,
+    XP_BENCHMARK_PASS,
     load_buddy,
     record_collection_progress,
     save_buddy,
@@ -411,6 +419,123 @@ def award_gstack_sprint_xp(
             buddy.name, legendary_title,
         )
 
+    return xp
+
+
+# ── Phase 2 integration XP sources ───────────────────────────────────────────
+
+
+def award_pentest_xp(findings_count: int = 0, critical_count: int = 0) -> Optional[int]:
+    """Award XP for running a DeepTeam security scan.
+
+    Red teaming = the system eating security training data.
+    More findings = more learning material.
+    """
+    buddy = load_buddy()
+    if buddy is None:
+        return None
+
+    xp = XP_RED_TEAM_SCAN + critical_count * 5
+    buddy.award_xp(xp)
+    buddy.feed("red_team_scan")
+    buddy.walk("tool_use", domain="security")
+
+    save_buddy(buddy)
+    logger.info("Buddy %s gained %d XP from red team scan (%d findings)", buddy.name, xp, findings_count)
+    return xp
+
+
+def award_durable_task_xp(event_type: str = "checkpoint") -> Optional[int]:
+    """Award XP for durable task lifecycle events.
+
+    event_type: 'checkpoint' | 'complete' | 'resume'
+    """
+    buddy = load_buddy()
+    if buddy is None:
+        return None
+
+    xp_map = {
+        "checkpoint": XP_DURABLE_TASK_CHECKPOINT,
+        "complete": XP_DURABLE_TASK_COMPLETE,
+        "resume": XP_DURABLE_TASK_RESUME,
+    }
+    xp = xp_map.get(event_type, XP_DURABLE_TASK_CHECKPOINT)
+    buddy.award_xp(xp)
+    buddy.feed("durable_task")
+    if event_type == "resume":
+        buddy.walk("monitor_recovery")
+
+    save_buddy(buddy)
+    logger.info("Buddy %s gained %d XP from durable task (%s)", buddy.name, xp, event_type)
+    return xp
+
+
+def award_overnight_xp(iteration_count: int = 1, success: bool = True) -> Optional[int]:
+    """Award XP for overnight orchestrator iterations.
+
+    Overnight autonomous work = the buddy feeding and hydrating itself.
+    """
+    buddy = load_buddy()
+    if buddy is None:
+        return None
+
+    xp = XP_OVERNIGHT_ITERATION * iteration_count
+    if success and iteration_count >= 3:
+        xp += 20  # Streak bonus for 3+ consecutive successes
+    buddy.award_xp(xp)
+
+    buddy.feed("overnight_iteration")
+    buddy.water("overnight_cycle")
+    buddy.walk("self_explore")
+
+    save_buddy(buddy)
+    logger.info("Buddy %s gained %d XP from overnight (%d iterations)", buddy.name, xp, iteration_count)
+    return xp
+
+
+def award_managed_agent_xp(session_duration_min: float = 0) -> Optional[int]:
+    """Award XP for completing a managed agent session."""
+    buddy = load_buddy()
+    if buddy is None:
+        return None
+
+    xp = XP_MANAGED_AGENT_SESSION
+    buddy.award_xp(xp)
+    buddy.feed("auto_care")
+    buddy.walk("self_explore")
+
+    save_buddy(buddy)
+    logger.info("Buddy %s gained %d XP from managed agent session (%.1f min)", buddy.name, xp, session_duration_min)
+    return xp
+
+
+def award_monitor_recovery_xp() -> Optional[int]:
+    """Award XP when ExecutionMonitor intervention succeeds."""
+    buddy = load_buddy()
+    if buddy is None:
+        return None
+
+    xp = XP_MONITOR_RECOVERY
+    buddy.award_xp(xp)
+    buddy.walk("monitor_recovery")
+
+    save_buddy(buddy)
+    logger.info("Buddy %s gained %d XP from monitor recovery", buddy.name, xp)
+    return xp
+
+
+def award_benchmark_xp(model: str, domain: str, passed: bool = True) -> Optional[int]:
+    """Award XP for behavioral benchmark results (pass/fail per model)."""
+    buddy = load_buddy()
+    if buddy is None:
+        return None
+
+    xp = XP_BENCHMARK_PASS if passed else 5
+    buddy.award_xp(xp)
+    buddy.feed("eval_pass")
+
+    save_buddy(buddy)
+    logger.info("Buddy %s gained %d XP from benchmark %s/%s (%s)", buddy.name, xp, model, domain, "pass" if passed else "fail")
     return xp
 
 

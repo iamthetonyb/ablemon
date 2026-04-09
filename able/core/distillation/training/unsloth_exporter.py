@@ -148,6 +148,20 @@ class UnslothExporter:
         quants = _GGUF_QUANTS.get(model_name, ["q4_k_m"])
         runtime_profile = config.runtime_profiles.get(runtime, {})
 
+        # Gemma 4 KV-sharing bug guard: use_cache=False + gradient checkpointing
+        # corrupts training without Unsloth's fix. All generated notebooks use
+        # Unsloth, so this is safe — but warn if someone tries to train outside
+        # the generated notebooks.
+        if model_name in _GEMMA4_MODELS:
+            import warnings
+            warnings.warn(
+                f"CRITICAL: {model_name} requires Unsloth for training. "
+                f"use_cache=False + gradient checkpointing causes KV-sharing "
+                f"corruption on Gemma 4 without Unsloth's fix. Do NOT train "
+                f"this model with vanilla transformers/PEFT.",
+                stacklevel=2,
+            )
+
         cells = []
 
         # Cell 1: Title + setup

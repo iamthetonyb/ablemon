@@ -328,6 +328,35 @@ BADGE_DEFS = {
         "title": "Champion Crown",
         "description": "Fully evolve and level the hidden sixth signal to its final form.",
     },
+    # Phase 2 badges
+    "death-spiral-survivor": {
+        "title": "Death Spiral Survivor",
+        "description": "Survived a context compression death spiral.",
+    },
+    "night-owl": {
+        "title": "Night Owl",
+        "description": "Complete first overnight orchestrator run.",
+    },
+    "red-team-leader": {
+        "title": "Red Team Leader",
+        "description": "Run first successful DeepTeam security scan cycle.",
+    },
+    "context-master": {
+        "title": "Context Master",
+        "description": "Survive 3 context compactions in a single session.",
+    },
+    "multi-agent": {
+        "title": "Multi-Agent",
+        "description": "Complete first managed agent session.",
+    },
+    "architect": {
+        "title": "Architect",
+        "description": "Complete first durable task with checkpoints.",
+    },
+    "safe-hands": {
+        "title": "Safe Hands",
+        "description": "Successfully rollback from 10 filesystem checkpoints.",
+    },
 }
 
 OMNIDEX_EASTER_EGG = {
@@ -349,6 +378,16 @@ XP_APPROVAL_GRANTED = 8         # Bonus for approved write action
 XP_BATTLE_WIN = 50              # Eval battle win
 XP_BATTLE_DRAW = 20             # Eval battle draw
 XP_DOMAIN_BONUS = 5             # Bonus when interaction matches species domain
+
+# Phase 2 integration XP sources
+XP_DURABLE_TASK_CHECKPOINT = 5     # Reaching a checkpoint in durable task
+XP_DURABLE_TASK_COMPLETE = 15      # Completing a full durable task
+XP_DURABLE_TASK_RESUME = 10        # Resuming from failure (resilience)
+XP_MANAGED_AGENT_SESSION = 20      # Completing a managed agent session
+XP_RED_TEAM_SCAN = 25              # Running a DeepTeam security scan
+XP_OVERNIGHT_ITERATION = 10        # Each successful overnight loop iteration
+XP_MONITOR_RECOVERY = 8            # ExecutionMonitor intervention that succeeded
+XP_BENCHMARK_PASS = 15             # Behavioral benchmark pass per model
 
 
 def xp_for_level(level: int) -> int:
@@ -417,6 +456,10 @@ NEED_RESTORE = {
         "auto_care": 12,        # Autonomous system work (cron jobs = self-training)
         "evolution_deploy": 15, # System deployed new weights = hearty meal
         "session_harvest": 8,   # Harvesting sessions from external tools
+        # Phase 2 sources
+        "red_team_scan": 20,       # Security scan = training data feast
+        "overnight_iteration": 15, # Overnight autonomous work = self-feeding
+        "durable_task": 10,        # Completing a durable task checkpoint
     },
     "thirst": {
         "evolve": 40,        # Running evolution cycle = big drink
@@ -424,12 +467,19 @@ NEED_RESTORE = {
         "auto_tick": 5,      # Autonomous tick = the system is alive = sip
         "distillation": 10,  # Harvesting training data = watering the roots
         "session_ingest": 5, # External session ingested = knowledge absorbed
+        # Phase 2 sources
+        "context_compact": 8,    # Knowledge compression = watering the roots
+        "overnight_cycle": 10,   # Overnight cycle = deep hydration
     },
     "energy": {
         "new_domain": 25,  # Using a domain for the first time today
         "tool_use": 5,     # Using a tool = a short walk
         "variety": 15,     # Using 3+ different domains in a session
         "self_explore": 8, # Autonomous background walk — buddy explores on its own
+        # Phase 2 sources
+        "tool_persist": 3,      # Tool output persisted to disk = short walk
+        "edge_inference": 10,   # Edge/local inference = exploration
+        "monitor_recovery": 5,  # ExecutionMonitor saved the day = adrenaline
     },
 }
 

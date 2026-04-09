@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -54,7 +55,7 @@ def test_save_report_writes_operator_latest_files(tmp_path, monkeypatch):
         }
     ]
 
-    scout._save_report(report)
+    asyncio.run(scout._save_report(report))
 
     repo_json = list((tmp_path / "repo_reports").glob("research_*.json"))
     operator_json = tmp_path / ".able" / "reports" / "research" / "latest.json"

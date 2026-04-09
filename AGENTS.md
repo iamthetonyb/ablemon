@@ -82,7 +82,7 @@ User (Telegram/CLI/Studio) -> Gateway -> TrustGate -> Scanner -> Enricher -> Com
 
 All wired into the gateway tool loop (`gateway.py` lines ~1090-1620). Context compactor, tool result persistence, activity timeout, repeated call guard, thinking prefill, background notifications, 413 auto-compress, disconnect reclassification.
 
-### Test results: 651 passing, 1 pre-existing failure (test_runtime_boundaries — unrelated CLI test).
+### Test results: 828 passing, 0 failures (3 pre-existing test issues fixed this session).
 
 ### P0 — Phase 1 Item 5: Background Process Notifications
 

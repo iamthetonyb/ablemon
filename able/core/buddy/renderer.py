@@ -870,3 +870,26 @@ def render_starter_selection() -> str:
     lines.append("  Rare hatch chance: some starters emerge as Shiny variants.")
     lines.append("  Interactive chat requires a starter pick. Non-interactive sessions skip this flow.")
     return "\n".join(lines)
+
+
+def render_compact_status(buddy: BuddyState | None = None) -> str:
+    """Render a compact one-line status for embedding in widgets/status bars.
+
+    Format: `[emoji Name L12 H:▓▓▓░ T:▓▓▓▓ E:▓▓░░]`
+    ~40 chars. Used by Focus View, Storm widgets, CLI status lines.
+    """
+    if buddy is None:
+        from .model import load_buddy
+        buddy = load_buddy()
+    if buddy is None:
+        return "[No buddy]"
+
+    def _bar(val: float, width: int = 4) -> str:
+        filled = int(val / 100 * width)
+        return "\u2593" * filled + "\u2591" * (width - filled)
+
+    needs = buddy.needs
+    return (
+        f"[{buddy.display_emoji} {buddy.name} L{buddy.level} "
+        f"H:{_bar(needs.hunger)} T:{_bar(needs.thirst)} E:{_bar(needs.energy)}]"
+    )

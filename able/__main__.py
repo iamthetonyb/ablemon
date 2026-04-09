@@ -7,6 +7,11 @@ import asyncio
 import sys
 
 
+def build_parser(configure_chat: bool = False) -> argparse.ArgumentParser:
+    """Build the CLI argument parser. Public API for test access."""
+    return _build_parser(configure_chat=configure_chat)
+
+
 def _build_parser(configure_chat: bool = False) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="able",

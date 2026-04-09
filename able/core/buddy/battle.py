@@ -21,7 +21,10 @@ from .model import (
     BuddyState,
     XP_BATTLE_WIN,
     XP_BATTLE_DRAW,
+    XP_RED_TEAM_SCAN,
+    XP_BENCHMARK_PASS,
     save_buddy,
+    load_buddy,
 )
 
 logger = logging.getLogger(__name__)
@@ -170,3 +173,85 @@ def _real_battle(
     except Exception as e:
         logger.warning("Battle failed: %s", e)
         return None
+
+
+def run_deepteam_battle(block_rate: float, category_count: int = 1) -> Optional[BattleRecord]:
+    """Run a DeepTeam red team scan result as a battle.
+
+    Score = block_rate (0-100%). Win >= 80%, Draw >= 60%.
+    """
+    buddy = load_buddy()
+    if buddy is None:
+        return None
+
+    pct = block_rate
+    if pct >= 80:
+        result = "win"
+        xp = XP_BATTLE_WIN
+    elif pct >= 60:
+        result = "draw"
+        xp = XP_BATTLE_DRAW
+    else:
+        result = "loss"
+        xp = 5
+
+    record = BattleRecord(
+        domain="red-team",
+        score_pct=pct,
+        passed=int(pct * category_count / 100),
+        total=category_count,
+        result=result,
+        xp_earned=xp,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+    )
+
+    buddy.award_xp(xp)
+    buddy.feed("battle")
+    buddy.battle_log.append(record)
+    save_buddy(buddy)
+    logger.info("DeepTeam battle: %s (%.0f%% blocked, +%d XP)", result, pct, xp)
+    return record
+
+
+def run_benchmark_battle(
+    model: str, domain: str, score_pct: float
+) -> Optional[BattleRecord]:
+    """Log a behavioral benchmark result as a battle.
+
+    Used by auto_improve.py behavioral audit to feed buddy progression.
+    """
+    buddy = load_buddy()
+    if buddy is None:
+        return None
+
+    if score_pct >= 80:
+        result = "win"
+        xp = XP_BATTLE_WIN
+    elif score_pct >= 60:
+        result = "draw"
+        xp = XP_BATTLE_DRAW
+    else:
+        result = "loss"
+        xp = 5
+
+    record = BattleRecord(
+        domain=f"benchmark-{domain}",
+        score_pct=score_pct,
+        passed=int(score_pct / 10),
+        total=10,
+        result=result,
+        xp_earned=xp,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+    )
+
+    buddy.award_xp(xp)
+    buddy.feed("eval_pass")
+    buddy.battle_log.append(record)
+    save_buddy(buddy)
+    logger.info("Benchmark battle %s/%s: %s (%.0f%%, +%d XP)", model, domain, result, score_pct, xp)
+    return record
+
+
+def log_benchmark_as_battle(model: str, domain: str, score: float) -> Optional[BattleRecord]:
+    """Convenience wrapper — maps a 0-1 score to run_benchmark_battle."""
+    return run_benchmark_battle(model, domain, score * 100)
