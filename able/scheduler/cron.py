@@ -8,6 +8,7 @@ Every job execution is recorded before delivery — results survive gateway rest
 import asyncio
 import logging
 import os
+import queue
 import sqlite3
 import time
 import uuid
@@ -128,6 +129,7 @@ class CronJob:
     timeout_seconds: float = 300.0  # 5 minute default timeout
     max_retries: int = 3
     retry_backoff_base: float = 30.0  # seconds
+    notify_on_complete: bool = False  # Push completion to gateway notification queue
 
 
 @dataclass
@@ -297,6 +299,9 @@ class CronScheduler:
         self._running = False
         self.db = CronExecutionDB(db_path)
         self._startup_time = time.time()
+        # Completion queue — gateway drains this after each agent turn
+        # to inject background job notifications into the conversation.
+        self.completion_queue: queue.Queue = queue.Queue()
 
     def add_job(
         self,
@@ -555,6 +560,23 @@ class CronScheduler:
 
         # Persist result AFTER execution (before any delivery)
         self.db.record_finish(result)
+
+        # ── Push to completion queue for gateway notifications ──
+        # Gateway drains this queue after each agent turn and injects
+        # notification messages so the user knows background work finished.
+        if job.notify_on_complete:
+            _summary = str(result.output)[:200] if result.output else ""
+            _status = "completed" if result.success else f"failed: {result.error or 'unknown'}"
+            try:
+                self.completion_queue.put_nowait({
+                    "job_name": job.name,
+                    "status": _status,
+                    "duration_s": round(result.duration_s, 1),
+                    "summary": _summary,
+                    "timestamp": time.time(),
+                })
+            except queue.Full:
+                logger.warning("Completion queue full, dropping notification for %s", job.name)
 
         # Audit log (best-effort, non-blocking)
         if self.audit_log:
@@ -1364,4 +1386,48 @@ def register_default_jobs(
         description="Collect promptfoo eval results and feed self-improvement loop",
         timeout=120.0,
         max_retries=1,
+    )
+
+    # ── Trilium historic upload — weekly Sunday 3am ────────────────
+    async def run_trilium_historic_upload():
+        """Upload all historic data to TriliumNext knowledge base.
+
+        Idempotent — checks for existing category notes before creating.
+        Uploads: routing history, distillation corpus, evolution cycles,
+        batch trajectories, cron history, system stats, architecture docs.
+        """
+        try:
+            from able.tools.trilium.client import TriliumClient, ensure_parent
+            from able.tools.trilium.historic_upload import upload_all
+
+            async with TriliumClient() as client:
+                if not await client.is_available():
+                    logger.info("Trilium not available — skipping historic upload")
+                    return {"skipped": True, "reason": "trilium_unavailable"}
+
+                # Ensure knowledge_base parent exists before upload
+                await ensure_parent(client, "knowledge_base")
+
+                categories = await upload_all(client)
+                logger.info(
+                    "Trilium historic upload complete: %d categories",
+                    len(categories),
+                )
+                return {
+                    "categories": list(categories.keys()),
+                    "count": len(categories),
+                }
+        except ImportError:
+            return {"skipped": True, "reason": "trilium_client_not_installed"}
+        except Exception as e:
+            logger.warning("Trilium historic upload failed: %s", e)
+            return {"error": str(e)}
+
+    scheduler.add_job(
+        "trilium-historic-upload",
+        "0 3 * * 0",  # Sunday 3am — after nightly distillation + evolution
+        run_trilium_historic_upload,
+        description="Upload all historic data (routing, distillation, evolution, arch) to TriliumNext",
+        timeout=600.0,
+        max_retries=2,
     )

@@ -44,6 +44,59 @@ KNOWN_PARENTS = {
     "security": os.environ.get("TRILIUM_SECURITY", ""),
 }
 
+# Display name and icon for each auto-creatable parent
+_PARENT_DEFS = {
+    "knowledge_base": ("ABLE Knowledge Base", "bx bx-book-open"),
+    "weekly_research": ("Weekly Research", "bx bx-search-alt"),
+    "document_summaries": ("Document Summaries", "bx bx-file"),
+    "architecture": ("Architecture", "bx bx-sitemap"),
+    "security": ("Security Findings", "bx bx-shield"),
+}
+
+
+async def ensure_parent(client: "TriliumClient", key: str) -> str:
+    """Return the note ID for a KNOWN_PARENTS key, creating the note if missing.
+
+    When the env var is not set (empty string), searches Trilium for a note
+    with the expected title under root. If not found, creates it. Caches the
+    ID in KNOWN_PARENTS so subsequent calls are instant.
+    """
+    existing = KNOWN_PARENTS.get(key, "")
+    if existing:
+        return existing
+
+    defn = _PARENT_DEFS.get(key)
+    if not defn:
+        return ""
+
+    title, icon = defn
+    kb_root = KNOWN_PARENTS.get("knowledge_base") or "root"
+
+    # Search for existing note by title
+    try:
+        results = await client.search_notes(
+            f'note.title="{title}" note.parents.noteId={kb_root}',
+            limit=1,
+        )
+        if results:
+            nid = results[0].note_id
+            KNOWN_PARENTS[key] = nid
+            logger.info("Auto-discovered Trilium parent '%s' → %s", key, nid)
+            return nid
+    except Exception as e:
+        logger.debug("Parent search failed for '%s': %s", key, e)
+
+    # Create the parent note
+    try:
+        note = await client.create_note(kb_root, title, f"<p>Auto-created by ABLE</p>")
+        await client.create_label(note.note_id, "iconClass", icon)
+        KNOWN_PARENTS[key] = note.note_id
+        logger.info("Auto-created Trilium parent '%s' → %s", key, note.note_id)
+        return note.note_id
+    except Exception as e:
+        logger.warning("Failed to create Trilium parent '%s': %s", key, e)
+        return ""
+
 
 @dataclass
 class TriliumNote:

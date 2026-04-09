@@ -33,6 +33,7 @@ ABLE/
 │   ├── core/
 │   │   ├── gateway/gateway.py     # Central coordinator — routing, tools, Telegram, HTTP
 │   │   ├── gateway/tool_registry.py  # Declarative tool registration + dispatch
+│   │   ├── gateway/tool_result_storage.py  # 3-layer tool output persistence (Hermes PR #5210)
 │   │   ├── gateway/tool_defs/     # Tool modules: github, web, infra, tenant, resource
 │   │   ├── control_plane/resources.py  # Nomad-style service/model/storage inventory
 │   │   ├── approval/workflow.py   # Human-in-the-loop for write operations
@@ -81,11 +82,26 @@ ABLE/
 
 ```
 User → TrustGate → Scanner → Auditor → PromptEnricher → ComplexityScorer → ProviderChain → Tool Dispatch
-                                                                │
-                                                  InteractionLogger → EvolutionDaemon (6h) → WeightDeployer
-                                                        │                      │
-                                                  DistillationHarvester    AutoImprove ← EvalResults
+                                                                │                              │
+                                                  InteractionLogger → EvolutionDaemon    ExecutionMonitor
+                                                        │                │                     │
+                                                  DistillationHarvester  AutoImprove    ContextCompactor
+                                                                                              │
+                                                                                    ToolResultStorage
 ```
+
+### Gateway Robustness Stack (Phase 0/1 — 2026-04-09)
+
+| Layer | Component | Purpose |
+|-------|-----------|---------|
+| Context | `ContextCompactor` | Strip-thinking + extractive summary at 80% capacity, death spiral prevention (max 3 attempts) |
+| Context | `ToolResultStorage` | 3-layer large output defense: self-truncate → persist-to-disk → enforce-turn-budget |
+| Progress | `ExecutionMonitor` | Spinning/thrashing/error-loop detection (<1ms heuristics) |
+| Progress | Repeated call guard | Pre-dispatch fingerprint check blocks identical consecutive tool calls |
+| Timeout | Activity-based | 20-iteration budget, idle pressure at 60s, extends for active agents |
+| Recovery | Thinking prefill | Re-run when model produces thinking but no output (max 2 retries) |
+| Recovery | 413 auto-compress | Catch provider context-length errors, auto-compact, retry |
+| Notification | Completion queue | Cron jobs with `notify_on_complete` push results to gateway |
 
 ### Model Routing (5 tiers)
 
@@ -455,7 +471,29 @@ Training lanes:
     - Added `able/tests/test_telegram_buddy_dispatch.py` to verify Telegram-path tool dispatch hits `buddy_status` rather than `tenant_status`.
     - Added `.github/workflows/gateway-health-smoke.yml` to build the gateway image, start it, verify `/health`, and assert `config/routing_config.yaml` exists inside the container.
 
-## Latest Completed Work (Session 2026-04-07 #2)
+## Latest Completed Work (Session 2026-04-09)
+
+42. **Phase 0 Critical Fixes — Gateway Robustness** (Plan Items 0b, 0c):
+    - **Context compactor wired into gateway** (`gateway.py`): Before each LLM call in the tool loop, messages are checked against the provider's `max_context` limit. When at 80% capacity, `ContextCompactor.compact_if_needed()` runs extractive summarization on the oldest 60%.
+    - **Death spiral prevention** (`context_compactor.py`): Hard cap of 3 compression attempts per session. Each attempt verifies `len(result) < original_len` — if compression didn't reduce, breaks immediately. `reset_compression_counter()` at session start.
+    - **Strip-thinking recovery**: Before full compaction, strips `<think>...</think>` and `[Internal reasoning]` blocks from assistant messages. If stripping alone reclaims enough space, skips full compaction (cheaper, preserves more context).
+    - **Disconnect reclassification**: `is_context_length_error()` recognizes `RemoteProtocolError`, `ServerDisconnectedError`, `ConnectionResetError`, `ReadTimeout` as disguised context-length failures (providers disconnect on oversized payloads instead of returning 413).
+    - **Min-tail protection**: Always preserves at least 3 recent messages during compaction — prevents losing active conversation context.
+    - **413 auto-compress + retry**: Provider errors caught in gateway tool loop, auto-compacts and retries when `is_context_length_error()` returns True.
+
+43. **Phase 1 Hermes Quick Wins** (Plan Items 4a–4e, 5):
+    - **Activity-based timeout** (4a, Hermes v0.8 PR #5389): Replaced fixed 15-iteration budget with 20-iteration activity-aware timeout. Tracks `_last_activity_ts` and `_last_activity_desc`. Hard budget pressure at iteration 17, idle pressure at >60s inactivity + iteration ≥8. Active agents never get killed prematurely.
+    - **Tool result persistence** (4b, Hermes PR #5210 + #6085): NEW FILE `able/core/gateway/tool_result_storage.py` (~150 lines). 3-layer defense: Layer 2 `maybe_persist_tool_result()` saves outputs >4000 tokens to `data/tool_results/`, replaces inline with pointer + summary. Layer 3 `enforce_turn_budget()` spills largest outputs to disk when turn total exceeds 200K chars. `read_file`/`Read` exempt (prevents infinite loops). `cleanup_old_results()` removes files >24h old.
+    - **Thinking-only prefill** (4c, Hermes PR #5931): When model produces `<think>` content but no user-facing text, thinking is appended as assistant prefill and the loop re-runs (max 2 retries). Prevents wasted iterations.
+    - **Strip-thinking recovery** (4d, gemma-gem): Implemented in `ContextCompactor._strip_thinking_blocks()`. Regex strips `<think>...</think>` and `[Internal reasoning]...[/Internal reasoning]` from assistant messages before full compaction.
+    - **Repeated tool call guard** (4e, mini-coding-agent): Pre-dispatch check uses `_args_fingerprint()` to detect last 2 tool calls with same name + args. Blocks with `[BLOCKED] Repeated tool call` message forcing different approach. Lightweight complement to full ExecutionMonitor.
+    - **Background notification queue** (5, Hermes PR #5779): `CronScheduler.completion_queue` (`queue.Queue`), `notify_on_complete: bool = False` on `CronJob` dataclass. Gateway `_drain_completion_queue()` method pulls completions after each turn, injects as system messages.
+
+44. **Test fix**: `test_reasoning_preview_extracts_think_blocks` — pre-existing failure from `_ReasoningPreview` → `_ReasoningCapture` rename. Fixed `limit=40` param removal and assertion update for `captured_thinking` attribute.
+
+45. **Test results**: 823 passing (2 pre-existing failures in unrelated modules), 0 regressions from these changes.
+
+### Previous Session (2026-04-07 #2)
 
 33. **Buddy auto-care system** — Fixed "neglected" status issue:
     - Root cause: `buddy_walk` cron only restored energy (+8), not hunger or thirst
@@ -485,9 +523,41 @@ Training lanes:
 
 37. **Test results**: 755 passing (91 new + 664 existing), 0 regressions from these changes
 
+38. **Trilium auto-init parent notes** — Fixed silent data loss:
+    - Root cause: `TRILIUM_WEEKLY_RESEARCH` env var empty → `_file_to_trilium()` silently returned with `logger.debug()`, dropping all research findings
+    - Added `ensure_parent(client, key)` in `able/tools/trilium/client.py` — searches Trilium for existing note by title, creates if missing, caches ID
+    - `_file_to_trilium()` and `_file_graph_to_trilium()` now use `ensure_parent()` instead of checking bare env vars
+    - Silent `debug` logs upgraded to `warning` so failures are visible in logs
+    - Result: Research findings, mermaid diagrams, and knowledge graphs auto-file to Trilium even without manual env var setup
+
+39. **Trilium historic upload cron job** — `trilium-historic-upload` (Sunday 3am):
+    - Calls `upload_all()` from `able/tools/trilium/historic_upload.py`
+    - Uploads: routing history, distillation corpus, evolution cycles, batch trajectories, cron history, system stats dashboard, architecture docs
+    - Idempotent — searches for existing category notes before creating
+    - Uses `ensure_parent()` for knowledge_base root
+
+40. **Phoenix tracer retry mechanism** — Fixed spans silently dropped forever:
+    - Root cause: `_ensure_initialized()` returned `False` on first failure and never retried — if Phoenix started after cron scheduler, all spans lost for process lifetime
+    - Added 5-minute retry interval with timestamp tracking
+    - On successful late init, flushes cached no-op tracers so real OTel tracers take over
+    - `get_tracer()` now checks `_initialized` flag before returning cached tracer
+
+41. **Test results**: 825 passing, 0 regressions from these changes (3 pre-existing failures excluded)
+
+### Session 2026-04-09 — Gateway robustness + Hermes patterns
+
+See "Latest Completed Work" section above (Items 42-45).
+
 ## Next-Run Objectives
 
-### Priority 0: Live production verification
+### Priority 0: Continue Phase 1 — TurboQuant + Gemma 4 + DeepTeam (Plan Items 1-3)
+
+Phase 0 critical fixes and Phase 1 Hermes quick wins (Items 4a-4e, 5) are done. Next items from the plan:
+- **Item 1**: TurboQuant KV cache — update Modelfile.gemma4-31b with `flash_attention on`, `cache_type_k q4_0`, `cache_type_v q4_0`. Create turbo variant Modelfile. Create `kv_cache_config.py`.
+- **Item 2**: Gemma 4 as distillation target — add `ABLE_GEMMA4_31B` and `ABLE_GEMMA4_E4B` to model_configs.py, update unsloth_exporter for Gemma 4 chat template (`<|turn>` tags), create `Modelfile.gemma4-e4b`.
+- **Item 3**: DeepTeam red teaming bridge — `deepteam_bridge.py` wrapping ABLE gateway as model callback, wire into `self_pentest.py`, add weekly deep scan to cron.
+
+### Priority 1: Live production verification
 
 Run the now-hardened deploy path against production and verify the real operator path end-to-end:
 - confirm the deployed container sees `/home/able/.able/auth.json`
@@ -560,8 +630,9 @@ Still on the roadmap (saved for future sessions):
 ### Priority 11: End-to-end system hardening
 
 - Verify all cron jobs execute successfully on the production server
-- Confirm Phoenix receives spans from gateway calls (systematic tracing)
-- Validate Trilium receives research findings + knowledge graphs
+- ~~Confirm Phoenix receives spans from gateway calls (systematic tracing)~~ ✓ Fixed: tracer retries every 5min, flushes no-op cache on late connect
+- ~~Validate Trilium receives research findings + knowledge graphs~~ ✓ Fixed: `ensure_parent()` auto-creates notes, silent failures now warn
+- ~~Historic data uploaded to Trilium~~ ✓ Fixed: weekly `trilium-historic-upload` cron job (Sunday 3am)
 - Test eval collection → self-improvement feedback loop end-to-end
 - Ensure buddy auto-care keeps mood above "hungry" without user intervention for 48h+
 

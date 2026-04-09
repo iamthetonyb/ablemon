@@ -16,7 +16,8 @@ from typing import TYPE_CHECKING, AsyncIterator, Dict, List, Optional, Union
 from pathlib import Path
 from urllib.parse import unquote
 
-from able.core.gateway.execution_monitor import ExecutionMonitor
+from able.core.gateway.execution_monitor import ExecutionMonitor, _args_fingerprint
+from able.core.gateway.tool_result_storage import maybe_persist_tool_result as _maybe_persist
 
 # Project root is 4 levels up from this file (able/core/gateway/gateway.py → ABLE/)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -222,6 +223,7 @@ from able.core.routing.provider_registry import ProviderRegistry, ProviderTierCo
 from able.core.routing.complexity_scorer import ComplexityScorer, ScoringResult
 from able.core.routing.interaction_log import InteractionLogger, InteractionRecord
 from able.core.routing.prompt_enricher import PromptEnricher, EnrichmentResult, DeepEnricher
+from able.core.session.context_compactor import ContextCompactor
 from able.core.approval.workflow import ApprovalWorkflow, ApprovalStatus
 from able.tools.github.client import GitHubClient
 from able.tools.digitalocean.client import DigitalOceanClient
@@ -630,6 +632,9 @@ class ABLEGateway:
         except Exception as e:
             logger.warning(f"SessionManager failed to init: {e}")
             self.session_mgr = None
+
+        # Context compactor — prevents context window overflow in long sessions
+        self.context_compactor = ContextCompactor()
 
         # Pre-build tier-specific chains for scored routing
         self.tier_chains = {}
@@ -1088,7 +1093,51 @@ class ABLEGateway:
 
             _used_tools = False
             _execution_monitor = ExecutionMonitor()
-            for loop_iteration in range(15):
+
+            # ── Activity-based timeout tracking (Hermes v0.8 PR #5389) ──
+            # Instead of a hard 15-iteration cap, track actual activity.
+            # Active agents (tool call <30s ago) get extended budget.
+            # Idle agents (>60s no tools) get pressure earlier.
+            _last_activity_ts = _time.monotonic()
+            _last_activity_desc = "initial"
+            _MAX_ITERATIONS = 20  # Extended from 15 — activity tracking prevents runaways
+            _IDLE_THRESHOLD_S = 60.0  # Inject pressure after 60s idle
+
+            # Resolve context limit for the selected provider tier
+            _context_limit = 128000  # safe default
+            if hasattr(self, 'provider_registry') and self.provider_registry and scoring_result:
+                _tier_cfg = self.provider_registry.get_primary_for_tier(scoring_result.selected_tier)
+                if _tier_cfg:
+                    _context_limit = _tier_cfg.max_context
+            self.context_compactor.reset_compression_counter()
+
+            for loop_iteration in range(_MAX_ITERATIONS):
+                # ── Context compaction check (Phase 0b) ──────────────
+                # Before each LLM call, check if messages are approaching
+                # the context limit. Compact if needed to prevent overflow.
+                _msgs_as_dicts = [
+                    {"role": m.role.value if hasattr(m.role, 'value') else str(m.role),
+                     "content": m.content}
+                    for m in msgs
+                ]
+                if self.context_compactor.needs_compaction(_msgs_as_dicts, _context_limit):
+                    _pre_count = len(msgs)
+                    _compacted_dicts = self.context_compactor.compact_if_needed(
+                        _msgs_as_dicts, _context_limit
+                    )
+                    if len(_compacted_dicts) < _pre_count:
+                        # Rebuild msgs from compacted dicts
+                        _new_msgs = []
+                        for d in _compacted_dicts:
+                            _role_str = d.get("role", "system")
+                            _role = Role(_role_str) if _role_str in Role.__members__.values() else Role.SYSTEM
+                            _new_msgs.append(Message(role=_role, content=d["content"]))
+                        msgs = _new_msgs
+                        logger.info(
+                            "[PIPELINE] Context compacted: %d → %d messages (iter %d, limit %d)",
+                            _pre_count, len(msgs), loop_iteration, _context_limit,
+                        )
+
                 _iter_start = _time.monotonic()
                 # ── Trace span for provider call ──
                 _span = None
@@ -1105,36 +1154,66 @@ class ABLEGateway:
                         },
                     )
                 # Route to a vision-capable provider if message is multimodal (only needed for first pass)
-                if isinstance(message, list) and loop_iteration == 0:
-                    result = await self.vision_chain.complete(
-                        msgs,
-                        tools=authorized_tools,
-                        max_tokens=4096,
-                        temperature=0.60
-                    )
-                else:
-                    # Sanitize msgs for the text-only provider chain by converting multimodal lists into pure text strings
-                    text_only_msgs = []
-                    for msg in msgs:
-                        if isinstance(msg.content, list):
-                            extracted_text = next((item.get("text", "") for item in msg.content if item.get("type") == "text"), "")
-                            text_only_msgs.append(Message(
-                                role=msg.role,
-                                content=extracted_text,
-                                name=msg.name,
-                                tool_call_id=msg.tool_call_id,
-                                tool_calls=msg.tool_calls
-                            ))
-                        else:
-                            text_only_msgs.append(msg)
+                try:
+                    if isinstance(message, list) and loop_iteration == 0:
+                        result = await self.vision_chain.complete(
+                            msgs,
+                            tools=authorized_tools,
+                            max_tokens=4096,
+                            temperature=0.60
+                        )
+                    else:
+                        # Sanitize msgs for the text-only provider chain by converting multimodal lists into pure text strings
+                        text_only_msgs = []
+                        for msg in msgs:
+                            if isinstance(msg.content, list):
+                                extracted_text = next((item.get("text", "") for item in msg.content if item.get("type") == "text"), "")
+                                text_only_msgs.append(Message(
+                                    role=msg.role,
+                                    content=extracted_text,
+                                    name=msg.name,
+                                    tool_call_id=msg.tool_call_id,
+                                    tool_calls=msg.tool_calls
+                                ))
+                            else:
+                                text_only_msgs.append(msg)
 
-                    result = await selected_chain.complete(
-                        text_only_msgs,
-                        tools=authorized_tools,
-                        max_tokens=16384,
-                        temperature=0.60,
-                        top_p=0.95,
-                    )
+                        result = await selected_chain.complete(
+                            text_only_msgs,
+                            tools=authorized_tools,
+                            max_tokens=16384,
+                            temperature=0.60,
+                            top_p=0.95,
+                        )
+                except Exception as _provider_err:
+                    # ── 413 / context-length auto-compact + retry (Phase 0b) ──
+                    if ContextCompactor.is_context_length_error(_provider_err):
+                        logger.warning(
+                            "[PIPELINE] Context-length error detected (%s), "
+                            "attempting compaction and retry",
+                            type(_provider_err).__name__,
+                        )
+                        _msgs_dicts = [
+                            {"role": m.role.value if hasattr(m.role, 'value') else str(m.role),
+                             "content": m.content}
+                            for m in msgs
+                        ]
+                        _compacted = self.context_compactor.compact_if_needed(
+                            _msgs_dicts, _context_limit
+                        )
+                        if len(_compacted) < len(msgs):
+                            _new_msgs = []
+                            for d in _compacted:
+                                _role_str = d.get("role", "system")
+                                _role = Role(_role_str) if _role_str in Role.__members__.values() else Role.SYSTEM
+                                _new_msgs.append(Message(role=_role, content=d["content"]))
+                            msgs = _new_msgs
+                            logger.info(
+                                "[PIPELINE] Post-error compaction: %d → %d msgs, retrying",
+                                len(_msgs_dicts), len(msgs),
+                            )
+                            continue  # Retry the loop iteration with compacted context
+                    raise  # Re-raise if not a context-length error or compaction failed
 
                 _iter_ms = (_time.monotonic() - _iter_start) * 1000
                 _provider_name = getattr(result, 'provider', '?')
@@ -1170,21 +1249,65 @@ class ABLEGateway:
                         tool_calls=result.tool_calls
                     ))
                     
-                    # ── Iteration budget pressure (Hermes-inspired) ──────────
-                    # At 80% budget (≥12 of 15 iterations), inject a pressure
-                    # signal into tool results so the model stops calling tools
-                    # and synthesizes a final answer before hitting the ceiling.
-                    _budget_remaining = 15 - loop_iteration
+                    # ── Activity-aware budget pressure (Hermes v0.8) ──────────
+                    # Replace fixed iteration count with activity timer.
+                    # Active agents never get killed; only truly idle ones.
+                    _budget_remaining = _MAX_ITERATIONS - loop_iteration
+                    _time_since_activity = _time.monotonic() - _last_activity_ts
                     _budget_pressure = ""
-                    if loop_iteration >= 12:
+
+                    # Hard budget pressure near the ceiling
+                    if loop_iteration >= _MAX_ITERATIONS - 3:
                         _budget_pressure = (
                             f"\n\n[⚠️ BUDGET: {_budget_remaining} iteration(s) remaining. "
                             f"Stop calling tools. Synthesize a final answer NOW.]"
                         )
+                    # Idle pressure — no tool activity for 60+ seconds
+                    elif _time_since_activity > _IDLE_THRESHOLD_S and loop_iteration >= 8:
+                        _budget_pressure = (
+                            f"\n\n[⚠️ No productive tool activity for {_time_since_activity:.0f}s. "
+                            f"Synthesize your answer from available data.]"
+                        )
 
                     for tool_call in result.tool_calls:
+                        # ── Repeated tool call guard (mini-coding-agent pattern) ──
+                        # Block identical tool calls that were just made — force
+                        # the model to try a different approach instead of looping.
+                        _tc_args_current = tool_call.arguments if isinstance(tool_call.arguments, dict) else {}
+                        _recent_same = [
+                            r for r in _execution_monitor.history[-2:]
+                            if r.name == tool_call.name
+                            and _args_fingerprint(r.args) == _args_fingerprint(_tc_args_current)
+                        ]
+                        if len(_recent_same) >= 2:
+                            tool_output = (
+                                f"[BLOCKED] Tool `{tool_call.name}` called with identical "
+                                f"arguments 3 times. Use a different approach or synthesize "
+                                f"from existing results."
+                            )
+                            logger.warning(
+                                "[PIPELINE] Blocked repeated tool call: %s (same args 3x)",
+                                tool_call.name,
+                            )
+                            _execution_monitor.record(
+                                tool_name=tool_call.name,
+                                tool_args=_tc_args_current,
+                                tool_output=tool_output,
+                                iteration=loop_iteration,
+                                success=False,
+                            )
+                            msgs.append(Message(
+                                role=Role.TOOL,
+                                content=f"[TOOL OUTPUT — {tool_call.name}]\n{tool_output}\n[END TOOL OUTPUT]",
+                                name=tool_call.name,
+                                tool_call_id=tool_call.id,
+                            ))
+                            continue  # Skip execution, move to next tool call
+
                         # Execute the tool
                         tool_output = await self._handle_tool_call(tool_call, update, user_id, msgs)
+                        _last_activity_ts = _time.monotonic()
+                        _last_activity_desc = tool_call.name
 
                         # Record for execution monitor (PentAGI-inspired progress analysis)
                         _tc_args = tool_call.arguments if isinstance(tool_call.arguments, dict) else {}
@@ -1214,10 +1337,22 @@ class ABLEGateway:
                             except Exception:
                                 pass
 
+                        # ── Tool result persistence (Hermes PR #5210) ──
+                        # Large tool outputs get saved to disk with inline pointer.
+                        # Prevents context overflow from verbose tools.
+                        _tool_content = str(tool_output)
+                        _tool_content, _was_persisted = _maybe_persist(
+                            tool_call.name, tool_call.id, _tool_content,
+                        )
+                        if _was_persisted:
+                            logger.info(
+                                "[PIPELINE] Tool output persisted to disk: %s (%d chars)",
+                                tool_call.name, len(str(tool_output)),
+                            )
+
                         # Inject the tool observation back into the prompt for the next loop.
                         # Wrap output with delimiters to prevent prompt injection via tool results.
                         # Append budget pressure signal when approaching the iteration ceiling.
-                        _tool_content = str(tool_output)
                         _wrapped_tool_content = (
                             f"[TOOL OUTPUT — {tool_call.name}]\n"
                             f"{_tool_content}\n"
@@ -1280,7 +1415,32 @@ class ABLEGateway:
                 result.strip_thinking()
                 _has_thinking = result.has_thinking
                 _thinking_content = result.thinking_content or ""
-                final_text = result.content or "⚠️ ABLE exceeded the maximum internal thinking steps (15 turns)."
+                final_text = result.content or ""
+
+                # ── Thinking-only prefill continuation (Hermes PR #5931) ──
+                # If the model produced thinking content but no user-facing
+                # text, append thinking as assistant prefill and continue the
+                # loop so the model sees its own reasoning and generates text.
+                if not final_text.strip() and _has_thinking and _thinking_content:
+                    if not hasattr(self, '_thinking_prefill_retries'):
+                        self._thinking_prefill_retries = 0
+                    if self._thinking_prefill_retries < 2:
+                        self._thinking_prefill_retries += 1
+                        logger.info(
+                            "[PIPELINE] Thinking-only response (retry %d/2) — "
+                            "appending as prefill for continuation",
+                            self._thinking_prefill_retries,
+                        )
+                        msgs.append(Message(
+                            role=Role.ASSISTANT,
+                            content=f"[Internal reasoning]\n{_thinking_content}\n[/Internal reasoning]",
+                        ))
+                        continue  # Re-run the loop — model sees its reasoning
+
+                if not final_text.strip():
+                    final_text = "⚠️ ABLE exceeded the maximum internal thinking steps (15 turns)."
+                # Reset prefill counter on successful text output
+                self._thinking_prefill_retries = 0
 
                 # ── Capture reasoning trace for ALL channels (not just CLI) ──────────
                 # CLI captures via _StreamThinkFilter in stream_message.
@@ -1471,9 +1631,16 @@ class ABLEGateway:
                 except Exception:
                     pass  # Buddy is optional — never block the pipeline
 
+                # ── Drain background completion queue (Hermes PR #5779) ──
+                # Check if any cron jobs finished while we were processing.
+                # Append notifications so the user knows about background work.
+                _bg_notes = self._drain_completion_queue()
+                if _bg_notes:
+                    final_text = final_text + "\n\n" + _bg_notes
+
                 return final_text
 
-            return "⚠️ Agent exceeded maximum tool iterations (15)."
+            return f"⚠️ Agent exceeded maximum tool iterations ({_MAX_ITERATIONS})."
 
         except Exception as e:
             import traceback
@@ -1745,6 +1912,34 @@ class ABLEGateway:
             if source.startswith("cli"):
                 return "cli"
         return "telegram" if update else "api"
+
+    def _drain_completion_queue(self) -> str:
+        """
+        Drain the cron scheduler's completion queue and format notifications.
+
+        Called at the end of each process_message turn. Returns a formatted
+        string of background job completions, or empty string if none.
+        """
+        if not hasattr(self, 'scheduler') or not self.scheduler:
+            return ""
+
+        notifications = []
+        while not self.scheduler.completion_queue.empty():
+            try:
+                completion = self.scheduler.completion_queue.get_nowait()
+                job_name = completion.get("job_name", "unknown")
+                status = completion.get("status", "unknown")
+                duration = completion.get("duration_s", 0)
+                summary = completion.get("summary", "")
+
+                note = f"[BACKGROUND] {job_name} {status} ({duration}s)"
+                if summary:
+                    note += f": {summary[:100]}"
+                notifications.append(note)
+            except Exception:
+                break
+
+        return "\n".join(notifications)
 
     async def _handle_tool_call(self, tool_call, update: Optional[Update], user_id: str, msgs: List["Message"] = None) -> str:
         """Dispatch a tool call from the AI to the correct client, with approval for writes."""

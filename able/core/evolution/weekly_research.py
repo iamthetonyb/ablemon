@@ -700,15 +700,16 @@ class WeeklyResearchScout:
     async def _file_graph_to_trilium(self, export):
         """Upload graphify D3 HTML visualization + mermaid to Trilium."""
         try:
-            from able.tools.trilium.client import TriliumClient, KNOWN_PARENTS
+            from able.tools.trilium.client import TriliumClient, ensure_parent
             from pathlib import Path as _Path
-
-            parent_id = KNOWN_PARENTS.get("weekly_research")
-            if not parent_id:
-                return
 
             async with TriliumClient() as client:
                 if not await client.is_available():
+                    return
+
+                parent_id = await ensure_parent(client, "weekly_research")
+                if not parent_id:
+                    logger.warning("Cannot file graph to Trilium — parent note missing")
                     return
 
                 date_str = datetime.now().strftime("%Y-%m-%d")
@@ -1182,17 +1183,20 @@ RULES:
         Uses wiki_ingest_research() for full cross-referencing + web clipper linking.
         """
         try:
-            from able.tools.trilium.client import TriliumClient, KNOWN_PARENTS
+            from able.tools.trilium.client import TriliumClient, KNOWN_PARENTS, ensure_parent
             from able.tools.trilium.wiki_skill import wiki_ingest_research
-
-            parent_id = KNOWN_PARENTS.get("weekly_research")
-            if not parent_id:
-                logger.debug("TRILIUM_WEEKLY_RESEARCH not set, skipping Trilium filing")
-                return
 
             async with TriliumClient() as client:
                 if not await client.is_available():
                     logger.debug("Trilium not available, skipping filing")
+                    return
+
+                parent_id = await ensure_parent(client, "weekly_research")
+                if not parent_id:
+                    logger.warning(
+                        "TRILIUM_WEEKLY_RESEARCH not set and auto-create failed — "
+                        "research findings will NOT be filed to Trilium"
+                    )
                     return
 
                 findings = report.high_priority + report.findings

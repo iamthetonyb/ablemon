@@ -27,11 +27,12 @@ def test_work_style_options_include_all_terrain():
 
 
 def test_reasoning_preview_extracts_think_blocks():
-    preview = _ReasoningPreview(limit=40)
+    preview = _ReasoningPreview()
 
-    thought, answer = preview.consume("<think>plan the steps</think>Final answer")
+    _empty, answer = preview.consume("<think>plan the steps</think>Final answer")
 
-    assert "plan the steps" in thought
+    assert _empty == ""  # Thinking is never returned in consume()
+    assert "plan the steps" in preview.captured_thinking
     assert answer == "Final answer"
 
 

@@ -35,13 +35,25 @@ logger = logging.getLogger(__name__)
 
 _tracer_cache: Dict[str, Any] = {}
 _initialized = False
+_last_init_attempt = 0.0
+_RETRY_INTERVAL = 300.0  # Retry Phoenix connection every 5 minutes
 
 
 def _ensure_initialized():
-    """Initialize OTel tracer provider if not already done by PhoenixObserver."""
-    global _initialized
+    """Initialize OTel tracer provider if not already done by PhoenixObserver.
+
+    Retries periodically if Phoenix was unavailable at first attempt — handles
+    the case where Phoenix starts after the cron scheduler or gateway.
+    """
+    global _initialized, _last_init_attempt
     if _initialized:
         return True
+
+    # Don't hammer Phoenix on every span — retry at most every 5 min
+    now = time.time()
+    if now - _last_init_attempt < _RETRY_INTERVAL:
+        return False
+    _last_init_attempt = now
 
     try:
         from opentelemetry import trace
@@ -67,19 +79,20 @@ def _ensure_initialized():
         )
         register(project_name="able", endpoint=endpoint)
         _initialized = True
+        _tracer_cache.clear()  # Flush cached no-op tracers
         logger.info("Phoenix tracer self-registered at %s", endpoint)
         return True
     except ImportError:
         logger.warning("OTel/Phoenix not installed — cron spans will be dropped")
         return False
     except Exception as e:
-        logger.warning("Phoenix tracer init failed (spans will be dropped): %s", e)
+        logger.debug("Phoenix tracer init deferred (will retry in %ds): %s", int(_RETRY_INTERVAL), e)
         return False
 
 
 def get_tracer(name: str = "able") -> Any:
     """Get an OTel tracer by name. Returns a no-op tracer if Phoenix unavailable."""
-    if name in _tracer_cache:
+    if name in _tracer_cache and _initialized:
         return _tracer_cache[name]
 
     if not _ensure_initialized():

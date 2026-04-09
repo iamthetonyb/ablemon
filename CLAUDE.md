@@ -161,8 +161,40 @@ Claude and other models emit synthetic declarations that never run — those are
 ## CVC Context Management
 
 ### Context Compaction (`able/core/session/context_compactor.py`)
-- At 80% context window: summarizes oldest 60% via T1, replaces with `[CONTEXT SUMMARY]`
-- Wire into orchestrator before plan step
+- **Wired into gateway** — runs before each LLM call in the tool loop
+- At 80% context window: summarizes oldest 60%, replaces with `[CONTEXT SUMMARY]`
+- **Strip-thinking recovery** (gemma-gem pattern): before full compaction, strips `<think>` blocks from assistant messages — cheaper and preserves more context. Only falls back to full compaction if stripping is insufficient
+- **Death spiral prevention** (Hermes PR #4750): max 3 compression attempts per session, verifies each attempt actually reduces message count, min 3 tail messages always preserved
+- **Disconnect reclassification**: `RemoteProtocolError`, `ServerDisconnectedError`, `ConnectionResetError`, `ReadTimeout` treated as context-length errors (providers disconnect instead of returning 413)
+- **413 auto-compress + retry**: provider errors caught in gateway, auto-compacts and retries if `is_context_length_error()` returns True
+
+### Tool Result Persistence (`able/core/gateway/tool_result_storage.py`)
+- **3-layer defense** against context overflow from large tool outputs (Hermes PR #5210 + #6085):
+  - Layer 1: Tools pre-truncate their own output
+  - Layer 2: `maybe_persist_tool_result()` — if output > 4000 tokens, saves to `data/tool_results/{id}.txt`, replaces inline with pointer + summary
+  - Layer 3: `enforce_turn_budget()` — after all tool calls in a turn, if total > 200K chars, spills largest to disk
+- `read_file` threshold pinned to `float("inf")` — prevents infinite persist→read→persist loops
+
+### Activity-Based Timeout (Hermes v0.8 PR #5389)
+- Replaces fixed 15-iteration budget with 20-iteration activity-aware timeout
+- Active agents (last tool call <60s ago) get extended budgets
+- Idle agents (>60s with no tool calls at iteration ≥8) get pressure messages
+- Hard pressure at iteration 17/20, idle pressure earlier
+
+### Repeated Tool Call Guard (mini-coding-agent pattern)
+- Pre-dispatch check: if last 2 tool calls have same name + args fingerprint, blocks the call
+- Returns `[BLOCKED]` message forcing the model to try a different approach
+- Lightweight first-pass guard complementing the full ExecutionMonitor analysis
+
+### Thinking-Only Prefill Continuation (Hermes PR #5931)
+- After receiving response, checks if thinking-only (has `<think>` content but no user-facing text)
+- Appends thinking as assistant prefill with marker, re-runs (max 2 retries)
+- Prevents wasted iterations where model reasons but produces no output
+
+### Background Notification Queue (Hermes PR #5779)
+- `CronScheduler.completion_queue` — jobs with `notify_on_complete=True` push completion dicts
+- Gateway drains queue after each tool-loop turn via `_drain_completion_queue()`
+- Injected as system messages: `[BACKGROUND] {job_name} completed: {summary}`
 
 ### Session Versioning (`able/core/session/context_versioning.py`)
 - Merkle DAG snapshots — SHA-256 of serialized messages stored in `context_snapshots` table
