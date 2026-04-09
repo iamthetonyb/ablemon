@@ -265,6 +265,27 @@ Training lanes:
     - Integration: called by evolution daemon weekly after interaction audit.
     - **Test results**: 828 passing, 0 failures. Codex audit: PASS.
 
+56. **Streaming Tool Dispatch in Gateway** (d0b4f9c, Priority 3):
+    - `stream_message()` now supports multi-turn tool dispatch. When authorized tools exist, uses `complete()` for tool iterations (yields `⚙️ [tool_name]` progress notifications), then `stream()` for the final text response.
+    - When no tools are available, preserves original stream-first behavior (stream → fallback to complete on failure).
+    - 10-iteration tool dispatch cap. Tool result persistence via `_maybe_persist()` integrated.
+    - All existing streaming tests pass unchanged (stream-first fallback path preserved for toolless chains).
+
+57. **Anthropic Provider Extended Thinking Streaming** (d0b4f9c, Priority 4):
+    - `stream()` method now respects `extended_thinking` flag: sets beta header (`interleaved-thinking-2025-05-14`), thinking budget, temperature=1.
+    - Captures `thinking_delta` events and yields as `<think>...</think>` markers for downstream filtering by `_StreamThinkFilter`.
+    - Handles `content_block_start/stop` for `tool_use` blocks — accumulates tool calls during streaming (exposed via `_last_stream_tool_calls`).
+    - `input_json_delta` reassembly for streamed tool arguments.
+    - Accepts `tools` parameter (was missing from stream signature).
+
+58. **battle.py Hardening** (d0b4f9c):
+    - `run_deepteam_battle()`: Clamp `pct` BEFORE result classification (was after — raw value drove win/draw/loss).
+    - `run_deepteam_battle()`: Guard `category_count < 1` → force to 1 (prevents `total=0` in BattleRecord).
+    - Both `run_deepteam_battle()` and `run_benchmark_battle()`: NaN rejection via `math.isfinite()` — prevents silent corruption from upstream computation errors.
+    - Codex audit: PASS (3 INFO items addressed: clamp-before-branch, category_count guard, NaN rejection).
+
+    **Test results**: 872 passing, 0 failures. Codex audit: PASS.
+
 ---
 
 ## Previous Work (same session, earlier)
@@ -314,13 +335,13 @@ All 10 Studio API routes built and operational. Gateway has `/api/buddy`, `/metr
 
 The pluggable ASR interface is ready. Next step: configure the operator's preferred audio-native model (Voxtral or Qwen3) as the `ABLE_ASR_ENDPOINT`, test with real audio from Telegram and CLI, and verify transcription quality.
 
-### Priority 3: Streaming for tool-dispatch iterations
+### Priority 3: Streaming for tool-dispatch iterations ✓ (completed 2026-04-09)
 
-Current streaming (`stream_message()`) handles text-only responses. For tool dispatch, `process_message()` still blocks. Investigate partial result streaming during tool iterations.
+`stream_message()` now supports multi-turn tool dispatch: `complete()` for tool iterations with progress notifications, `stream()` for final text response. Stream-first fallback preserved when no tools available.
 
-### Priority 4: Provider-level reasoning streaming
+### Priority 4: Provider-level reasoning streaming ✓ (completed 2026-04-09)
 
-The CLI parser can already surface streamed reasoning markers, but most providers currently only stream visible answer text. Add provider-level support where available (Anthropic/OpenAI reasoning deltas) so live `thinking` previews are grounded in actual provider events.
+Anthropic `stream()` now supports extended thinking: beta header, thinking budget, `thinking_delta` → `<think>` markers, tool call accumulation. CLI `_StreamThinkFilter` already handles the markers downstream.
 
 ### Priority 5: Federation live setup
 

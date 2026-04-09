@@ -60,7 +60,8 @@ All four learning feedback loops are closed and tested:
 - 60 buddy tests covering model, persistence, onboarding/profile state, rendering, battles, rarity, XP, needs, mood, autonomous tick, orchestration bonuses, and repo-root-independent battle discovery
 
 **Streaming + approval UX**:
-- `stream_message()` async generator in the gateway — runs full pipeline then streams AI response
+- `stream_message()` now supports multi-turn tool dispatch: `complete()` for tool iterations (yields progress notifications), `stream()` for the final text response. Stream-first fallback preserved when no tools available
+- Anthropic `stream()` supports extended thinking: beta header, thinking budget, `thinking_delta` → `<think>` markers, tool call accumulation via `content_block_start/stop`
 - CLI streams tokens as they arrive, `--no-stream` flag to disable
 - Gateway fallback now only re-fetches a completion if the stream fails before the first chunk; partial stream output is preserved without duplication
 - CLI prompts now use local line editing/history, so arrow keys and cursor movement work during chat and onboarding
@@ -193,6 +194,7 @@ All four learning feedback loops are closed and tested:
 - `ThreeManTeamProtocol`: PLANNER → PLAN-BRIEF.md → CODER → BUILD-LOG.md → REVIEWER → REVIEW-FEEDBACK.md. Scope-lock, token-optimized reads
 - `provider_behavioral_audit()`: 10 probes × 5 failure modes (thinking bleed, empty responses, tool refusal, format violations, hallucinated tool calls). Per-model-family guidance generation. Weekly cron (Sunday 5am)
 - Buddy gamification: 8 XP constants, 7 badges, 7 award functions wired to durable tasks, overnight, managed agents, red team, benchmarks
+- `battle.py` hardened: clamp-before-branch, category_count≥1 guard, NaN rejection via `math.isfinite()`
 
 **Test suite**:
 - 872 tests passing, 0 failures (excluding `test_routing.py` and `test_gateway.py`)
