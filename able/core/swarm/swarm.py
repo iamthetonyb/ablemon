@@ -8,7 +8,7 @@ Supports agent specialization, coordination, and result aggregation.
 import asyncio
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set
 import logging
@@ -48,7 +48,7 @@ class AgentMessage:
     recipient_id: Optional[str]  # None = broadcast
     content: Any
     message_type: str  # "task", "result", "query", "response", "signal"
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     requires_response: bool = False
     correlation_id: Optional[str] = None  # For request-response pairs
 
@@ -62,7 +62,7 @@ class AgentTask:
     dependencies: List[str] = field(default_factory=list)
     priority: int = 5
     timeout_seconds: float = 300
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass
@@ -75,7 +75,7 @@ class AgentResult:
     error: Optional[str] = None
     execution_time: float = 0
     metadata: Dict[str, Any] = field(default_factory=dict)
-    completed_at: datetime = field(default_factory=datetime.utcnow)
+    completed_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass
@@ -88,7 +88,7 @@ class SwarmAgent:
     current_task: Optional[AgentTask] = None
     results: List[AgentResult] = field(default_factory=list)
     message_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Agent personality/behavior
     system_prompt: str = ""
@@ -742,4 +742,165 @@ class PhasedCoordinatorProtocol:
             "phases": phase_results,
             "final_output": final_output,
             "success": all(p.get("success", False) for p in phase_results.values()),
+        }
+
+
+# ── Three Man Team — file-based artifact handoff ────────────────────────────
+
+class ThreeManTeamProtocol:
+    """
+    Structured handoff protocol with file-based artifacts.
+
+    PLANNER → PLAN-BRIEF.md → CODER → BUILD-LOG.md → REVIEWER → REVIEW-FEEDBACK.md
+
+    Scope-lock discipline: step N+1 waits for step N to complete and
+    produce its artifact. Each role loads ONLY the artifacts it needs
+    (token optimization).
+
+    Artifact chain:
+      1. PLANNER reads the goal + context, writes PLAN-BRIEF.md
+      2. CODER reads PLAN-BRIEF.md only, writes BUILD-LOG.md
+      3. REVIEWER reads PLAN-BRIEF.md + BUILD-LOG.md, writes REVIEW-FEEDBACK.md
+    """
+
+    STEPS = [
+        ("planner", AgentRole.PLANNER, "PLAN-BRIEF.md"),
+        ("coder", AgentRole.CODER, "BUILD-LOG.md"),
+        ("reviewer", AgentRole.REVIEWER, "REVIEW-FEEDBACK.md"),
+    ]
+
+    # Token-optimized context: each role only sees what it needs
+    _STEP_READS: Dict[str, List[str]] = {
+        "planner": [],                                 # Only goal + initial context
+        "coder": ["PLAN-BRIEF.md"],                    # Plan only — no goal bloat
+        "reviewer": ["PLAN-BRIEF.md", "BUILD-LOG.md"], # Plan + build log
+    }
+
+    _STEP_PROMPTS: Dict[str, str] = {
+        "planner": (
+            "You are the PLANNER. Decompose the goal into a concrete implementation plan.\n"
+            "Output a PLAN-BRIEF.md with: ## Objective, ## Steps (numbered), "
+            "## Dependencies, ## Success Criteria.\n"
+            "Be specific about file paths, function names, and test expectations.\n"
+            "Do NOT implement — only plan."
+        ),
+        "coder": (
+            "You are the CODER. Implement EXACTLY what PLAN-BRIEF.md specifies.\n"
+            "Output a BUILD-LOG.md with: ## Changes Made (file:line), "
+            "## Tests Added, ## Decisions (any deviations from plan + why).\n"
+            "Stay in scope — do not add features not in the plan."
+        ),
+        "reviewer": (
+            "You are the REVIEWER. Verify the BUILD-LOG against PLAN-BRIEF.\n"
+            "Output a REVIEW-FEEDBACK.md with: ## Coverage (which plan steps are done), "
+            "## Issues (bugs, missing tests, scope creep), ## Verdict (PASS/REVISE/FAIL).\n"
+            "Be specific — reference file paths and line numbers."
+        ),
+    }
+
+    def __init__(self, coordinator: SwarmCoordinator):
+        self.coordinator = coordinator
+
+    async def execute(
+        self,
+        goal: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Run Three Man Team on a goal.
+
+        Returns dict with artifacts (the .md contents), step results,
+        and the reviewer's verdict.
+        """
+        context = dict(context or {})
+        artifacts: Dict[str, str] = {}
+        step_results: Dict[str, Dict[str, Any]] = {}
+
+        for step_name, role, artifact_name in self.STEPS:
+            logger.info(f"[3MT] Starting step: {step_name} → {artifact_name}")
+
+            # ── Token optimization: load only required artifacts ──
+            step_context = {}
+            for req_artifact in self._STEP_READS[step_name]:
+                if req_artifact in artifacts:
+                    step_context[req_artifact] = artifacts[req_artifact]
+
+            # First step also gets initial context
+            if step_name == "planner":
+                step_context.update(context)
+
+            # Build the prompt
+            prompt = self._STEP_PROMPTS[step_name]
+            task_goal = f"{prompt}\n\nGOAL: {goal}" if step_name == "planner" else prompt
+
+            # Inject artifact context
+            if step_context:
+                artifact_section = "\n\n".join(
+                    f"--- {name} ---\n{content}"
+                    for name, content in step_context.items()
+                )
+                task_goal += f"\n\nCONTEXT:\n{artifact_section}"
+
+            try:
+                results = await self.coordinator.execute_swarm_task(
+                    goal=task_goal,
+                    roles=[role],
+                    context=step_context,
+                    parallel=False,
+                )
+
+                # Extract the artifact from the agent output
+                output = ""
+                for r in results.values():
+                    if hasattr(r, "output") and r.output:
+                        output = str(r.output)
+                        break
+
+                success = all(
+                    getattr(r, "success", True)
+                    for r in results.values()
+                    if hasattr(r, "success")
+                )
+
+                artifacts[artifact_name] = output
+                step_results[step_name] = {
+                    "artifact": artifact_name,
+                    "output_length": len(output),
+                    "success": success,
+                }
+
+                logger.info(
+                    "[3MT] Step %s complete → %s (%d chars)",
+                    step_name, artifact_name, len(output),
+                )
+
+                # Scope-lock: halt on failure
+                if not success:
+                    logger.warning("[3MT] Step %s failed — halting chain", step_name)
+                    break
+
+            except Exception as e:
+                logger.error("[3MT] Step %s error: %s", step_name, e)
+                step_results[step_name] = {
+                    "artifact": artifact_name,
+                    "success": False,
+                    "error": str(e),
+                }
+                break
+
+        # Extract verdict from reviewer feedback
+        verdict = "INCOMPLETE"
+        if "REVIEW-FEEDBACK.md" in artifacts:
+            feedback = artifacts["REVIEW-FEEDBACK.md"].upper()
+            for v in ("PASS", "REVISE", "FAIL"):
+                if v in feedback:
+                    verdict = v
+                    break
+
+        return {
+            "goal": goal,
+            "artifacts": artifacts,
+            "steps": step_results,
+            "verdict": verdict,
+            "success": verdict == "PASS",
         }

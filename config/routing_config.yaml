@@ -191,7 +191,30 @@ providers:
       background_only: true
       description: "Self-evolution daemon ONLY. Never user-facing."
 
-  # ── Tier 4: Premium — Claude Opus 4.6 (Max Subscription via CLI) ─
+  # ── Tier 4: Primary — Managed Agents (SSE, $0.08/session-hr) ────
+  # Anthropic Managed Agents API — stream-first SSE, lossless reconnect,
+  # custom tools with host-side credential injection.
+  # Beta: managed-agents-2026-04-01. Fallback: Claude Code CLI.
+  - name: "managed-agent-opus"
+    tier: 4
+    provider_type: "managed_agent"
+    endpoint: "https://api.anthropic.com/v1"
+    model_id: "claude-opus-4-6"
+    cost_per_m_input: 0.00
+    cost_per_m_output: 0.00
+    max_context: 200000
+    supports_tools: true
+    supports_vision: true
+    throughput_tps: 30
+    enabled: true
+    fallback_to: "claude-opus-4-6"
+    api_key_env: "ANTHROPIC_API_KEY"
+    extra:
+      description: "Managed Agents — $0.08/session-hr, SSE streaming, lossless reconnect"
+      timeout: 300.0
+      cost_per_session_hour: 0.08
+
+  # ── Tier 4: Fallback A — Claude Opus 4.6 (Max Subscription via CLI) ─
   # Routed through Claude Code SDK → uses Claude Max subscription ($0 per token).
   # Extended thinking enabled by default via CLI.
   # Fallback: Anthropic API if CLI unavailable.

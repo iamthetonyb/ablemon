@@ -1470,3 +1470,33 @@ def register_default_jobs(
         timeout=900.0,
         max_retries=1,
     )
+
+    # ── Behavioral audit — Sunday 5am (after DeepTeam) ───────────
+    async def run_behavioral_audit():
+        from able.core.evolution.auto_improve import provider_behavioral_audit
+
+        results = await provider_behavioral_audit(tiers=[1, 2, 4])
+        summary = {
+            "tiers_audited": len(results),
+            "results": [
+                {
+                    "tier": r.tier,
+                    "provider": r.provider_name,
+                    "pass_rate": f"{r.pass_rate * 100:.0f}%",
+                    "failure_modes": list(r.failures.keys()),
+                    "guidance_count": len(r.guidance),
+                }
+                for r in results
+            ],
+        }
+        logger.info("Behavioral audit: %d tiers audited", len(results))
+        return summary
+
+    scheduler.add_job(
+        "behavioral-audit",
+        "0 5 * * 0",  # Sunday 5am — after DeepTeam scan
+        run_behavioral_audit,
+        description="Per-tier behavioral probes — detect thinking bleed, tool refusal, format violations",
+        timeout=600.0,
+        max_retries=1,
+    )

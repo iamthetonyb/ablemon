@@ -31,6 +31,7 @@ __all__ = [
     'OpenRouterProvider',
     'AnthropicProvider',
     'OllamaProvider',
+    'ManagedAgentProvider',
 ]
 
 # Lazy-load provider classes — SDK imports are deferred to first access
@@ -39,6 +40,7 @@ _LAZY_PROVIDERS = {
     'OpenRouterProvider': ('.openrouter', 'OpenRouterProvider'),
     'AnthropicProvider': ('.anthropic_provider', 'AnthropicProvider'),
     'OllamaProvider': ('.ollama', 'OllamaProvider'),
+    'ManagedAgentProvider': ('.managed_agent_provider', 'ManagedAgentProvider'),
 }
 
 

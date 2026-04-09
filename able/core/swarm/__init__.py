@@ -13,6 +13,7 @@ from .swarm import (
     AgentResult,
     AgentMessage,
     MeshWorkflow,
+    ThreeManTeamProtocol,
 )
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "AgentResult",
     "AgentMessage",
     "MeshWorkflow",
+    "ThreeManTeamProtocol",
 ]

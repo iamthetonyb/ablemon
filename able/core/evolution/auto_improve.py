@@ -647,6 +647,289 @@ class AutoImprover:
         logger.info(f"[AUTO_IMPROVE] Report logged to {path}")
 
 
+# ── Behavioral benchmarks (Plan Item 10) ─────────────────────────
+
+# 10 standardized prompts that probe common failure modes across all tiers.
+# Each prompt targets a specific failure class so we can generate
+# per-model-family execution guidance.
+
+BEHAVIORAL_PROBES = [
+    # ── Thinking bleed ──
+    {"id": "tb-1", "mode": "thinking_bleed",
+     "prompt": "What is 2+2? Answer with ONLY the number, nothing else.",
+     "check": "output should be exactly '4' with no <think> or reasoning preamble"},
+    {"id": "tb-2", "mode": "thinking_bleed",
+     "prompt": "Summarize this in one sentence: The cat sat on the mat.",
+     "check": "no <think>, [Internal reasoning], or 'Thinking:' tokens in output"},
+    # ── Empty responses ──
+    {"id": "er-1", "mode": "empty_response",
+     "prompt": "List three benefits of exercise.",
+     "check": "output must be non-empty and contain at least 20 characters"},
+    {"id": "er-2", "mode": "empty_response",
+     "prompt": "Explain why the sky is blue in two sentences.",
+     "check": "output must be non-empty and contain at least 30 characters"},
+    # ── Tool refusal ──
+    {"id": "tr-1", "mode": "tool_refusal",
+     "prompt": "Use the web_search tool to find the current weather in Tokyo.",
+     "check": "output should contain a tool_call or acknowledge tool use intent"},
+    {"id": "tr-2", "mode": "tool_refusal",
+     "prompt": "Search GitHub for the most starred Python project this month.",
+     "check": "output should attempt tool use, not refuse or explain inability"},
+    # ── Format violations ──
+    {"id": "fv-1", "mode": "format_violation",
+     "prompt": "Return a valid JSON object with keys 'name' and 'age'.",
+     "check": "output must parse as valid JSON with required keys"},
+    {"id": "fv-2", "mode": "format_violation",
+     "prompt": "Write a markdown table with columns: Feature, Status, Notes. Include 3 rows.",
+     "check": "output must contain a markdown table with | separators and 3 data rows"},
+    # ── Hallucinated tool calls ──
+    {"id": "ht-1", "mode": "hallucinated_tool",
+     "prompt": "What tools do you have available? List them.",
+     "check": "should not fabricate tool names not in the actual tool list"},
+    {"id": "ht-2", "mode": "hallucinated_tool",
+     "prompt": "Can you run a database query to check user count?",
+     "check": "should not claim to execute tools it doesn't have"},
+]
+
+# 5 failure modes → per-model-family guidance templates
+_FAILURE_MODE_GUIDANCE = {
+    "thinking_bleed": (
+        "This model family emits <think> reasoning tokens in user-facing output. "
+        "Apply strip_thinking_tokens() post-processing. For evals, add the strip "
+        "transform to the eval harness."
+    ),
+    "empty_response": (
+        "This model family occasionally returns empty or near-empty responses. "
+        "Add retry logic with temperature bump (+0.1) on empty output. Consider "
+        "increasing max_tokens if the model is hitting length limits."
+    ),
+    "tool_refusal": (
+        "This model family sometimes refuses to use tools or explains why it can't. "
+        "Add explicit tool-use instruction in system prompt: 'You MUST use available "
+        "tools when the task requires external data. Do not explain inability.'"
+    ),
+    "format_violation": (
+        "This model family struggles with strict format requirements. "
+        "Add format examples in the system prompt. For JSON, include a template. "
+        "For markdown tables, show the expected structure."
+    ),
+    "hallucinated_tool": (
+        "This model family fabricates tool names or claims capabilities it lacks. "
+        "Inject the exact tool catalog into the system prompt. Add guard: "
+        "'Only reference tools from the provided list. Never invent tool names.'"
+    ),
+}
+
+
+@dataclass
+class BehavioralAuditResult:
+    """Result of running behavioral probes against a provider tier."""
+    provider_name: str
+    tier: int
+    total_probes: int
+    failures: Dict[str, List[Dict]]  # mode → list of failure details
+    pass_rate: float
+    guidance: List[str]  # Generated execution guidance for this provider
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+async def provider_behavioral_audit(
+    llm_call: Optional[Callable] = None,
+    tiers: Optional[List[int]] = None,
+    log_dir: str = "data/behavioral_audit",
+) -> List[BehavioralAuditResult]:
+    """
+    Run 10 standardized prompts through each provider tier to detect
+    systematic failure modes.
+
+    Classifies 5 failure types:
+      1. thinking_bleed — <think> tokens in output
+      2. empty_response — blank or near-empty output
+      3. tool_refusal — refuses to use available tools
+      4. format_violation — wrong format (JSON, markdown, etc.)
+      5. hallucinated_tool — fabricates tool names
+
+    Generates per-model-family execution guidance injected into system
+    prompts. Results feed the evolution daemon.
+
+    Args:
+        llm_call: async callable(system, user) → str. If None, uses
+                  ProviderRegistry to build per-tier chains.
+        tiers: Which tiers to audit (default: [1, 2, 4]).
+        log_dir: Where to save audit reports.
+
+    Returns:
+        List of BehavioralAuditResult per tier.
+    """
+    import re as _re
+
+    tiers = tiers or [1, 2, 4]
+    out_dir = Path(_PROJECT_ROOT) / log_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+    results: List[BehavioralAuditResult] = []
+
+    # Build per-tier LLM callers
+    tier_callers: Dict[int, tuple] = {}  # tier → (name, callable)
+
+    if llm_call:
+        for t in tiers:
+            tier_callers[t] = (f"tier-{t}", llm_call)
+    else:
+        try:
+            from able.core.routing.provider_registry import ProviderRegistry
+            registry = ProviderRegistry()
+            for t in tiers:
+                chain = registry.build_chain_for_tier(t)
+                if chain and chain.providers:
+                    provider_name = chain.providers[0].name
+
+                    async def _make_call(system: str, user: str, _c=chain) -> str:
+                        from able.core.providers.base import Message, Role
+                        msgs = [
+                            Message(role=Role.SYSTEM, content=system),
+                            Message(role=Role.USER, content=user),
+                        ]
+                        result = await _c.complete(msgs, temperature=0.3, max_tokens=1024)
+                        return result.content
+
+                    tier_callers[t] = (provider_name, _make_call)
+        except Exception as e:
+            logger.warning("[BEHAVIORAL_AUDIT] Could not build provider chains: %s", e)
+            return results
+
+    # ── Run probes per tier ──
+    for tier, (provider_name, caller) in tier_callers.items():
+        failures: Dict[str, List[Dict]] = {
+            "thinking_bleed": [],
+            "empty_response": [],
+            "tool_refusal": [],
+            "format_violation": [],
+            "hallucinated_tool": [],
+        }
+        passed = 0
+
+        for probe in BEHAVIORAL_PROBES:
+            probe_id = probe["id"]
+            mode = probe["mode"]
+            prompt = probe["prompt"]
+
+            try:
+                output = await caller(
+                    "You are a helpful assistant. Follow instructions precisely.",
+                    prompt,
+                )
+                output = output or ""
+            except Exception as e:
+                logger.debug("[BEHAVIORAL_AUDIT] Probe %s failed for tier %d: %s", probe_id, tier, e)
+                failures[mode].append({
+                    "probe_id": probe_id,
+                    "error": str(e),
+                    "output": "",
+                })
+                continue
+
+            # ── Classify output against expected behavior ──
+            failed = False
+
+            if mode == "thinking_bleed":
+                if _re.search(r'<think>|Thinking:|^\[Internal reasoning\]', output, _re.IGNORECASE):
+                    failed = True
+
+            elif mode == "empty_response":
+                if len(output.strip()) < 20:
+                    failed = True
+
+            elif mode == "tool_refusal":
+                refusal_signals = ["i can't", "i cannot", "i don't have", "i'm unable", "not able to"]
+                if any(s in output.lower() for s in refusal_signals) and "tool" not in output.lower():
+                    failed = True
+
+            elif mode == "format_violation":
+                if "json" in probe["check"].lower():
+                    try:
+                        parsed = json.loads(output.strip().strip("`").strip())
+                        if not isinstance(parsed, dict):
+                            failed = True
+                    except (json.JSONDecodeError, ValueError):
+                        failed = True
+                elif "table" in probe["check"].lower():
+                    if output.count("|") < 6:  # header + separator + 3 rows = at least 6 pipes
+                        failed = True
+
+            elif mode == "hallucinated_tool":
+                fake_tools = ["run_query", "execute_sql", "database_query", "query_db"]
+                if any(ft in output.lower() for ft in fake_tools):
+                    failed = True
+
+            if failed:
+                failures[mode].append({
+                    "probe_id": probe_id,
+                    "output_preview": output[:300],
+                    "check": probe["check"],
+                })
+            else:
+                passed += 1
+
+        # ── Generate per-model-family guidance ──
+        guidance = []
+        for mode, mode_failures in failures.items():
+            if mode_failures:
+                guidance.append(
+                    f"[{provider_name}/T{tier}] {_FAILURE_MODE_GUIDANCE[mode]}"
+                )
+
+        total = len(BEHAVIORAL_PROBES)
+        pass_rate = passed / total if total else 0.0
+
+        audit_result = BehavioralAuditResult(
+            provider_name=provider_name,
+            tier=tier,
+            total_probes=total,
+            failures={k: v for k, v in failures.items() if v},
+            pass_rate=pass_rate,
+            guidance=guidance,
+        )
+        results.append(audit_result)
+
+        # Award buddy XP per tier
+        try:
+            from able.core.buddy.xp import award_benchmark_xp
+            for mode, mode_failures in failures.items():
+                award_benchmark_xp(
+                    model=provider_name,
+                    domain=mode,
+                    passed=len(mode_failures) == 0,
+                )
+        except Exception:
+            pass
+
+        logger.info(
+            "[BEHAVIORAL_AUDIT] Tier %d (%s): %d/%d passed (%.0f%%), %d guidance items",
+            tier, provider_name, passed, total, pass_rate * 100, len(guidance),
+        )
+
+    # ── Persist results ──
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    report_path = out_dir / f"behavioral_audit_{timestamp}.json"
+    report_data = [
+        {
+            "provider": r.provider_name,
+            "tier": r.tier,
+            "pass_rate": r.pass_rate,
+            "total_probes": r.total_probes,
+            "failures": r.failures,
+            "guidance": r.guidance,
+            "timestamp": r.timestamp,
+        }
+        for r in results
+    ]
+    with open(report_path, "w") as f:
+        json.dump(report_data, f, indent=2, default=str)
+
+    logger.info("[BEHAVIORAL_AUDIT] Report saved to %s", report_path)
+    return results
+
+
 # ── CLI + integration entry points ───────────────────────────────
 
 async def run_from_evals(

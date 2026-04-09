@@ -177,13 +177,31 @@ All four learning feedback loops are closed and tested:
 - `InitiativeEngine` distillation-readiness cron at 5am daily: Telegram notification with generated scripts when corpus is ready
 - Ollama confirmed as the right T5 backend (vs LM Studio) — headless, multi-model, API-native, Modelfile-first
 
+**Gateway robustness stack (Phase 0/1)**:
+- Context compactor wired into gateway tool loop — strip-thinking recovery + extractive summary at 80% capacity, death spiral prevention (max 3 attempts), min-tail protection (3 messages), 413 auto-compress + retry
+- Tool result persistence: 3-layer defense (self-truncate → persist-to-disk → enforce-turn-budget)
+- ExecutionMonitor: spinning/thrashing/error-loop detection (<1ms heuristics)
+- Activity-based timeout: 20-iteration budget with idle pressure
+- Repeated tool call guard: pre-dispatch fingerprint blocks identical consecutive calls
+- Thinking-only prefill: re-run when model produces thinking but no output
+- Background notification queue: cron jobs push completions to gateway
+
+**Phase 2 architecture (ALL DONE)**:
+- `DurableTask` ABC with checkpoint/retry/waitpoint, `OvernightLoop` orchestrator
+- `ManagedAgentProvider`: SSE streaming, stream-first pattern, lossless reconnect via `events.list()`, custom tools with host-side credential injection. T4 priority 1, falls back to Claude Code CLI. Beta: `managed-agents-2026-04-01`
+- SSRF hardening: CGNAT range, cloud metadata blocking, archive traversal, redirect re-validation
+- `ThreeManTeamProtocol`: PLANNER → PLAN-BRIEF.md → CODER → BUILD-LOG.md → REVIEWER → REVIEW-FEEDBACK.md. Scope-lock, token-optimized reads
+- `provider_behavioral_audit()`: 10 probes × 5 failure modes (thinking bleed, empty responses, tool refusal, format violations, hallucinated tool calls). Per-model-family guidance generation. Weekly cron (Sunday 5am)
+- Buddy gamification: 8 XP constants, 7 badges, 7 award functions wired to durable tasks, overnight, managed agents, red team, benchmarks
+
 **Test suite**:
-- Repo-wide documented suite pass: 712 tests, 0 deprecation warnings (`able/tests/`, excluding `test_routing.py` and `test_gateway.py`)
+- 872 tests passing, 0 failures (excluding `test_routing.py` and `test_gateway.py`)
 - Added targeted tests for tier-1 primary provider selection (`test_provider_registry_primary.py`) and Telegram buddy tool dispatch (`test_telegram_buddy_dispatch.py`)
+- 16 managed agent provider tests, 14 three man team tests, 14 behavioral audit tests
 - 40 federation tests (identity, models, PII scrubbing, ingestion, sync, store since, Unsloth exporter)
 - 70 harvester tests (scaffolding, entry types, harvesters, session writers, corpus scrubber)
 - 11 security tests (injection, command guard, binary hijack, cd+git, dangerous paths, subcommand cap)
-- datetime.utcnow() replaced with datetime.now(timezone.utc) across all tenant modules
+- datetime.utcnow() replaced with datetime.now(timezone.utc) across all modules
 
 Plus: resource action tool, control-plane endpoint tests, legacy shim removal, CLI slash commands (/resources, /eval, /evolve, /buddy, /battle).
 

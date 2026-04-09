@@ -306,6 +306,20 @@ class ProviderRegistry:
                 base_url=config.endpoint or "http://localhost:11434",
             )
 
+        elif ptype == "managed_agent":
+            if not key:
+                return None
+            try:
+                from able.core.providers.managed_agent_provider import ManagedAgentProvider
+                return ManagedAgentProvider(
+                    api_key=key,
+                    model=config.model_id,
+                    timeout=config.extra.get("timeout", 300.0),
+                )
+            except ImportError as e:
+                logger.warning(f"Managed Agent provider deps missing for {config.name}: {e}")
+                return None
+
         elif ptype == "claude_code":
             try:
                 from able.core.providers.claude_code_provider import ClaudeCodeProvider

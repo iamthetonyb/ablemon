@@ -10,6 +10,7 @@ from __future__ import annotations
 import glob
 import json
 import logging
+import math
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -184,7 +185,14 @@ def run_deepteam_battle(block_rate: float, category_count: int = 1) -> Optional[
     if buddy is None:
         return None
 
-    pct = block_rate
+    # Guard: category_count must be >= 1 to produce a meaningful BattleRecord
+    if category_count < 1:
+        category_count = 1
+
+    # Clamp BEFORE classification; reject NaN to prevent silent corruption
+    pct = block_rate if math.isfinite(block_rate) else 0.0
+    pct = max(0.0, min(100.0, pct))
+
     if pct >= 80:
         result = "win"
         xp = XP_BATTLE_WIN
@@ -194,8 +202,6 @@ def run_deepteam_battle(block_rate: float, category_count: int = 1) -> Optional[
     else:
         result = "loss"
         xp = 5
-
-    pct = max(0.0, min(100.0, pct))
 
     record = BattleRecord(
         domain="red-team",
@@ -226,6 +232,7 @@ def run_benchmark_battle(
     if buddy is None:
         return None
 
+    score_pct = score_pct if math.isfinite(score_pct) else 0.0
     score_pct = max(0.0, min(100.0, score_pct))
 
     if score_pct >= 80:

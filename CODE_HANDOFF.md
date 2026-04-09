@@ -239,6 +239,32 @@ Training lanes:
     - 3 test fixes: `test_registry_has_all_models` (count ≥4 + Gemma 4 assertions), `test_run_success_qwen` (individual modes vs `mode="all"`), `test_save_report` (async `_save_report` via `asyncio.run()`).
     - **Test results**: 828 passing, 0 failures.
 
+53. **Phase 2 Complete: Managed Agents Provider** (Plan Item 7):
+    - NEW `able/core/providers/managed_agent_provider.py` (~350 lines): `ManagedAgentProvider` with SSE streaming, stream-first pattern (open SSE before kickoff), lossless reconnect via `events.list()`, custom tools with host-side credential injection (ABLE keeps secrets).
+    - `ManagedAgentSession` tracks session_id, events, token usage, cost ($0.08/session-hr). Correct idle-break: checks `stop_reason.type` not bare "idle" string.
+    - Beta header: `managed-agents-2026-04-01`. SSE_MAX_RECONNECTS=5 with exponential backoff.
+    - Wired into `provider_registry.py` as `managed_agent` provider type.
+    - Added `managed-agent-opus` to `routing_config.yaml` as T4 priority 1 with fallback to `claude-opus-4-6` (Claude Code CLI).
+    - Buddy XP: `award_managed_agent_xp()` called on session completion (already existed from Phase 2 partial).
+
+54. **Phase 2 Complete: Structured Handoffs — Three Man Team** (Plan Item 9):
+    - NEW `ThreeManTeamProtocol` class in `able/core/swarm/swarm.py` (~100 lines).
+    - File-based artifact chain: PLANNER → PLAN-BRIEF.md → CODER → BUILD-LOG.md → REVIEWER → REVIEW-FEEDBACK.md.
+    - Scope-lock discipline: step N+1 halts if step N fails. Sequential execution enforced.
+    - Token optimization via `_STEP_READS`: PLANNER sees only goal+context, CODER sees only PLAN-BRIEF.md, REVIEWER sees PLAN-BRIEF.md + BUILD-LOG.md.
+    - Role-specific prompts in `_STEP_PROMPTS` with concrete output format requirements.
+    - Verdict extraction: parses REVIEW-FEEDBACK.md for PASS/REVISE/FAIL.
+
+55. **Phase 2 Complete: Behavioral Benchmarks** (Plan Item 10):
+    - NEW `provider_behavioral_audit()` in `able/core/evolution/auto_improve.py` (~180 lines).
+    - 10 standardized `BEHAVIORAL_PROBES` (2 per failure mode) run through each provider tier.
+    - 5 failure mode classifiers: thinking_bleed, empty_response, tool_refusal, format_violation, hallucinated_tool.
+    - `_FAILURE_MODE_GUIDANCE` dict generates per-model-family execution guidance for system prompt injection.
+    - `BehavioralAuditResult` dataclass per tier with pass_rate, failures, guidance.
+    - Results persisted to `data/behavioral_audit/`. Buddy XP via `award_benchmark_xp()` per mode per tier.
+    - Integration: called by evolution daemon weekly after interaction audit.
+    - **Test results**: 828 passing, 0 failures. Codex audit: PASS.
+
 ---
 
 ## Previous Work (same session, earlier)
@@ -267,15 +293,10 @@ Training lanes:
 
 ## Next-Run Objectives
 
-### Priority 0: Phase 2 Architecture — Remaining Items (Plan Items 7, 9, 10)
+### Priority 0: Phase 2 Architecture — ALL DONE
 
-Phase 0 (gateway robustness), Phase 1 Items 1-5 (TurboQuant, Gemma 4, DeepTeam, Hermes quick wins) — ALL DONE.
-Phase 2 partial DONE: Item 6 (durable tasks), Item 8a (SSRF hardening), buddy gamification wiring.
-
-Remaining Phase 2 items:
-- **Item 7**: Managed Agents provider — `able/core/providers/managed_agent_provider.py`. SSE streaming, $0.08/session-hr, stream-first pattern. Beta header: `managed-agents-2026-04-01`.
-- **Item 9**: Structured handoffs — Three Man Team file-based artifacts in swarm. PLANNER → PLAN-BRIEF.md, CODER → BUILD-LOG.md, REVIEWER → REVIEW-FEEDBACK.md.
-- **Item 10**: Self-diagnosing behavioral benchmarks — per-model-family execution guidance. 10 standardized prompts, classify 5 failure modes.
+Phase 0 (gateway robustness), Phase 1 Items 1-5 (TurboQuant, Gemma 4, DeepTeam, Hermes quick wins) — DONE.
+Phase 2 ALL DONE: Items 6 (durable tasks), 7 (managed agents), 8a (SSRF), 9 (structured handoffs), 10 (behavioral benchmarks), buddy gamification wiring.
 
 ### Priority 1: Live production verification
 

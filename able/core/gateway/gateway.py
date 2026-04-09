@@ -1679,9 +1679,10 @@ class ABLEGateway:
         """
         Streaming variant of process_message for CLI/interactive use.
 
-        Runs the full pipeline (scanner → auditor → enricher → scorer),
-        then streams the AI response token-by-token.  Does NOT support
-        multi-turn tool dispatch — use process_message for that.
+        Runs the full pipeline (scanner → auditor → enricher → scorer).
+        Supports multi-turn tool dispatch: intermediate tool iterations use
+        complete() and yield progress notifications; the final text response
+        is streamed token-by-token.
 
         Yields string chunks as they arrive from the provider.
         """
@@ -1792,11 +1793,81 @@ class ABLEGateway:
 
         msgs.append(Message(role=Role.USER, content=enriched_text))
 
-        # Stream the AI response — filter think-blocks and eval-mode bleed
+        # ── Tool dispatch + streaming ─────────────────────────────────
+        # Strategy: if tools are available, use complete() for tool dispatch
+        # iterations (yields progress notifications), then stream() for the
+        # final text response. If no tools, stream directly (original path).
+        _actual_provider = selected_chain.providers[0].name if selected_chain.providers else ""
+        _MAX_STREAM_TOOL_ITERS = 10
+        _used_tools = False
+
+        # Resolve authorized tools for stream tool dispatch
+        _stream_tools = []
+        try:
+            if hasattr(self, 'tool_registry') and self.tool_registry:
+                _stream_tools = await fetch_authorized_tools(self.tool_registry, client_id)
+        except Exception:
+            pass
+
+        # ── Tool dispatch loop (only when tools are available) ─────────
+        if _stream_tools:
+            _complete_result = None
+            for _tool_iter in range(_MAX_STREAM_TOOL_ITERS):
+                try:
+                    _complete_result = await selected_chain.complete(
+                        msgs, tools=_stream_tools,
+                        max_tokens=16384, temperature=0.60, top_p=0.95,
+                    )
+                except Exception as e:
+                    yield f"⚠️ AI error: {e}"
+                    return
+
+                if not _complete_result.tool_calls:
+                    break  # No tool calls — fall through to stream
+
+                _used_tools = True
+                msgs.append(Message(
+                    role=Role.ASSISTANT,
+                    content=_complete_result.content or "",
+                    tool_calls=_complete_result.tool_calls,
+                ))
+
+                for tool_call in _complete_result.tool_calls:
+                    tool_output = await self._handle_tool_call(tool_call, None, user_id, msgs)
+
+                    _tool_preview = str(tool_output)[:200]
+                    yield f"\n⚙️ [{tool_call.name}] {_tool_preview}\n"
+
+                    _tool_content = str(tool_output)
+                    _tool_content, _ = _maybe_persist(
+                        tool_call.name, tool_call.id, _tool_content,
+                    )
+                    msgs.append(Message(
+                        role=Role.TOOL,
+                        content=f"[TOOL OUTPUT — {tool_call.name}]\n{_tool_content}\n[END TOOL OUTPUT]",
+                        name=tool_call.name,
+                        tool_call_id=tool_call.id,
+                    ))
+            else:
+                # Exhausted tool iterations — yield last result
+                yield _complete_result.content or "⚠️ Tool dispatch exceeded maximum iterations."
+                full_response = _complete_result.content or ""
+                _total_ms = (_time.monotonic() - _pipeline_start) * 1000
+                if self.interaction_logger and interaction_id:
+                    try:
+                        self.interaction_logger.update_result(
+                            interaction_id, actual_provider=_actual_provider,
+                            success=True, latency_ms=_total_ms,
+                            raw_input=message[:10000], raw_output=full_response[:10000],
+                        )
+                    except Exception:
+                        pass
+                return
+
+        # ── Stream the final text response ─────────────────────────────
         accumulated = []
         yielded_any = False
         _think_filter = _StreamThinkFilter()
-        _actual_provider = selected_chain.providers[0].name if selected_chain.providers else ""
         try:
             async for chunk in selected_chain.stream(
                 msgs, max_tokens=16384, temperature=0.60
@@ -1809,8 +1880,7 @@ class ABLEGateway:
         except Exception as e:
             if yielded_any:
                 logger.warning(
-                    "Streaming interrupted after partial output; preserving streamed chunks only: %s",
-                    e,
+                    "Streaming interrupted after partial output; preserving streamed chunks: %s", e,
                 )
             else:
                 logger.warning(f"Streaming failed before first chunk, falling back to complete(): {e}")
@@ -1825,15 +1895,14 @@ class ABLEGateway:
                     yield f"⚠️ AI error: {e2}"
                     return
 
-        # Flush probe buffer (handles streams that ended before _PROBE_LIMIT was reached)
+        # Flush probe buffer
         flushed = _think_filter.flush()
         if flushed:
             yield flushed
 
         full_response = "".join(accumulated)
-        _visible_response = full_response  # may differ from full if think-stripped
 
-        # Audit: write captured reasoning (think-blocks + eval-mode bleed) to log
+        # Audit: write captured reasoning to log
         if _think_filter.captured:
             _domain_for_log = scoring_result.domain if scoring_result else "default"
             _log_reasoning_gateway(
@@ -1851,7 +1920,7 @@ class ABLEGateway:
                     _actual_provider, len(_think_filter.captured),
                 )
 
-        # Post-processing: interaction log update (now includes raw_input/raw_output)
+        # Post-processing: interaction log update
         _total_ms = (_time.monotonic() - _pipeline_start) * 1000
         if self.interaction_logger and interaction_id:
             try:

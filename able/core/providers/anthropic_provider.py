@@ -284,6 +284,7 @@ class AnthropicProvider(LLMProvider):
         messages: List[Message],
         temperature: float = 0.7,
         max_tokens: int = 4096,
+        tools: Optional[List[Dict]] = None,
         **kwargs
     ) -> AsyncIterator[str]:
         session = await self._get_session()
@@ -294,18 +295,38 @@ class AnthropicProvider(LLMProvider):
             "Content-Type": "application/json"
         }
 
+        # Extended thinking requires beta header (same as complete())
+        if self.extended_thinking:
+            headers["anthropic-beta"] = "interleaved-thinking-2025-05-14"
+
         system, converted_messages = self._convert_messages(messages)
 
         payload = {
             "model": self.config.model,
             "messages": converted_messages,
             "max_tokens": max_tokens,
-            "temperature": temperature,
             "stream": True
         }
 
+        # Extended thinking: temperature must be 1, add thinking budget
+        if self.extended_thinking:
+            payload["temperature"] = 1
+            payload["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": self.thinking_budget_tokens,
+            }
+        else:
+            payload["temperature"] = temperature
+
         if system:
             payload["system"] = system
+
+        if tools:
+            payload["tools"] = self._convert_tools(tools)
+
+        # Track tool calls accumulated during streaming for callers that need them
+        _pending_tool_calls: List[Dict] = []
+        _current_tool: Optional[Dict] = None
 
         try:
             async with session.post(
@@ -328,10 +349,38 @@ class AnthropicProvider(LLMProvider):
                             data = json.loads(line[6:])
                             event_type = data.get("type")
 
-                            if event_type == "content_block_delta":
+                            if event_type == "content_block_start":
+                                block = data.get("content_block", {})
+                                if block.get("type") == "tool_use":
+                                    _current_tool = {
+                                        "id": block.get("id", ""),
+                                        "name": block.get("name", ""),
+                                        "input_json": "",
+                                    }
+                            elif event_type == "content_block_delta":
                                 delta = data.get("delta", {})
-                                if delta.get("type") == "text_delta":
+                                delta_type = delta.get("type")
+                                if delta_type == "text_delta":
                                     yield delta.get("text", "")
+                                elif delta_type == "thinking_delta":
+                                    # Yield thinking wrapped in markers for downstream filtering
+                                    thinking = delta.get("thinking", "")
+                                    if thinking:
+                                        yield f"<think>{thinking}</think>"
+                                elif delta_type == "input_json_delta" and _current_tool:
+                                    _current_tool["input_json"] += delta.get("partial_json", "")
+                            elif event_type == "content_block_stop":
+                                if _current_tool:
+                                    try:
+                                        args = json.loads(_current_tool["input_json"]) if _current_tool["input_json"] else {}
+                                    except json.JSONDecodeError:
+                                        args = {}
+                                    _pending_tool_calls.append({
+                                        "id": _current_tool["id"],
+                                        "name": _current_tool["name"],
+                                        "arguments": args,
+                                    })
+                                    _current_tool = None
                             elif event_type == "message_stop":
                                 break
                             elif event_type == "error":
@@ -349,6 +398,10 @@ class AnthropicProvider(LLMProvider):
                 f"Stream connection error: {e}",
                 retryable=True
             )
+
+        # Expose accumulated tool calls for callers that need them
+        # (e.g., gateway stream_message tool dispatch)
+        self._last_stream_tool_calls = _pending_tool_calls
 
     def count_tokens(self, text: str) -> int:
         """Approximate token count for Claude"""

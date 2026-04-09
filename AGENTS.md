@@ -89,13 +89,13 @@ All wired into the gateway tool loop (`gateway.py` lines ~1090-1620). Context co
 - Already shipped as part of gateway robustness stack
 - `CronScheduler.completion_queue` + `_drain_completion_queue()` in gateway
 
-### P1 — Phase 2 Architecture (Plan Items 6-10)
+### P1 — Phase 2 Architecture (Plan Items 6-10) ✓ ALL DONE
 
-- Durable task execution framework (iteration-commit-rollback from gnhf)
-- Managed Agents provider ($0.08/session-hr, SSE streaming)
-- SSRF hardening (CGNAT, tar traversal, DNS rebinding, cloud metadata)
-- Structured agent handoffs (Three Man Team file-based artifacts)
-- Self-diagnosing behavioral benchmarks (per-model-family guidance)
+- ✓ Durable task execution framework (iteration-commit-rollback from gnhf)
+- ✓ Managed Agents provider ($0.08/session-hr, SSE streaming, lossless reconnect)
+- ✓ SSRF hardening (CGNAT, tar traversal, DNS rebinding, cloud metadata)
+- ✓ Structured agent handoffs (Three Man Team file-based artifacts)
+- ✓ Self-diagnosing behavioral benchmarks (per-model-family guidance, 10 probes, 5 failure modes)
 
 ### P2 — Production verification
 
