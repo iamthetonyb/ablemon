@@ -1094,6 +1094,15 @@ class ABLEGateway:
             _used_tools = False
             _execution_monitor = ExecutionMonitor()
 
+            # ── T5 cloud advisor escalation state (Plan A+5) ──────────
+            # For tier-5 (local/Ollama) models, track stuck signals and
+            # escalate to a cloud advisor when the model can't make progress.
+            _t5_state = None
+            if scoring_result and scoring_result.selected_tier == 5:
+                from able.core.gateway.t5_advisor import T5AdvisorState
+                _t5_state = T5AdvisorState()
+                logger.info("[PIPELINE] T5 advisor escalation enabled (max %d calls)", 2)
+
             # ── Activity-based timeout tracking (Hermes v0.8 PR #5389) ──
             # Instead of a hard 15-iteration cap, track actual activity.
             # Active agents (tool call <30s ago) get extended budget.
@@ -1297,10 +1306,14 @@ class ABLEGateway:
                             f"Synthesize your answer from available data.]"
                         )
 
+                    # ── Concurrent tool execution (Plan E1, Hermes v0.3) ────
+                    # When multiple tool calls arrive in one turn, run
+                    # independent ones in parallel via asyncio.gather().
+                    # Phase 1: classify each call as blocked or executable.
+                    _blocked_calls = []  # (tool_call, output) — pre-blocked
+                    _executable_calls = []  # tool_call — ready to run
+
                     for tool_call in result.tool_calls:
-                        # ── Repeated tool call guard (mini-coding-agent pattern) ──
-                        # Block identical tool calls that were just made — force
-                        # the model to try a different approach instead of looping.
                         _tc_args_current = tool_call.arguments if isinstance(tool_call.arguments, dict) else {}
                         _recent_same = [
                             r for r in _execution_monitor.history[-2:]
@@ -1308,7 +1321,7 @@ class ABLEGateway:
                             and _args_fingerprint(r.args) == _args_fingerprint(_tc_args_current)
                         ]
                         if len(_recent_same) >= 2:
-                            tool_output = (
+                            _block_msg = (
                                 f"[BLOCKED] Tool `{tool_call.name}` called with identical "
                                 f"arguments 3 times. Use a different approach or synthesize "
                                 f"from existing results."
@@ -1320,67 +1333,94 @@ class ABLEGateway:
                             _execution_monitor.record(
                                 tool_name=tool_call.name,
                                 tool_args=_tc_args_current,
-                                tool_output=tool_output,
+                                tool_output=_block_msg,
                                 iteration=loop_iteration,
                                 success=False,
                             )
-                            msgs.append(Message(
-                                role=Role.TOOL,
-                                content=f"[TOOL OUTPUT — {tool_call.name}]\n{tool_output}\n[END TOOL OUTPUT]",
-                                name=tool_call.name,
-                                tool_call_id=tool_call.id,
-                            ))
-                            continue  # Skip execution, move to next tool call
+                            _blocked_calls.append((tool_call, _block_msg))
+                        else:
+                            _executable_calls.append(tool_call)
 
-                        # Execute the tool
-                        tool_output = await self._handle_tool_call(tool_call, update, user_id, msgs)
-                        _last_activity_ts = _time.monotonic()
-                        _last_activity_desc = tool_call.name
+                    # Phase 2: execute tools — parallel if multiple, sequential if one.
+                    _tool_results = {}  # tool_call.id -> output string
+                    for tc, out in _blocked_calls:
+                        _tool_results[tc.id] = out
 
-                        # Record for execution monitor (PentAGI-inspired progress analysis)
+                    if len(_executable_calls) >= 2:
+                        # Parallel execution via asyncio.gather
+                        async def _run_tool(tc):
+                            return tc, await self._handle_tool_call(tc, update, user_id, msgs)
+                        _gathered = await asyncio.gather(
+                            *[_run_tool(tc) for tc in _executable_calls],
+                            return_exceptions=True,
+                        )
+                        for item in _gathered:
+                            if isinstance(item, Exception):
+                                logger.warning("[PIPELINE] Parallel tool exception: %s", item)
+                                continue
+                            tc, output = item
+                            _tool_results[tc.id] = str(output)
+                        logger.info(
+                            "[PIPELINE] Concurrent tool execution: %d tools in parallel",
+                            len(_executable_calls),
+                        )
+                    else:
+                        # Single tool — run directly (no gather overhead)
+                        for tc in _executable_calls:
+                            output = await self._handle_tool_call(tc, update, user_id, msgs)
+                            _tool_results[tc.id] = str(output)
+
+                    _last_activity_ts = _time.monotonic()
+                    if _executable_calls:
+                        _last_activity_desc = _executable_calls[-1].name
+
+                    # Phase 3: record, persist, and assemble messages in order.
+                    for tool_call in result.tool_calls:
+                        tool_output = _tool_results.get(tool_call.id, "⚠️ Tool execution failed")
                         _tc_args = tool_call.arguments if isinstance(tool_call.arguments, dict) else {}
-                        _tc_output_str = str(tool_output).lower()
-                        _tc_success = not (
-                            _tc_output_str.startswith("error")
-                            or _tc_output_str.startswith("⚠️ tool error")
-                            or _tc_output_str.startswith("❌")
-                            or "failed:" in _tc_output_str[:100]
-                        )
-                        _execution_monitor.record(
-                            tool_name=tool_call.name,
-                            tool_args=_tc_args,
-                            tool_output=str(tool_output),
-                            iteration=loop_iteration,
-                            success=_tc_success,
-                        )
 
-                        # Notify the user on Telegram that a tool was executed
+                        # Record for execution monitor
+                        if tool_call.id not in {tc.id for tc, _ in _blocked_calls}:
+                            _tc_output_str = tool_output.lower()
+                            _tc_success = not (
+                                _tc_output_str.startswith("error")
+                                or _tc_output_str.startswith("⚠️ tool error")
+                                or _tc_output_str.startswith("❌")
+                                or "failed:" in _tc_output_str[:100]
+                            )
+                            _execution_monitor.record(
+                                tool_name=tool_call.name,
+                                tool_args=_tc_args,
+                                tool_output=tool_output,
+                                iteration=loop_iteration,
+                                success=_tc_success,
+                            )
+                            # T5 advisor: track tool success/failure
+                            if _t5_state is not None:
+                                _t5_state.record_tool_result(_tc_success)
+
+                        # Notify Telegram
                         if update and update.message:
                             try:
                                 tool_notification = f"⚙️ [{tool_call.name}]\n{tool_output}"
-                                # Truncate to Telegram's 4096 char limit
                                 if len(tool_notification) > 4000:
                                     tool_notification = tool_notification[:4000] + "\n... (truncated)"
                                 await update.message.reply_text(tool_notification)
                             except Exception:
                                 pass
 
-                        # ── Tool result persistence (Hermes PR #5210) ──
-                        # Large tool outputs get saved to disk with inline pointer.
-                        # Prevents context overflow from verbose tools.
-                        _tool_content = str(tool_output)
+                        # Tool result persistence (Hermes PR #5210)
+                        _tool_content = tool_output
                         _tool_content, _was_persisted = _maybe_persist(
                             tool_call.name, tool_call.id, _tool_content,
                         )
                         if _was_persisted:
                             logger.info(
                                 "[PIPELINE] Tool output persisted to disk: %s (%d chars)",
-                                tool_call.name, len(str(tool_output)),
+                                tool_call.name, len(tool_output),
                             )
 
-                        # Inject the tool observation back into the prompt for the next loop.
-                        # Wrap output with delimiters to prevent prompt injection via tool results.
-                        # Append budget pressure signal when approaching the iteration ceiling.
+                        # Inject tool observation into prompt
                         _wrapped_tool_content = (
                             f"[TOOL OUTPUT — {tool_call.name}]\n"
                             f"{_tool_content}\n"
@@ -1433,6 +1473,25 @@ class ABLEGateway:
                             f"{_monitor_verdict.pattern} ({_monitor_verdict.details}). "
                             f"Could you rephrase or break this into smaller steps?"
                         )
+
+                    # ── T5 cloud advisor escalation (Plan A+5) ────────────
+                    # If the local model is stuck (3+ tool failures or 2+ empty
+                    # outputs), ask a cloud advisor for guidance.
+                    if _t5_state is not None and _t5_state.is_stuck():
+                        from able.core.gateway.t5_advisor import maybe_escalate_to_advisor
+                        _adv_guidance = await maybe_escalate_to_advisor(
+                            _t5_state,
+                            text_content if isinstance(text_content, str) else "",
+                            msgs,
+                            self.tier_chains,
+                            self.provider_chain,
+                        )
+                        if _adv_guidance:
+                            msgs.append(Message(
+                                role=Role.SYSTEM,
+                                content=f"[ADVISOR] {_adv_guidance}",
+                            ))
+
                     continue
 
                 _total_ms = (_time.monotonic() - _pipeline_start) * 1000
@@ -1466,7 +1525,29 @@ class ABLEGateway:
                         continue  # Re-run the loop — model sees its reasoning
 
                 if not final_text.strip():
+                    # ── T5 advisor: empty output escalation (Plan A+5) ────
+                    if _t5_state is not None:
+                        _t5_state.record_empty_output()
+                        if _t5_state.is_stuck():
+                            from able.core.gateway.t5_advisor import maybe_escalate_to_advisor
+                            _adv_guidance = await maybe_escalate_to_advisor(
+                                _t5_state,
+                                text_content if isinstance(text_content, str) else "",
+                                msgs,
+                                self.tier_chains,
+                                self.provider_chain,
+                            )
+                            if _adv_guidance:
+                                msgs.append(Message(
+                                    role=Role.SYSTEM,
+                                    content=f"[ADVISOR] {_adv_guidance}",
+                                ))
+                                continue  # Re-run with advisor guidance
                     final_text = "⚠️ ABLE exceeded the maximum internal thinking steps (15 turns)."
+                else:
+                    # Successful text output — reset T5 state
+                    if _t5_state is not None:
+                        _t5_state.record_text_output()
                 # Reset prefill counter on successful text output
                 self._thinking_prefill_retries = 0
 

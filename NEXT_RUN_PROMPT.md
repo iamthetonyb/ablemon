@@ -209,7 +209,7 @@ All four learning feedback loops are closed and tested:
 - `claude-sonnet-advisor` routing config: tier 2.5, complexity 0.5-0.7, `advisor_fallback_only: true` (activates when API costs apply)
 
 **Test suite**:
-- 980 tests passing, 0 failures (excluding `test_routing.py` and `test_gateway.py`)
+- 1029 tests passing, 0 failures
 - Added targeted tests for tier-1 primary provider selection (`test_provider_registry_primary.py`) and Telegram buddy tool dispatch (`test_telegram_buddy_dispatch.py`)
 - 16 managed agent provider tests, 14 three man team tests, 14 behavioral audit tests
 - 40 federation tests (identity, models, PII scrubbing, ingestion, sync, store since, Unsloth exporter)
@@ -232,16 +232,15 @@ These external resources informed the federation and distillation architecture d
 
 A 79-item master plan lives at `.claude/plans/luminous-wibbling-pie.md` across 7 tracks (A/A+/B/C/D/E/F). Each session should pick up the next uncompleted items from the priority order and push forward.
 
-**Completed (Phase 2.5+3):** A1 (arg sanitizer), A2 (NextAuth), A3 (PII redactor), A+1 (advisor tool type), A+2 (advisor routing config), A+3 (gateway advisor injection), A+4 (advisor cost tracking), B1 (durable task tests), B2 (overnight loop tests), B3 (context compactor tests), B4 (tool result storage tests).
+**Completed (Phase 2.5+3+4):** A1 (arg sanitizer), A2 (NextAuth), A3 (PII redactor), A+1 (advisor tool type), A+2 (advisor routing config), A+3 (gateway advisor injection), A+4 (advisor cost tracking), A+5 (T5 cloud advisor escalation), B1 (durable task tests), B2 (overnight loop tests), B3 (context compactor tests), B4 (tool result storage tests), B6 (execution monitor tests), E1 (concurrent tool execution).
 
 **Next immediate (HIGH VALUE):**
-- A+5: T5 local model cloud advisor escalation — Opus guidance for stuck Ollama models
 - A+6: Subscription-aware advisor fallback — activate advisor only when API costs apply
-- B5-B6: AutoImprover E2E + ExecutionMonitor integration tests
+- B5: AutoImprover E2E pipeline test
 - C1: MemPalace 4-layer memory (~170 token wake-up)
 - C2: Temporal knowledge graph — fact lifecycle management
+- C3: Smart search pipeline — BM25+vector+rerank fusion
 - D1: Claude Agent SDK integration — replace manual T4 tool loop
-- E1: Concurrent tool execution (asyncio.gather for independent tool calls)
 
 **Medium value (sessions 4-6):** A4-A8 remaining security, C4-C6 memory upgrades, D2-D5 advanced capabilities.
 

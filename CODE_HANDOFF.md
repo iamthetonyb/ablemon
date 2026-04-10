@@ -350,6 +350,21 @@ Training lanes:
 
     **Test results**: 980 passing, 0 failures (46 new tests: 31 context compactor + 15 overnight loop).
 
+69. **Concurrent Tool Execution** (Plan E1):
+    - Modified `gateway.py` tool dispatch: when multiple tool calls arrive in one LLM turn, runs them in parallel via `asyncio.gather()` instead of sequentially.
+    - 3-phase design: (1) classify calls as blocked or executable (repeated call guard), (2) parallel execution via `asyncio.gather` for 2+ executable calls (single calls still sequential), (3) record/persist/assemble messages in original order. Exception isolation per tool — one failure doesn't block others.
+
+70. **ExecutionMonitor Integration Tests** (Plan B6):
+    - NEW FILE `able/tests/test_execution_monitor.py` (28 tests).
+    - Covers: `_args_fingerprint` (empty, deterministic, order-independent, whitespace normalization, different args), `_text_similarity` (identical, empty, no overlap, partial), healthy analysis (few calls, diverse calls), spinning detection (hard spin, soft spin, not-spinning with different tools, terminate after many), thrashing detection (A-B-A-B pattern, no thrashing with 3 tools), output repetition (identical outputs = stall, diverse outputs = healthy), error loop (3 failures, success breaks loop, terminate after many), `get_summary` (empty, populated), dataclass defaults, priority ordering (spinning > thrashing, spinning > error_loop).
+
+71. **T5 Cloud Advisor Escalation** (Plan A+5):
+    - NEW FILE `able/core/gateway/t5_advisor.py` (~130 lines): `T5AdvisorState` tracks consecutive failures, empty outputs, and advisor budget. `maybe_escalate_to_advisor()` curates last 3 messages + task summary, sends to T4 (Opus) or T2 fallback chain with `max_tokens=700, temperature=0.3`.
+    - Gateway wiring: state initialized when `scoring_result.selected_tier == 5`. Tool results tracked via `record_tool_result()`. Escalation triggers after 3+ consecutive tool failures or 2+ empty outputs. Advisor response injected as `[ADVISOR] {guidance}` system message. Max 2 advisor calls per session.
+    - NEW FILE `able/tests/test_t5_advisor.py` (21 tests): state defaults, budget exhaustion, stuck detection (failures, empty outputs, resets), context curation (basic, truncation, limits), escalation (not stuck, no providers, stuck+provider, T4 preference, T2 fallback, provider failure, budget respect, correct params, empty guidance).
+
+    **Test results**: 1029 passing, 0 failures (49 new tests: 28 execution monitor + 21 T5 advisor).
+
 ---
 
 ## Previous Work (same session, earlier)
@@ -460,16 +475,15 @@ Still on the roadmap (saved for future sessions):
 
 See full plan at `.claude/plans/luminous-wibbling-pie.md` (79 items across 7 tracks).
 
-Completed: A1, A2, A3, A+1, A+2, A+3, A+4, B1, B2, B3, B4.
+Completed: A1, A2, A3, A+1, A+2, A+3, A+4, A+5, B1, B2, B3, B4, B6, E1.
 
 **Next up (high value)**:
-- **A+5**: T5 local model cloud advisor escalation — Opus guidance for stuck Ollama models
 - **A+6**: Subscription-aware advisor fallback — activate advisor only when API costs apply
-- **B5-B6**: AutoImprover E2E + ExecutionMonitor integration tests
+- **B5**: AutoImprover E2E pipeline test
 - **C1**: MemPalace 4-layer memory (~170 token wake-up from unbounded)
 - **C2**: Temporal knowledge graph — fact lifecycle management
+- **C3**: Smart search pipeline — BM25+vector+rerank fusion
 - **D1**: Claude Agent SDK integration — replace manual T4 tool loop
-- **E1**: Concurrent tool execution — asyncio.gather for independent tool calls
 - **A4-A8**: Remaining security (subprocess runner, enhanced SSRF, env sanitization, plugin hardening, smart approvals)
 
 ### Priority 11: End-to-end system hardening
@@ -500,8 +514,10 @@ python3 -m pytest able/tests/test_control_plane.py able/tests/test_resource_tool
 python3 -m pytest able/tests/test_gateway_metrics.py -x
 # Phase 2.5 security + advisor + production module tests:
 python3 -m pytest able/tests/test_arg_sanitizer.py able/tests/test_pii_redactor.py able/tests/test_durable_task.py able/tests/test_tool_result_storage.py -x -v
-# Full suite (884 expected with ignores, 934 total including routing+gateway):
-python3 -m pytest able/tests/ -x --ignore=able/tests/test_routing.py --ignore=able/tests/test_gateway.py -q
+# Phase 3 tests (execution monitor, T5 advisor, context compactor, overnight loop):
+python3 -m pytest able/tests/test_execution_monitor.py able/tests/test_t5_advisor.py able/tests/test_context_compactor.py able/tests/test_overnight_loop.py -x -v
+# Full suite (1029 total):
+python3 -m pytest able/tests/ -x -q
 cd able-studio && pnpm build
 bash -n deploy-to-server.sh
 bash -n install.sh
