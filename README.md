@@ -1,4 +1,4 @@
-# ABLE — Your AI That Gets Smarter Every Day
+# Able Your AI To Gets Smarter Every Day
 
 ABLE is an AI agent that lives on your server, talks to you on Telegram, and **learns from every conversation**.
 
@@ -109,7 +109,7 @@ ABLE turns your conversations into training data automatically.
 
 ## The buddy system
 
-Your buddy starts at a level based on your existing AI interaction history. Install ABLE and it reads your patterns — domains you work in, complexity you deal with — and sets the starting level accordingly.
+Think Pokémon but for business use cases, your buddy starts at a level based on your existing AI interaction history. Install ABLE and it reads your patterns — domains you work in, complexity you deal with — and sets the starting level accordingly.
 
 It earns XP from real system work:
 - Every completed interaction
@@ -201,7 +201,7 @@ able/
 
 ## The gateway — what happens when you send a message
 
-23 tools registered. Every request runs through:
+50+ tools registered. Every request runs through:
 
 ```
 Message -> TrustGate (safety score) -> Scanner -> Enricher (expands vague prompts)
