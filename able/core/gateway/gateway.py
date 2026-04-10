@@ -983,6 +983,35 @@ class ABLEGateway:
             except Exception as e:
                 logger.warning(f"[PIPELINE] Complexity scoring failed, using default chain: {e}")
 
+        # ── A+6: Advisor fallback routing for borderline complexity ──
+        # When the T4 subscription provider (CLI) is unavailable, redirect
+        # 0.5-0.7 complexity requests to the advisor-enhanced Sonnet provider.
+        # This saves ~80% vs full Opus API for borderline tasks.
+        if (scoring_result and
+                hasattr(self, 'provider_registry') and self.provider_registry):
+            _thresholds = getattr(self.complexity_scorer, 'weights', {}).get("tier_thresholds", {})
+            _adv_min = _thresholds.get("tier_advisor_min_score", 0.5)
+            _adv_max = _thresholds.get("tier_advisor_max_score", 0.7)
+            if _adv_min <= scoring_result.score <= _adv_max:
+                _all_t4 = self.provider_registry._by_tier.get(4, [])
+                _subscription_available = any(
+                    p.provider_type in ("claude_code", "openai_oauth") and p.is_available
+                    for p in _all_t4
+                )
+                if not _subscription_available:
+                    _has_advisor = any(
+                        (p.extra or {}).get("advisor_enabled") and p.is_available
+                        for p in _all_t4
+                    )
+                    if _has_advisor and 4 in self.tier_chains and self.tier_chains[4].providers:
+                        selected_chain = self.tier_chains[4]
+                        scoring_result.selected_tier = 4
+                        logger.info(
+                            "[PIPELINE] A+6 advisor fallback: score=%.3f redirected to "
+                            "advisor-enhanced T4 (subscription unavailable)",
+                            scoring_result.score,
+                        )
+
         # Step 3.5: Deep enrichment — model-assisted refinement for high-complexity prompts
         # Triggers when complexity > 0.7 and rule-based enrichment was applied
         if (scoring_result and scoring_result.score > 0.7
@@ -1122,6 +1151,14 @@ class ABLEGateway:
                     _context_limit = _tier_cfg.max_context
                     _advisor_cfg = _tier_cfg.extra or {}
                     _advisor_enabled = _advisor_cfg.get("advisor_enabled", False)
+                    # A+6: advisor_fallback_only guard — skip advisor injection
+                    # when a subscription provider is active (no cost benefit).
+                    if _advisor_enabled and _advisor_cfg.get("advisor_fallback_only", False):
+                        if _tier_cfg.provider_type in ("claude_code", "openai_oauth"):
+                            _advisor_enabled = False
+                            logger.debug(
+                                "[PIPELINE] Advisor skipped — subscription provider active"
+                            )
 
             # ── Advisor strategy injection (Plan A+3) ─────────────
             # When the selected provider has advisor_enabled=True, inject

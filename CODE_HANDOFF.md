@@ -365,6 +365,21 @@ Training lanes:
 
     **Test results**: 1029 passing, 0 failures (49 new tests: 28 execution monitor + 21 T5 advisor).
 
+72. **Subscription-Aware Advisor Fallback** (Plan A+6):
+    - Gateway routing override: when T4 subscription (CLI) is unavailable and complexity is 0.5-0.7, redirects to advisor-enhanced Sonnet provider (saves ~80% vs full Opus API). Uses `tier_advisor_min_score`/`tier_advisor_max_score` from routing config thresholds.
+    - Injection guard: `advisor_fallback_only` flag checked before advisor tool injection — skips advisor when subscription provider is active (no cost benefit).
+    - Completes the full A+1 through A+6 advisor strategy end-to-end.
+
+73. **Subprocess I/O Standardization** (Plan A4):
+    - NEW FILE `able/core/security/subprocess_runner.py` (~220 lines): `run()` sync and `async_run()` async execution with guardrails. `SubprocessResult` with success/timed_out/truncated properties. `_sanitize_env()` strips 18+ injection vectors (LD_PRELOAD, DYLD_*, JAVA_TOOL_OPTIONS, RUSTFLAGS, GIT_SSH_COMMAND, NODE_OPTIONS, KUBECONFIG, etc.) with per-call allowlist override. Output truncation with `[TRUNCATED — N bytes omitted]` marker. Default 30s timeout, 50KB output cap.
+    - NEW FILE `able/tests/test_subprocess_runner.py` (34 tests): result properties, truncation logic, env sanitization (8 injection categories + prefix patterns + allowlist + safe preservation), sync execution (echo, exit codes, stderr, timeout, not-found, truncation, env stripping, cwd, stdin), async execution (echo, exit codes, timeout, env stripping, not-found, truncation, stdin).
+
+74. **MemPalace 4-Layer Memory** (Plan C1):
+    - NEW FILE `able/memory/layered_memory.py` (~220 lines): `LayeredMemory` class with 4 layers. L0 (~50 tokens): identity from `~/.able/memory/identity.yaml` + objectives. L1 (~500-800 tokens): auto-generated from learnings.md + HybridMemory with deduplication. L2 (on-demand): filtered retrieval via HybridMemory `search()`. L3 (deep): full semantic search with lower threshold + metadata. `wake_up()` returns L0+L1 (~170 tokens). `recall(query, depth)` for graduated retrieval. `get_stats()` for observability.
+    - NEW FILE `able/tests/test_layered_memory.py` (30 tests): layer/config defaults, L0 loading (default, yaml, objectives, truncation, corrupt yaml), L1 loading (learnings file, truncation, empty sources, hybrid deduplication), L2/L3 query (empty without hybrid, queries hybrid, handles failure, metadata, lower threshold), wake_up (with files, with defaults), recall (depth 1/2/3), get_stats, get_layer.
+
+    **Test results**: 1093 passing, 0 failures (64 new tests: 34 subprocess runner + 30 layered memory).
+
 ---
 
 ## Previous Work (same session, earlier)
@@ -475,16 +490,16 @@ Still on the roadmap (saved for future sessions):
 
 See full plan at `.claude/plans/luminous-wibbling-pie.md` (79 items across 7 tracks).
 
-Completed: A1, A2, A3, A+1, A+2, A+3, A+4, A+5, B1, B2, B3, B4, B6, E1.
+Completed: A1, A2, A3, A4, A+1, A+2, A+3, A+4, A+5, A+6, B1, B2, B3, B4, B6, C1, E1.
 
 **Next up (high value)**:
-- **A+6**: Subscription-aware advisor fallback — activate advisor only when API costs apply
 - **B5**: AutoImprover E2E pipeline test
-- **C1**: MemPalace 4-layer memory (~170 token wake-up from unbounded)
 - **C2**: Temporal knowledge graph — fact lifecycle management
 - **C3**: Smart search pipeline — BM25+vector+rerank fusion
 - **D1**: Claude Agent SDK integration — replace manual T4 tool loop
-- **A4-A8**: Remaining security (subprocess runner, enhanced SSRF, env sanitization, plugin hardening, smart approvals)
+- **A5-A8**: Remaining security (enhanced SSRF, env sanitization, plugin hardening, smart approvals)
+- **C4**: Recency-weighted context compression
+- **C5**: Memory dreaming / REM (offline consolidation)
 
 ### Priority 11: End-to-end system hardening
 
@@ -516,7 +531,7 @@ python3 -m pytest able/tests/test_gateway_metrics.py -x
 python3 -m pytest able/tests/test_arg_sanitizer.py able/tests/test_pii_redactor.py able/tests/test_durable_task.py able/tests/test_tool_result_storage.py -x -v
 # Phase 3 tests (execution monitor, T5 advisor, context compactor, overnight loop):
 python3 -m pytest able/tests/test_execution_monitor.py able/tests/test_t5_advisor.py able/tests/test_context_compactor.py able/tests/test_overnight_loop.py -x -v
-# Full suite (1029 total):
+# Full suite (1093 total):
 python3 -m pytest able/tests/ -x -q
 cd able-studio && pnpm build
 bash -n deploy-to-server.sh
