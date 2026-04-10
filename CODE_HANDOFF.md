@@ -327,6 +327,29 @@ Training lanes:
 
     **Test results**: 934 passing, 0 failures (69 new tests: 23 arg sanitizer + 14 PII + 14 durable task + 11 tool result storage + 7 existing test improvements).
 
+65. **Gateway Advisor Tool Injection** (Plan A+3):
+    - When the selected provider has `advisor_enabled=True` in its config `extra`, the gateway injects `AnthropicProvider.advisor_tool()` into the `authorized_tools` array before the provider call.
+    - Reads `advisor_max_uses` and `advisor_model` from provider config extra dict.
+    - Injection logged at INFO level. Failure to inject is non-fatal (warning only).
+    - Works for both `process_message()` vision and text-only paths (tools array is shared).
+
+66. **Advisor Cost Tracking in Interaction Log** (Plan A+4):
+    - 3 new columns on `InteractionRecord`: `advisor_input_tokens`, `advisor_output_tokens`, `advisor_calls`.
+    - Migration columns added to `_MIGRATION_COLUMNS` (auto-added on first connection).
+    - `update_result()` accepts `advisor_input_tokens`, `advisor_output_tokens`, `advisor_calls` params.
+    - Gateway passes `result.advisor_usage` fields to interaction log after provider responds.
+    - Enables evolution daemon to analyze: "which tasks used the advisor?" for routing optimization.
+
+67. **ContextCompactor Unit Tests** (Plan B3):
+    - NEW FILE `able/tests/test_context_compactor.py` (31 tests).
+    - Covers: `estimate_tokens` (string, list, empty), `needs_compaction` (under/over threshold), `compact_if_needed` (basic reduction, tail preservation, summary structure), strip-thinking recovery (think blocks, internal reasoning, user preservation, mutation safety, skip-full-compaction), death spiral prevention (max attempts, no-op detection, counter reset), `is_context_length_error` (direct, 413, disconnect types, negatives), `_extractive_summary` (user requests, errors, empty), `snapshot_hash` (deterministic, content-sensitive), `_get_text` (string, list, empty).
+
+68. **OvernightLoop Unit Tests** (Plan B2):
+    - NEW FILE `able/tests/test_overnight_loop.py` (15 tests).
+    - Covers: dataclass defaults, report success_rate (normal + zero), all-succeed run, git commit on success, git rollback on failure, 3-consecutive-failure abort, success resets failure counter, exception-as-failure, abort signal, notes accumulation + passing to task_fn, metadata persistence, exponential backoff timing (60s * 2^n formula), results collection.
+
+    **Test results**: 980 passing, 0 failures (46 new tests: 31 context compactor + 15 overnight loop).
+
 ---
 
 ## Previous Work (same session, earlier)
@@ -437,16 +460,16 @@ Still on the roadmap (saved for future sessions):
 
 See full plan at `.claude/plans/luminous-wibbling-pie.md` (79 items across 7 tracks).
 
-Completed this session: A1 (arg sanitizer), A2 (NextAuth), A3 (PII redactor), A+1 (advisor tool type), A+2 (advisor routing), B1 (durable task tests), B4 (tool result storage tests).
+Completed: A1, A2, A3, A+1, A+2, A+3, A+4, B1, B2, B3, B4.
 
 **Next up (high value)**:
-- **A+3**: Gateway advisor injection — inject advisor tool when provider has `advisor_enabled=True`
-- **A+4**: Cost tracking — separate executor vs advisor token accounting in interaction_log
 - **A+5**: T5 local model cloud advisor escalation — Opus guidance for stuck Ollama models
 - **A+6**: Subscription-aware advisor fallback — activate advisor only when API costs apply
-- **B3**: ContextCompactor unit tests — still 0% coverage
 - **B5-B6**: AutoImprover E2E + ExecutionMonitor integration tests
 - **C1**: MemPalace 4-layer memory (~170 token wake-up from unbounded)
+- **C2**: Temporal knowledge graph — fact lifecycle management
+- **D1**: Claude Agent SDK integration — replace manual T4 tool loop
+- **E1**: Concurrent tool execution — asyncio.gather for independent tool calls
 - **A4-A8**: Remaining security (subprocess runner, enhanced SSRF, env sanitization, plugin hardening, smart approvals)
 
 ### Priority 11: End-to-end system hardening

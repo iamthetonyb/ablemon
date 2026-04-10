@@ -98,6 +98,13 @@ class InteractionRecord:
     audit_score: Optional[float] = None     # 0.0–5.0 judge LLM quality score
     audit_notes: Optional[str] = None       # JSON: {accuracy, relevance, improvements}
 
+    # ── Advisor strategy (2026-04-09) ─────────────────────────
+    # Tracks Sonnet→Opus advisor escalation within a single API call.
+    # Separate from main input_tokens/output_tokens (those are executor tokens).
+    advisor_input_tokens: int = 0           # Advisor (Opus) input tokens
+    advisor_output_tokens: int = 0          # Advisor (Opus) output tokens
+    advisor_calls: int = 0                  # Number of advisor invocations in this request
+
 
 class InteractionLogger:
     """
@@ -172,6 +179,10 @@ class InteractionLogger:
         # response_confidence: 0.0–1.0 confidence proxy (real logprobs for Ollama,
         # calibrated proxy for GPT/WHAM/Claude). Used for DPO pair filtering + federation.
         ("response_confidence", "REAL DEFAULT NULL"),
+        # Advisor strategy columns (2026-04-09) — track Sonnet→Opus advisory
+        ("advisor_input_tokens", "INTEGER DEFAULT 0"),
+        ("advisor_output_tokens", "INTEGER DEFAULT 0"),
+        ("advisor_calls", "INTEGER DEFAULT 0"),
     ]
 
     def __init__(self, db_path: str = DEFAULT_DB_PATH):
@@ -317,6 +328,9 @@ class InteractionLogger:
         tools_called: Optional[str] = None,           # JSON list of real executed tool names
         conversation_depth: Optional[int] = None,     # 0-indexed turn position in session
         response_confidence: Optional[float] = None,  # 0.0–1.0 confidence (logprob proxy)
+        advisor_input_tokens: Optional[int] = None,   # Advisor (Opus) input tokens
+        advisor_output_tokens: Optional[int] = None,  # Advisor (Opus) output tokens
+        advisor_calls: Optional[int] = None,          # Number of advisor invocations
     ):
         """
         Update execution results after a provider responds.
@@ -362,6 +376,9 @@ class InteractionLogger:
             ("tools_called", tools_called),
             ("conversation_depth", conversation_depth),
             ("response_confidence", response_confidence),
+            ("advisor_input_tokens", advisor_input_tokens),
+            ("advisor_output_tokens", advisor_output_tokens),
+            ("advisor_calls", advisor_calls),
         ]:
             if val is not None:
                 updates.append(f"{col} = ?")

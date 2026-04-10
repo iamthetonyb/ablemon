@@ -1103,12 +1103,40 @@ class ABLEGateway:
             _MAX_ITERATIONS = 20  # Extended from 15 — activity tracking prevents runaways
             _IDLE_THRESHOLD_S = 60.0  # Inject pressure after 60s idle
 
-            # Resolve context limit for the selected provider tier
+            # Resolve context limit and advisor config for the selected provider tier
             _context_limit = 128000  # safe default
+            _advisor_enabled = False
+            _advisor_cfg = {}
             if hasattr(self, 'provider_registry') and self.provider_registry and scoring_result:
                 _tier_cfg = self.provider_registry.get_primary_for_tier(scoring_result.selected_tier)
                 if _tier_cfg:
                     _context_limit = _tier_cfg.max_context
+                    _advisor_cfg = _tier_cfg.extra or {}
+                    _advisor_enabled = _advisor_cfg.get("advisor_enabled", False)
+
+            # ── Advisor strategy injection (Plan A+3) ─────────────
+            # When the selected provider has advisor_enabled=True, inject
+            # the advisor_20260301 server-side tool so Sonnet can escalate
+            # to Opus within a single API call.
+            _advisor_injected = False
+            if _advisor_enabled and authorized_tools is not None:
+                try:
+                    from able.core.providers.anthropic_provider import AnthropicProvider
+                    _adv_max = _advisor_cfg.get("advisor_max_uses", 3)
+                    _adv_model = _advisor_cfg.get("advisor_model")
+                    _adv_tool = AnthropicProvider.advisor_tool(
+                        max_uses=_adv_max,
+                        advisor_model=_adv_model,
+                    )
+                    authorized_tools = list(authorized_tools) + [_adv_tool]
+                    _advisor_injected = True
+                    logger.info(
+                        "[PIPELINE] Advisor tool injected: model=%s, max_uses=%d",
+                        _adv_tool.get("advisor_model", "?"), _adv_max,
+                    )
+                except Exception as _adv_err:
+                    logger.warning("[PIPELINE] Advisor tool injection failed: %s", _adv_err)
+
             self.context_compactor.reset_compression_counter()
 
             for loop_iteration in range(_MAX_ITERATIONS):
@@ -1582,6 +1610,19 @@ class ABLEGateway:
                             conversation_depth=_conv_depth,
                             # Response confidence: real logprobs for Ollama, proxy for others
                             response_confidence=_response_confidence,
+                            # Advisor strategy tracking (Plan A+4)
+                            advisor_input_tokens=(
+                                result.advisor_usage.get("input_tokens", 0)
+                                if hasattr(result, 'advisor_usage') and result.advisor_usage else None
+                            ),
+                            advisor_output_tokens=(
+                                result.advisor_usage.get("output_tokens", 0)
+                                if hasattr(result, 'advisor_usage') and result.advisor_usage else None
+                            ),
+                            advisor_calls=(
+                                result.advisor_usage.get("calls", 0)
+                                if hasattr(result, 'advisor_usage') and result.advisor_usage else None
+                            ),
                         )
                     except Exception as log_e:
                         logger.warning(f"Failed to update interaction log: {log_e}")
