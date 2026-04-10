@@ -1,4 +1,4 @@
-# Able Your AI To Gets Smarter Every Day
+# Able Your AI To Get Smarter Every Day
 
 ABLE is an AI agent that lives on your server, talks to you on Telegram, and **learns from every conversation**.
 
