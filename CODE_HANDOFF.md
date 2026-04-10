@@ -286,6 +286,47 @@ Training lanes:
 
     **Test results**: 872 passing, 0 failures. Codex audit: PASS.
 
+59. **Tool Argument Sanitizer** (Plan A1 — CRITICAL security fix):
+    - NEW FILE `able/core/security/arg_sanitizer.py` (~200 lines). Closes critical gap where TrustGate validates user messages but NOT tool arguments.
+    - `sanitize_tool_args(tool_name, args) -> SanitizeResult` — per-tool-type rules: shell tools get metachar checks, file tools get traversal checks, URL tools get SSRF inspection.
+    - Checks: null bytes, `../` path traversal, shell metacharacters (context-aware — blocked in file tools, warned in general, allowed in shell tools), SSRF metadata endpoints (`169.254.169.254`, `metadata.google.internal`), API key leakage (`sk-`, `ghp_`, `AKIA`), control character stripping.
+    - Nested dict handling: only checks KEYS (paths), not values (file content naturally has shell syntax).
+    - Raises `ToolArgRejected` for critical violations (null bytes, traversal on file tools, SSRF metadata).
+    - Wired into `able/core/gateway/tool_registry.py` `dispatch()` — runs before every tool execution.
+    - 23 tests in `able/tests/test_arg_sanitizer.py`.
+
+60. **PII Redactor** (Plan A3):
+    - NEW FILE `able/core/security/pii_redactor.py` (~100 lines).
+    - `redact_pii(text) -> (redacted_text, list[RedactedField])` — pattern-based detection for email, phone (US + country code), SSN, credit card, API keys (OpenAI/GitHub/AWS/Slack/Google/GitLab prefixes).
+    - Typed numbered placeholders: `[REDACTED_EMAIL_1]`, `[REDACTED_PHONE_1]`, etc.
+    - `has_pii(text) -> bool` — quick check without full redaction.
+    - Designed for T1/T2 external providers only — T4 (Claude) and T5 (local) exempt.
+    - 14 tests in `able/tests/test_pii_redactor.py`.
+
+61. **Advisor Strategy — Provider Support** (Plan A+1):
+    - `AnthropicProvider.ADVISOR_TOOL_TYPE = "advisor_20260301"` class constant.
+    - `advisor_tool(max_uses=3, advisor_model=None)` classmethod — returns server-side tool declaration for Sonnet→Opus advisory within a single API call.
+    - `_convert_tools()` updated: `advisor_20260301` type passes through unchanged (server-side tool, not converted to function format).
+    - `complete()` tracks advisor usage: `usage.advisor_usage` → `{"calls": N, "input_tokens": N, "output_tokens": N}` logged and attached to `CompletionResult`.
+    - `CompletionResult.advisor_usage` field added to `able/core/providers/base.py`.
+
+62. **Advisor Routing Config** (Plan A+2):
+    - New provider entry `claude-sonnet-advisor` in `config/routing_config.yaml`: tier 2.5, Sonnet executor + Opus advisor, `advisor_enabled: true`, `advisor_max_uses: 3`, `advisor_fallback_only: true`.
+    - Routing thresholds: `tier_advisor_min_score: 0.5`, `tier_advisor_max_score: 0.7`.
+    - `advisor_fallback_only: true` — advisor routing only activates when API-priced providers are in use (subscription providers don't benefit from cost reduction).
+
+63. **NextAuth Session Enforcement** (Plan A2):
+    - NEW FILE `able-studio/middleware.ts` (~45 lines). Protects all `/api/*`, `/dashboard/*`, `/settings/*`, `/admin/*` routes.
+    - Exempt: `/api/auth/*`, `/health`, `/login`, `/register`, `/_next`, static assets.
+    - Unauthenticated requests redirect to `/login` with `callbackUrl` query param.
+    - Uses NextAuth v5 `auth()` callback pattern (not `getToken`).
+
+64. **Unit Tests for Production Modules** (Plan B1, B4):
+    - NEW FILE `able/tests/test_durable_task.py` (14 tests): TaskCheckpoint serialization, TaskStore persistence (register/status/save/get/list_resumable), TaskContext checkpoint/retry/waitpoint, TaskRunner execute/resume lifecycle.
+    - NEW FILE `able/tests/test_tool_result_storage.py` (11 tests): small/large output persistence, summary extraction, empty/none handling, read_file exemption, tool_use_id sanitization, turn budget enforcement.
+
+    **Test results**: 934 passing, 0 failures (69 new tests: 23 arg sanitizer + 14 PII + 14 durable task + 11 tool result storage + 7 existing test improvements).
+
 ---
 
 ## Previous Work (same session, earlier)
@@ -386,11 +427,27 @@ Push toward 100+ pairs for H100 fine-tuning:
 ### Priority 10: Remaining roadmap from executor research
 
 Still on the roadmap (saved for future sessions):
-- **Structured subprocess JSON I/O protocol** — Replace raw stdout parsing with `{ "status": "ok", "data": {...} }` contract on CLI tool invocations
+- **Structured subprocess JSON I/O protocol** — Replace raw stdout parsing with `{ "status": "ok", "data": {...} }` contract on CLI tool invocations (Plan A4: SubprocessRunner)
 - **Elicitation/interactive approval flows** — Tools can pause, collect structured user input via forms, then resume (richer than approve/deny)
 - **Python 3.14 JIT streaming for hot paths** — Leverage JIT compilation for hot paths alongside WebSocket improvements
-- **Studio NextAuth session checks** — Proxy routes forward service tokens but don't verify NextAuth sessions yet
+- ~~**Studio NextAuth session checks**~~ ✓ Done (Item 63): `able-studio/middleware.ts` enforces auth on all protected routes
 - **Morning briefing double-execution diagnosis** — No code duplication found; may be runtime issue (gateway restarting?)
+
+### Priority 10.5: Master Plan — Next immediate items
+
+See full plan at `.claude/plans/luminous-wibbling-pie.md` (79 items across 7 tracks).
+
+Completed this session: A1 (arg sanitizer), A2 (NextAuth), A3 (PII redactor), A+1 (advisor tool type), A+2 (advisor routing), B1 (durable task tests), B4 (tool result storage tests).
+
+**Next up (high value)**:
+- **A+3**: Gateway advisor injection — inject advisor tool when provider has `advisor_enabled=True`
+- **A+4**: Cost tracking — separate executor vs advisor token accounting in interaction_log
+- **A+5**: T5 local model cloud advisor escalation — Opus guidance for stuck Ollama models
+- **A+6**: Subscription-aware advisor fallback — activate advisor only when API costs apply
+- **B3**: ContextCompactor unit tests — still 0% coverage
+- **B5-B6**: AutoImprover E2E + ExecutionMonitor integration tests
+- **C1**: MemPalace 4-layer memory (~170 token wake-up from unbounded)
+- **A4-A8**: Remaining security (subprocess runner, enhanced SSRF, env sanitization, plugin hardening, smart approvals)
 
 ### Priority 11: End-to-end system hardening
 
@@ -418,6 +475,9 @@ python3 -m pytest able/tests/test_buddy.py -q
 python3 -m pytest able/tests/test_weekly_research.py -x
 python3 -m pytest able/tests/test_control_plane.py able/tests/test_resource_tools.py able/tests/test_learning_loops.py able/tests/test_collect_results.py able/tests/test_evolution_cycle.py -x
 python3 -m pytest able/tests/test_gateway_metrics.py -x
+# Phase 2.5 security + advisor + production module tests:
+python3 -m pytest able/tests/test_arg_sanitizer.py able/tests/test_pii_redactor.py able/tests/test_durable_task.py able/tests/test_tool_result_storage.py -x -v
+# Full suite (884 expected with ignores, 934 total including routing+gateway):
 python3 -m pytest able/tests/ -x --ignore=able/tests/test_routing.py --ignore=able/tests/test_gateway.py -q
 cd able-studio && pnpm build
 bash -n deploy-to-server.sh

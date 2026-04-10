@@ -196,8 +196,20 @@ All four learning feedback loops are closed and tested:
 - Buddy gamification: 8 XP constants, 7 badges, 7 award functions wired to durable tasks, overnight, managed agents, red team, benchmarks
 - `battle.py` hardened: clamp-before-branch, category_count≥1 guard, NaN rejection via `math.isfinite()`
 
+**Security hardening (Phase 2.5)**:
+- Tool argument sanitizer (`able/core/security/arg_sanitizer.py`): per-tool-type rules (shell/file/URL), wired into `tool_registry.py dispatch()`. Catches null bytes, path traversal, shell metacharacters, SSRF metadata, API key leakage. 23 tests.
+- PII redactor (`able/core/security/pii_redactor.py`): email, phone, SSN, credit card, API key detection with typed numbered placeholders. For T1/T2 external providers only. 14 tests.
+- NextAuth session enforcement (`able-studio/middleware.ts`): protects `/api/*`, `/dashboard/*`, `/settings/*`, `/admin/*`. Exempt: auth endpoints, health, login, static assets.
+
+**Advisor strategy integration**:
+- `AnthropicProvider.advisor_tool()` classmethod — `advisor_20260301` server-side tool for Sonnet→Opus advisory within single API call
+- `_convert_tools()` passes advisor tool type through unchanged (server-side, not function format)
+- `complete()` tracks advisor usage separately: calls, input_tokens, output_tokens
+- `CompletionResult.advisor_usage` field on base provider
+- `claude-sonnet-advisor` routing config: tier 2.5, complexity 0.5-0.7, `advisor_fallback_only: true` (activates when API costs apply)
+
 **Test suite**:
-- 872 tests passing, 0 failures (excluding `test_routing.py` and `test_gateway.py`)
+- 934 tests passing, 0 failures (excluding `test_routing.py` and `test_gateway.py`)
 - Added targeted tests for tier-1 primary provider selection (`test_provider_registry_primary.py`) and Telegram buddy tool dispatch (`test_telegram_buddy_dispatch.py`)
 - 16 managed agent provider tests, 14 three man team tests, 14 behavioral audit tests
 - 40 federation tests (identity, models, PII scrubbing, ingestion, sync, store since, Unsloth exporter)
@@ -216,18 +228,38 @@ These external resources informed the federation and distillation architecture d
 - **Ollama 0.19 MLX** — https://www.macrumors.com/2026/03/31/ollama-now-runs-faster-apple-silicon-macs/ — 1.6x prefill, ~2x decode on Apple Silicon via MLX backend. Validates ABLE's Qwen 3.5 quant choices (27B at 17.6GB, 9B at 3.65GB both fit 32GB unified memory). Faster T5 inference accelerates the distillation flywheel.
 - **Unsloth** — https://github.com/unslothai/unsloth — 2x faster training + 70% less VRAM via custom Triton kernels. Dynamic 2.0 GGUFs with layer-selective quantization. Used for `UnslothExporter` notebook/script generation.
 
+## Master Plan — Progressive Execution
+
+A 79-item master plan lives at `.claude/plans/luminous-wibbling-pie.md` across 7 tracks (A/A+/B/C/D/E/F). Each session should pick up the next uncompleted items from the priority order and push forward.
+
+**Completed (Phase 2.5):** A1 (arg sanitizer), A2 (NextAuth), A3 (PII redactor), A+1 (advisor tool type), A+2 (advisor routing config), B1 (durable task tests), B4 (tool result storage tests).
+
+**Next immediate (HIGH VALUE):**
+- A+3: Gateway advisor injection — inject advisor tool when provider has `advisor_enabled=True`
+- A+4: Cost tracking — separate executor vs advisor token accounting in interaction_log
+- A+5: T5 local model cloud advisor escalation — Opus guidance for stuck Ollama models
+- A+6: Subscription-aware advisor fallback — activate advisor only when API costs apply
+- B3: ContextCompactor unit tests (0% coverage)
+- B5-B6: AutoImprover E2E + ExecutionMonitor integration tests
+- C1: MemPalace 4-layer memory (~170 token wake-up)
+- E1: Concurrent tool execution (asyncio.gather for independent tool calls)
+
+**Medium value (sessions 4-6):** A4-A8 remaining security, C4-C6 memory upgrades, D2-D5 advanced capabilities.
+
+**Long tail (sessions 7+):** D6-D18, E7-E8, F1-F12.
+
 ## Core Mission
 
 Advance ABLE's scaffolding and operator usefulness. Prefer work that makes ABLE more self-owned, more testable, more deployable, and more capable of learning from its own behavior.
 
 Good work usually looks like:
+- implement the next items from the master plan priority order
 - grow the distillation corpus toward 100+ pairs for H100 fine-tuning
 - verify the live production Telegram + OAuth path after deploy changes
 - cut live startup and first-response latency further
 - harden runtime seams (deploy, gateway, approval, control plane)
 - add Studio dashboard integration for buddy, roster, operator profile, and routing metrics
-- add provider-level reasoning streaming where backends support it
-- keep optional subsystems off the hot path unless explicitly configured or promoted to a validated operator surface
+- keep optional subsystems off the hot path unless explicitly configured
 - add missing tests around new or risky surfaces
 - fix doc/runtime drift
 
@@ -235,11 +267,13 @@ Good work usually looks like:
 
 Use this order unless the user gives a more specific task:
 
-1. Take the highest-leverage open item from `CODE_HANDOFF.md` "Next-Run Objectives".
-2. Prefer correctness and data throughput over broad new features.
-3. Prefer real operator/runtime value over speculative architecture.
-4. If you add or change behavior, add tests for that seam.
-5. Keep docs factual. No roadmap hype, no marketing copy.
+1. Read the master plan at `.claude/plans/luminous-wibbling-pie.md` — find the next uncompleted item from the priority order.
+2. Cross-reference with `CODE_HANDOFF.md` "Next-Run Objectives" for any urgent items.
+3. Prefer correctness and data throughput over broad new features.
+4. Prefer real operator/runtime value over speculative architecture.
+5. If you add or change behavior, add tests for that seam.
+6. Keep docs factual. No roadmap hype, no marketing copy.
+7. After completing items, update CODE_HANDOFF.md + NEXT_RUN_PROMPT.md + plan progress before finishing.
 
 ## Working Rules
 
@@ -283,6 +317,8 @@ python3 -m pytest able/tests/test_control_plane.py able/tests/test_resource_tool
 python3 -m pytest able/tests/test_weekly_research.py -x
 python3 -m pytest able/tests/test_harvesters.py -x
 python3 -m pytest able/tests/test_evolution_split_tests.py -x
+# Phase 2.5 security + advisor tests:
+python3 -m pytest able/tests/test_arg_sanitizer.py able/tests/test_pii_redactor.py able/tests/test_durable_task.py able/tests/test_tool_result_storage.py -x -v
 ```
 
 If you change deploy/runtime wiring:

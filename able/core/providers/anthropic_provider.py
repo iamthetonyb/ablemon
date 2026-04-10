@@ -39,6 +39,7 @@ class AnthropicProvider(LLMProvider):
     PREMIUM_MODEL = "claude-opus-4-6"
     BASE_URL = "https://api.anthropic.com/v1"
     API_VERSION = "2023-06-01"
+    ADVISOR_TOOL_TYPE = "advisor_20260301"
 
     # Model pricing ($ per million tokens)
     MODEL_PRICING = {
@@ -76,6 +77,25 @@ class AnthropicProvider(LLMProvider):
         self._session: Optional[aiohttp.ClientSession] = None
         self.extended_thinking = extended_thinking
         self.thinking_budget_tokens = thinking_budget_tokens
+
+    @classmethod
+    def advisor_tool(cls, max_uses: int = 3, advisor_model: str = None) -> Dict:
+        """Return the advisor tool declaration for Anthropic's advisor strategy.
+
+        The advisor_20260301 server-side tool lets a cost-effective executor
+        (Sonnet/Haiku) escalate to a frontier advisor (Opus) within a single
+        /v1/messages call — no orchestration overhead.
+
+        Args:
+            max_uses: Maximum advisor invocations per request (cost control).
+            advisor_model: Override advisor model (defaults to PREMIUM_MODEL).
+        """
+        return {
+            "type": cls.ADVISOR_TOOL_TYPE,
+            "name": "advisor",
+            "advisor_model": advisor_model or cls.PREMIUM_MODEL,
+            "max_uses": max_uses,
+        }
 
     @property
     def name(self) -> str:
@@ -133,10 +153,17 @@ class AnthropicProvider(LLMProvider):
         return system, converted
 
     def _convert_tools(self, tools: List[Dict]) -> List[Dict]:
-        """Convert OpenAI tool format to Anthropic format"""
+        """Convert OpenAI tool format to Anthropic format.
+
+        Advisor tools (type=advisor_20260301) pass through unchanged —
+        they're server-side tools handled by Anthropic's API.
+        """
         converted = []
         for tool in tools:
-            if tool.get("type") == "function":
+            if tool.get("type") == self.ADVISOR_TOOL_TYPE:
+                # Advisor tool — pass through as-is (server-side)
+                converted.append(tool)
+            elif tool.get("type") == "function":
                 func = tool["function"]
                 converted.append({
                     "name": func["name"],
@@ -254,6 +281,22 @@ class AnthropicProvider(LLMProvider):
                 input_tokens = usage.get("input_tokens", 0)
                 output_tokens = usage.get("output_tokens", 0)
 
+                # Advisor strategy: track advisor token usage separately
+                advisor_usage = None
+                advisor_data = usage.get("advisor_usage")
+                if advisor_data:
+                    advisor_usage = {
+                        "calls": advisor_data.get("calls", 0),
+                        "input_tokens": advisor_data.get("input_tokens", 0),
+                        "output_tokens": advisor_data.get("output_tokens", 0),
+                    }
+                    logger.info(
+                        "Advisor usage: %d calls, %d in / %d out tokens",
+                        advisor_usage["calls"],
+                        advisor_usage["input_tokens"],
+                        advisor_usage["output_tokens"],
+                    )
+
                 result = CompletionResult(
                     content=content_text,
                     finish_reason=data.get("stop_reason", "end_turn"),
@@ -268,6 +311,7 @@ class AnthropicProvider(LLMProvider):
                     cost=self.calculate_cost(input_tokens, output_tokens),
                     raw_response=data,
                     thinking_content=thinking_text if thinking_text else None,
+                    advisor_usage=advisor_usage,
                 )
 
                 return result

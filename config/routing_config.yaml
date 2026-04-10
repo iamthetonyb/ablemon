@@ -258,6 +258,33 @@ providers:
       thinking_budget_tokens: 16000
       timeout: 300.0
 
+  # ── Tier 2.5: Advisor-Enhanced Sonnet (cost safety net) ──────────
+  # Sonnet executor + Opus advisor within a single API call.
+  # Activates for 0.5-0.7 complexity ONLY when API-priced providers are
+  # in use (subscription providers are already $0). Saves ~80% vs full Opus.
+  # Source: https://claude.com/blog/the-advisor-strategy
+  - name: "claude-sonnet-advisor"
+    tier: 4
+    provider_type: "anthropic"
+    endpoint: "https://api.anthropic.com"
+    model_id: "claude-sonnet-4-6"
+    cost_per_m_input: 3.00
+    cost_per_m_output: 15.00
+    max_context: 200000
+    supports_tools: true
+    supports_vision: true
+    throughput_tps: 50
+    enabled: true
+    fallback_to: "claude-opus-4-6-api"
+    api_key_env: "ANTHROPIC_API_KEY"
+    extra:
+      advisor_enabled: true
+      advisor_model: "claude-opus-4-6"
+      advisor_max_uses: 3
+      advisor_fallback_only: true
+      description: "Sonnet executor + Opus advisor — near-Opus quality at ~20% of Opus API cost"
+      timeout: 300.0
+
   # ── Tier 5: Ollama (Server) — Gemma 4 31B cloud ─────────────────
   # Uses Ollama cloud inference (gemma4:31b-cloud) — saves 18.8GB on server.
   # Runs on Ollama's NVIDIA Blackwell/Vera Rubin hardware, not local CPU/GPU.
@@ -339,6 +366,10 @@ routing:
   tier_1_max_score: 0.4    # Scores below this → Tier 1
   tier_2_max_score: 0.7    # Scores 0.4-0.7 → Tier 2
   tier_4_min_score: 0.7    # Scores above this → Tier 4 (with budget gate)
+  # Advisor strategy: borderline complexity uses Sonnet+Opus advisor
+  # instead of full Opus when API billing is active (not subscription).
+  tier_advisor_min_score: 0.5  # Lower bound for advisor-eligible requests
+  tier_advisor_max_score: 0.7  # Upper bound (above this → full T4)
 
 # ── Shootout Data (2026-03-19) ─────────────────────────────────
 # Benchmark: 5 diverse tasks (code, security, copy, research, planning)

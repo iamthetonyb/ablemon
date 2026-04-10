@@ -256,6 +256,17 @@ class ToolRegistry:
             return f"❓ Unknown tool: {name}"
 
         try:
+            # ── Sanitize tool arguments before execution ──────────
+            from able.core.security.arg_sanitizer import (
+                sanitize_tool_args, ToolArgRejected,
+            )
+            try:
+                sanitized = sanitize_tool_args(name, args)
+                args = sanitized.args
+            except ToolArgRejected as e:
+                logger.warning("Tool arg rejected: %s", e)
+                return f"🛡️ Blocked: {e}"
+
             context.metadata.pop("approval_result", None)
 
             # Handle approval for write tools

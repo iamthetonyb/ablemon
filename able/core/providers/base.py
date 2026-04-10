@@ -125,6 +125,7 @@ class CompletionResult:
     cost: float = 0.0
     raw_response: Optional[Dict] = None
     thinking_content: Optional[str] = None  # Raw thinking tokens preserved for distillation
+    advisor_usage: Optional[Dict] = None  # Advisor strategy: {"calls": N, "input_tokens": N, "output_tokens": N}
 
     def to_message(self) -> Message:
         """Convert result to assistant message"""
