@@ -16,12 +16,12 @@
     "@ai-sdk/openai": "^3.0.52",
     "@ai-sdk/react": "^3.0.160",
     "@auth/drizzle-adapter": "^1.7.0",
-    "@neondatabase/serverless": "^0.10.0",
+    "@neondatabase/serverless": "^1.0.2",
     "@tailwindcss/postcss": "^4.2.2",
     "ai": "^6.0.158",
-    "bcryptjs": "^2.4.3",
+    "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.44.7",
-    "lucide-react": "^0.577.0",
+    "lucide-react": "^1.8.0",
     "next": "^16.2.3",
     "next-auth": "^5.0.0-beta.25",
     "react": "^19.2.5",
@@ -35,7 +35,7 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@webgpu/types": "^0.1.69",
-    "drizzle-kit": "^0.30.0",
+    "drizzle-kit": "^0.30.6",
     "typescript": "^5.8.0"
   }
 }

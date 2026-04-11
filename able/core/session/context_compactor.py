@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 # Default context thresholds (configurable via env vars)
 COMPACT_THRESHOLD = float(os.environ.get("ABLE_COMPACT_THRESHOLD", "0.80"))
-COMPACT_RATIO = float(os.environ.get("ABLE_COMPACT_RATIO", "0.25"))
+COMPACT_RATIO = float(os.environ.get("ABLE_COMPACT_RATIO", "0.75"))
 SUMMARY_TOKEN_BUDGET = int(os.environ.get("ABLE_SUMMARY_TOKEN_BUDGET", "500"))
 
 # Death spiral prevention (Hermes PR #4750 + post-v0.8 tail protection)
@@ -61,8 +61,8 @@ class ContextCompactor:
     """
     Manages context window compaction for long conversations.
 
-    At 80% of the model's context limit, compacts to 25% of max tokens,
-    freeing 75% for new conversation. Uses UM-compressed summaries.
+    At 80% of the model's context limit, compacts 75% of messages into a
+    summary, keeping the most recent 25%. Uses UM-compressed summaries.
     """
 
     def __init__(

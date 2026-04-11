@@ -45,8 +45,19 @@ class SharedScratchpad:
             root = Path(__file__).resolve().parents[3]
             db_path = str(root / "data" / "scratchpad.db")
         self._db_path = db_path
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._init_db()
+        self._initialized = False
+
+    def _ensure_init(self):
+        """Lazy init — only create DB on first actual use."""
+        if self._initialized:
+            return
+        try:
+            Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+            self._init_db()
+            self._initialized = True
+        except Exception:
+            logger.warning("Scratchpad DB init failed — operating without cache", exc_info=True)
+            self._initialized = False
 
     def _init_db(self):
         """Create table if not exists."""
@@ -92,6 +103,9 @@ class SharedScratchpad:
             entry_type: "finding", "file_summary", "decision", "error"
         """
         now = time.time()
+        self._ensure_init()
+        if not self._initialized:
+            return
         serialized = json.dumps(value) if not isinstance(value, str) else value
 
         with sqlite3.connect(self._db_path) as conn:
@@ -108,6 +122,9 @@ class SharedScratchpad:
 
     def get(self, key: str, namespace: str = "global") -> Optional[str]:
         """Read a finding. Returns None if expired or missing."""
+        self._ensure_init()
+        if not self._initialized:
+            return None
         now = time.time()
         with sqlite3.connect(self._db_path) as conn:
             row = conn.execute(
@@ -119,6 +136,9 @@ class SharedScratchpad:
 
     def get_all(self, namespace: str = "global") -> List[Dict[str, str]]:
         """Get all non-expired entries in a namespace."""
+        self._ensure_init()
+        if not self._initialized:
+            return []
         now = time.time()
         with sqlite3.connect(self._db_path) as conn:
             conn.row_factory = sqlite3.Row
@@ -132,25 +152,33 @@ class SharedScratchpad:
         return [dict(r) for r in rows]
 
     def get_context_block(
-        self, namespace: str = "global", max_entries: int = 20
+        self, namespace: str = "global", max_entries: int = 10, max_chars: int = 2000
     ) -> str:
         """Generate a compact context block for agent injection.
 
         Returns UM-compressed summary of scratchpad entries
         suitable for prepending to agent prompts.
+
+        Args:
+            max_entries: Cap on number of entries (default 10)
+            max_chars: Total char budget for the block (default 2000)
         """
         entries = self.get_all(namespace)[:max_entries]
         if not entries:
             return ""
 
         lines = ["[SCRATCHPAD — prior agent findings]"]
+        total_chars = 0
         for e in entries:
             src = f" ({e['source_agent']})" if e.get("source_agent") else ""
-            # Truncate value for context injection
-            val = e["value"][:300]
-            if len(e["value"]) > 300:
+            val = e["value"][:200]
+            if len(e["value"]) > 200:
                 val += "..."
-            lines.append(f"- {e['key']}{src}: {val}")
+            line = f"- {e['key']}{src}: {val}"
+            if total_chars + len(line) > max_chars:
+                break
+            lines.append(line)
+            total_chars += len(line)
         lines.append("[/SCRATCHPAD]")
         return "\n".join(lines)
 
