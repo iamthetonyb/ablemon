@@ -181,17 +181,39 @@ class BaseHarvester(ABC):
         text = re.sub(r"\n{3,}", "\n\n", text).strip()
         return text
 
-    @staticmethod
-    def _truncate_tool_result(content: str) -> str:
+    # Edit/Write success patterns — extract path, discard verbose confirmation
+    _EDIT_RESULT_RE = re.compile(
+        r"(?:The file (\S+) has been (?:updated|created|written) successfully)"
+        r"|(?:File (?:updated|written|created):? (\S+))",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _truncate_tool_result(cls, content: str) -> str:
         """Truncate bloated tool results (file dumps, diffs).
 
         Tool results over 2000 chars are almost always raw file content
         or git diffs — not useful for teaching reasoning.  Keep the first
         and last lines so the model sees what tool was called and a hint
         of the output shape, but discard the bulk.
+
+        Special handling:
+        - Edit/Write results: extract path + confirmation only
+        - Persisted pointers: keep as-is (already compact)
         """
         if len(content) <= _MAX_TOOL_RESULT_CHARS:
             return content
+
+        # Already a persistence pointer — compact, keep it
+        if content.startswith("[Full output saved to"):
+            return content[:500]
+
+        # Edit/Write confirmations buried in verbose output — extract
+        m = cls._EDIT_RESULT_RE.search(content)
+        if m:
+            path = m.group(1) or m.group(2) or "file"
+            return f"[Edit: {path} updated successfully]"
+
         head = content[:800]
         tail = content[-200:]
         return f"{head}\n[... {len(content) - 1000} chars truncated for training ...]\n{tail}"

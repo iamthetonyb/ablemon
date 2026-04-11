@@ -89,7 +89,19 @@ class ContextCompactor:
             elif isinstance(content, list):
                 for block in content:
                     if isinstance(block, dict):
-                        total_chars += len(str(block.get("text", "")))
+                        btype = block.get("type", "")
+                        if btype == "text":
+                            total_chars += len(str(block.get("text", "")))
+                        elif btype == "tool_use":
+                            # Count tool inputs — Edit old_string/new_string
+                            # are often the largest context consumers
+                            inp = block.get("input", {})
+                            total_chars += len(json.dumps(inp)) if isinstance(inp, dict) else len(str(inp))
+                        elif btype == "tool_result":
+                            rc = block.get("content", "")
+                            total_chars += len(rc) if isinstance(rc, str) else len(str(rc))
+                        else:
+                            total_chars += len(str(block.get("text", "")))
                     else:
                         total_chars += len(str(block))
             # Add overhead for role, tool calls, etc.
@@ -153,6 +165,16 @@ class ContextCompactor:
             logger.info("read_file dedup sufficient: reclaimed ~%d tokens", _saved)
             return deduped
         messages = deduped
+
+        # ── Layer 2.5: Compress verbose tool results ─────────────
+        # Edit/Write confirmations, large Read outputs in old messages,
+        # and WebFetch content blocks waste context when kept verbatim.
+        tool_compressed = self._compress_tool_results(messages)
+        if not self.needs_compaction(tool_compressed, context_limit):
+            _saved = self.estimate_tokens(messages) - self.estimate_tokens(tool_compressed)
+            logger.info("Tool result compression sufficient: reclaimed ~%d tokens", _saved)
+            return tool_compressed
+        messages = tool_compressed
 
         # ── Layer 3: Recency-weighted compression (C4) ────────────
         recency_compressed = self._recency_compress(messages)
@@ -312,6 +334,224 @@ class ContextCompactor:
         logger.debug("read_file dedup: removing %d duplicate reads", len(remove_indices))
         return [m for i, m in enumerate(messages) if i not in remove_indices]
 
+    # ── Layer 2.5: Tool result compression ──────────────────────────
+    # Patterns that waste tokens in context:
+    # 1. Edit/Write confirmations — "The file X has been updated successfully" repeated
+    # 2. Large Read/WebFetch content blocks in old messages — full file dumps
+    # 3. Redundant content: same text appears in Read result AND Edit old_string
+
+    # Regex for Edit/Write success confirmations
+    _EDIT_SUCCESS_RE = re.compile(
+        r"(?:The file (\S+) has been (?:updated|created|written) successfully\.?)"
+        r"|(?:File (?:updated|written|created):? (\S+))",
+        re.IGNORECASE,
+    )
+
+    # Tools whose results can be aggressively compressed in older messages
+    _COMPRESSIBLE_TOOLS = frozenset({
+        "Edit", "edit_file", "Write", "write_file",
+        "WebFetch", "web_fetch", "WebSearch", "web_search",
+    })
+
+    def _compress_tool_results(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Compress verbose tool results while preserving actionable content.
+
+        Targets:
+        - Edit/Write confirmations → compact "[Edit: path updated]"
+        - Large Read outputs in older half → truncate to first/last lines
+        - WebFetch content blocks → truncate to summary
+        - Persisted tool result pointers → keep as-is (already compact)
+        """
+        n = len(messages)
+        if n < 4:
+            return messages
+
+        # Only compress older half — recent messages need full context
+        compress_boundary = n // 2
+        result = []
+
+        for i, msg in enumerate(messages):
+            if i >= compress_boundary:
+                result.append(msg)
+                continue
+
+            content = msg.get("content", "")
+
+            # String content — compress Edit/Write confirmations
+            if isinstance(content, str):
+                compressed = self._compress_text_result(content)
+                if compressed != content:
+                    result.append({**msg, "content": compressed})
+                else:
+                    result.append(msg)
+                continue
+
+            # List content — compress tool_use, tool_result, and text blocks
+            if isinstance(content, list):
+                new_blocks = []
+                for block in content:
+                    if not isinstance(block, dict):
+                        new_blocks.append(block)
+                        continue
+
+                    block_type = block.get("type", "")
+
+                    # Compress Edit/Write tool_use blocks — the main waste
+                    # old_string + new_string are nearly identical, replace
+                    # with compact diff summary
+                    if block_type == "tool_use":
+                        new_blocks.append(self._compress_tool_use_block(block))
+                        continue
+
+                    # Compress tool_result blocks
+                    if block_type == "tool_result":
+                        new_blocks.append(self._compress_tool_result_block(block))
+                        continue
+
+                    # Compress text blocks containing tool output
+                    if block_type == "text":
+                        text = block.get("text", "")
+                        compressed = self._compress_text_result(text)
+                        if compressed != text:
+                            new_blocks.append({**block, "text": compressed})
+                            continue
+
+                    new_blocks.append(block)
+
+                result.append({**msg, "content": new_blocks})
+                continue
+
+            result.append(msg)
+
+        return result
+
+    def _compress_tool_use_block(self, block: Dict[str, Any]) -> Dict[str, Any]:
+        """Compress a tool_use block, especially Edit/Write with redundant content.
+
+        The Edit tool sends full old_string + new_string even when only 1 word
+        changed. In older messages, replace with compact diff summary:
+        '[Edit file.py: "old text" → "new text"]'
+        """
+        name = block.get("name", "")
+        inp = block.get("input", {})
+        if not isinstance(inp, dict):
+            return block
+
+        # Only compress Edit/Write tool_use blocks
+        if name not in self._COMPRESSIBLE_TOOLS:
+            return block
+
+        old = inp.get("old_string", "")
+        new = inp.get("new_string", "")
+        path = inp.get("file_path", "")
+
+        # Edit with old_string/new_string — compute actual diff
+        if old and new and len(old) > 100:
+            # Find the actual changed portion
+            diff_summary = self._diff_strings(old, new)
+            short_path = path.rsplit("/", 1)[-1] if "/" in path else path
+            compact_input = {
+                "file_path": path,
+                "_compressed": True,
+                "_summary": f"{short_path}: {diff_summary}",
+            }
+            return {**block, "input": compact_input}
+
+        # Write with large content — summarize
+        content_field = inp.get("content", "")
+        if isinstance(content_field, str) and len(content_field) > 500:
+            short_path = path.rsplit("/", 1)[-1] if "/" in path else path
+            compact_input = {
+                "file_path": path,
+                "_compressed": True,
+                "_summary": f"Wrote {len(content_field)} chars to {short_path}",
+            }
+            return {**block, "input": compact_input}
+
+        return block
+
+    @staticmethod
+    def _diff_strings(old: str, new: str) -> str:
+        """Compute a compact human-readable diff between two strings.
+
+        Returns something like: '"8-layer" → "10-layer"' or
+        '3 lines changed' for larger diffs.
+        """
+        if old == new:
+            return "(no change)"
+
+        # Find common prefix/suffix to isolate the actual change
+        prefix_len = 0
+        for a, b in zip(old, new):
+            if a == b:
+                prefix_len += 1
+            else:
+                break
+
+        suffix_len = 0
+        for a, b in zip(reversed(old), reversed(new)):
+            if a == b and suffix_len < len(old) - prefix_len and suffix_len < len(new) - prefix_len:
+                suffix_len += 1
+            else:
+                break
+
+        old_changed = old[prefix_len:len(old) - suffix_len if suffix_len else len(old)]
+        new_changed = new[prefix_len:len(new) - suffix_len if suffix_len else len(new)]
+
+        # If the change is small enough, show it inline
+        if len(old_changed) < 80 and len(new_changed) < 80:
+            return f'"{old_changed.strip()}" → "{new_changed.strip()}"'
+
+        # Larger change — summarize by line count
+        old_lines = old_changed.count("\n") + 1
+        new_lines = new_changed.count("\n") + 1
+        return f"{old_lines} lines → {new_lines} lines ({len(new) - len(old):+d} chars)"
+
+    def _compress_text_result(self, text: str) -> str:
+        """Compress a text string that may contain tool output."""
+        if len(text) < 200:
+            return text
+
+        # Already a persistence pointer — keep as-is
+        if text.startswith("[Full output saved to"):
+            return text
+
+        # Edit/Write success confirmations — extract just the path
+        m = self._EDIT_SUCCESS_RE.search(text)
+        if m:
+            path = m.group(1) or m.group(2) or "file"
+            return f"[Edit: {path} updated]"
+
+        # Large tool output (>1000 chars) in old messages — keep head + tail
+        if len(text) > 1000:
+            head = text[:300]
+            tail = text[-100:]
+            saved = len(text) - 400
+            return f"{head}\n[...{saved} chars compressed...]\n{tail}"
+
+        return text
+
+    def _compress_tool_result_block(self, block: Dict[str, Any]) -> Dict[str, Any]:
+        """Compress a tool_result content block."""
+        content = block.get("content", "")
+
+        if isinstance(content, str):
+            compressed = self._compress_text_result(content)
+            if compressed != content:
+                return {**block, "content": compressed}
+        elif isinstance(content, list):
+            new_parts = []
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    text = part.get("text", "")
+                    compressed = self._compress_text_result(text)
+                    new_parts.append({**part, "text": compressed})
+                else:
+                    new_parts.append(part)
+            return {**block, "content": new_parts}
+
+        return block
+
     # ── C4: Recency-weighted compression ──────────────────────────
 
     def _recency_compress(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -448,6 +688,29 @@ class ContextCompactor:
         if tool_calls:
             sections.append("\n**Tool calls executed:**")
             sections.extend(tool_calls[:10])
+
+        # 2b. Extract tool result summaries (Edit/Write confirmations)
+        tool_results = []
+        for msg in messages:
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                m = self._EDIT_SUCCESS_RE.search(content)
+                if m:
+                    path = m.group(1) or m.group(2) or "file"
+                    tool_results.append(f"- {path} updated")
+            elif isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                        rc = block.get("content", "")
+                        if isinstance(rc, str):
+                            rm = self._EDIT_SUCCESS_RE.search(rc)
+                            if rm:
+                                path = rm.group(1) or rm.group(2) or "file"
+                                tool_results.append(f"- {path} updated")
+        if tool_results:
+            sections.append("\n**Files modified:**")
+            # Deduplicate (same file edited multiple times)
+            sections.extend(list(dict.fromkeys(tool_results))[:10])
 
         # 3. Extract key decisions / assistant conclusions
         assistant_conclusions = []

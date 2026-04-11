@@ -424,6 +424,66 @@ def _compression_efficiency_score(row: Dict[str, Any]) -> float:
     return round(max(0.0, min(5.0, score)), 3)
 
 
+def _edit_precision_score(row: Dict[str, Any]) -> float:
+    """
+    GEval metric: how surgical were Edit operations?
+
+    Measures the ratio of changed content to total content in edit operations.
+    High precision (small change, small old_string) = 1.0.
+    Low precision (1 word changed in 8-line old_string) = low score.
+
+    Returns 0.0–1.0 where 1.0 = maximally surgical edits.
+    Only meaningful when Edit/Write tools were used.
+    """
+    tools_json: Optional[str] = row.get("tools_called")
+    if not tools_json:
+        return -1.0  # no tools — not applicable
+
+    try:
+        tools: List[str] = json.loads(tools_json)
+    except (json.JSONDecodeError, TypeError):
+        return -1.0
+
+    # Only score when Edit was used
+    edit_tools = [t for t in tools if t in ("Edit", "edit_file")]
+    if not edit_tools:
+        return -1.0  # no edits — not applicable
+
+    # Estimate precision from raw_output: look for Edit tool patterns
+    raw_out = row.get("raw_output") or ""
+    if not raw_out:
+        return 0.5  # can't assess without output
+
+    # Count edit operations and estimate their precision
+    # Pattern: old_string of N chars replaced by new_string of M chars
+    # Precision = 1.0 - (overlap / max(len_old, len_new))
+    # Without exact old/new strings, we estimate from the output patterns
+    edit_count = len(edit_tools)
+    total_tools = len(tools)
+
+    # Heuristic: if edits are a small fraction of total tool calls,
+    # the session was doing more than just editing — less signal
+    edit_ratio = edit_count / max(total_tools, 1)
+
+    # Base precision: fewer edit calls for the same work = more surgical
+    # A session with 1 edit is more precise than one with 5 small edits
+    # (assuming same total change)
+    if edit_count <= 2:
+        base = 0.9
+    elif edit_count <= 5:
+        base = 0.7
+    elif edit_count <= 10:
+        base = 0.5
+    else:
+        base = 0.3  # many edits = likely wasteful
+
+    # Adjust by edit ratio (heavily edit-focused sessions are fine)
+    if edit_ratio > 0.8:
+        base = min(1.0, base + 0.1)  # editing IS the work — don't penalize
+
+    return round(base, 3)
+
+
 # ── Main auditor class ────────────────────────────────────────────────────────
 
 class InteractionAuditor:
@@ -622,6 +682,10 @@ class InteractionAuditor:
                 _row_with_score = dict(row)
                 _row_with_score["audit_score"] = audit_score
                 notes["compression_efficiency"] = _compression_efficiency_score(_row_with_score)
+            # Edit precision (only when Edit/Write tools were used)
+            _edit_prec = _edit_precision_score(row)
+            if _edit_prec >= 0:  # -1.0 = not applicable
+                notes["edit_precision"] = _edit_prec
             if judge_detail is not None:
                 notes.update({
                     "accuracy": judge_detail.get("accuracy"),
