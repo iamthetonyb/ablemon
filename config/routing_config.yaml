@@ -264,7 +264,7 @@ providers:
   # in use (subscription providers are already $0). Saves ~80% vs full Opus.
   # Source: https://claude.com/blog/the-advisor-strategy
   - name: "claude-sonnet-advisor"
-    tier: 4
+    tier: 4  # Conceptual band 2.5 in CLAUDE.md; uses tier 4 in fallback chain
     provider_type: "anthropic"
     endpoint: "https://api.anthropic.com"
     model_id: "claude-sonnet-4-6"

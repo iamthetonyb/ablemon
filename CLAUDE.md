@@ -22,7 +22,7 @@ ABLE uses a **complexity-scored 5-tier routing system** (see `docs/ROUTING.md` f
 | 0.5–0.7 | 2.5 | Claude Sonnet 4.6 + Opus advisor (API fallback only) | ~$3/$15 per M |
 | > 0.7 | 4 | Managed Agents Opus (SSE) → Claude Code CLI (Max sub) → Opus API ($15/$75) | $0 (Max sub) |
 | background | 3 | MiniMax M2.7 (evolution daemon only, OpenRouter) | $0.30/$1.20 per M |
-| offline | 5 | Gemma 4 E4B (Ollama, primary) → Gemma 4 31B cloud → Qwen 3.5 27B/9B UD (local) | FREE |
+| offline | 5 | Gemma 4 E4B (Ollama, primary) → Gemma 4 31B cloud → Qwen 3.5 9B UD (local) | FREE |
 
 Pipeline: User → TrustGate → Scanner → Auditor → **Enricher** → Scorer → Provider
 
