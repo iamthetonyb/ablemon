@@ -103,6 +103,14 @@ class ContextCompactor:
         estimated = self.estimate_tokens(messages)
         return estimated > (context_limit * self.threshold)
 
+    # Recency-weighted content limits (C4 — mini-coding-agent pattern)
+    # Graduated compression: oldest messages get heaviest truncation
+    _RECENCY_LIMITS = {
+        "old": 180,      # Oldest 40% — compressed to 180 chars
+        "mid": 500,      # Middle 30% — keep up to 500 chars
+        "recent": 900,   # Recent 30% — keep up to 900 chars
+    }
+
     def compact_if_needed(
         self,
         messages: List[Dict[str, Any]],
@@ -112,26 +120,21 @@ class ContextCompactor:
         """
         Compact messages if approaching context limit.
 
+        Strategy (layered, cheapest first):
+        1. Strip thinking blocks (free — just removes <think> tags)
+        2. Dedup repeated read_file calls on same path (C4)
+        3. Recency-weighted compression (C4 — graduated, not binary split)
+        4. Full extractive summary of oldest chunk (original fallback)
+
         Includes death spiral prevention (Hermes PR #4750):
         - Hard cap on compression attempts (default 3)
         - Verifies compression actually reduces message count
         - Preserves minimum tail messages for continuity
-
-        Args:
-            messages: Full conversation history.
-            context_limit: Model's context window in tokens.
-            summary_fn: Optional async function to generate LLM summary.
-                        If None, uses extractive summarization.
-
-        Returns:
-            Compacted message list with summary replacing old messages.
         """
         if not self.needs_compaction(messages, context_limit):
             return messages
 
-        # ── Strip-thinking recovery (gemma-gem pattern) ──────────
-        # Before full compression, try stripping thinking blocks first.
-        # This is cheaper (no summarization) and preserves more context.
+        # ── Layer 1: Strip-thinking recovery (gemma-gem pattern) ──
         stripped = self._strip_thinking_blocks(messages)
         if not self.needs_compaction(stripped, context_limit):
             _saved_tokens = self.estimate_tokens(messages) - self.estimate_tokens(stripped)
@@ -141,16 +144,30 @@ class ContextCompactor:
                 _saved_tokens,
             )
             return stripped
-        # If stripping wasn't enough, continue with stripped messages
-        # (still helps reduce load before full compaction)
         messages = stripped
 
-        # Death spiral guard: stop after max attempts per session
+        # ── Layer 2: Dedup repeated read_file calls (C4) ──────────
+        deduped = self._dedup_read_file(messages)
+        if not self.needs_compaction(deduped, context_limit):
+            _saved = self.estimate_tokens(messages) - self.estimate_tokens(deduped)
+            logger.info("read_file dedup sufficient: reclaimed ~%d tokens", _saved)
+            return deduped
+        messages = deduped
+
+        # ── Layer 3: Recency-weighted compression (C4) ────────────
+        recency_compressed = self._recency_compress(messages)
+        if not self.needs_compaction(recency_compressed, context_limit):
+            _saved = self.estimate_tokens(messages) - self.estimate_tokens(recency_compressed)
+            logger.info("Recency compression sufficient: reclaimed ~%d tokens", _saved)
+            return recency_compressed
+        messages = recency_compressed
+
+        # ── Layer 4: Full extractive summary (original fallback) ──
+        # Death spiral guard
         if self._compression_attempts >= self.max_attempts:
             logger.error(
                 "Context compaction death spiral: %d/%d attempts exhausted. "
-                "Context is at %d tokens vs %d limit. "
-                "Consider reducing message size or increasing context limit.",
+                "Context is at %d tokens vs %d limit.",
                 self._compression_attempts,
                 self.max_attempts,
                 self.estimate_tokens(messages),
@@ -166,20 +183,17 @@ class ContextCompactor:
         if compact_count < 2:
             return messages
 
-        # Tail protection: always keep at least MIN_TAIL_MESSAGES recent messages
+        # Tail protection
         keep_count = max(total - compact_count, MIN_TAIL_MESSAGES)
         compact_count = total - keep_count
         if compact_count < 2:
             return messages
 
-        # Split into old (to summarize) and recent (to keep)
         old_messages = messages[:compact_count]
         recent_messages = messages[compact_count:]
 
-        # Extract key information from old messages
         summary = self._extractive_summary(old_messages)
 
-        # Build the continuation signal
         summary_message = {
             "role": "system",
             "content": (
@@ -193,7 +207,6 @@ class ContextCompactor:
         new_tokens = self.estimate_tokens(result)
         old_tokens = self.estimate_tokens(messages)
 
-        # Verify compression actually reduced size — prevents no-op loops
         if len(result) >= original_len:
             logger.warning(
                 "Compaction produced no reduction (%d → %d messages). "
@@ -216,13 +229,12 @@ class ContextCompactor:
             self.max_attempts,
         )
 
-        # Store compaction event for telemetry (gateway reads this at update_result time)
-        # Accumulate: first compaction's tokens_before + latest tokens_after = true savings
+        # Telemetry event (accumulated across compactions)
         if self._first_tokens_before is None:
             self._first_tokens_before = old_tokens
         _event = {
             "event": "context_compaction",
-            "tokens_before": self._first_tokens_before,  # Original size before any compaction
+            "tokens_before": self._first_tokens_before,
             "tokens_after": new_tokens,
             "ratio": round(new_tokens / max(self._first_tokens_before, 1), 4),
             "messages_before": total,
@@ -232,7 +244,6 @@ class ContextCompactor:
         }
         self._last_compaction_event = _event
 
-        # Emit via callback if configured
         if self._event_callback is not None:
             try:
                 self._event_callback(_event)
@@ -240,6 +251,103 @@ class ContextCompactor:
                 logger.debug("Compression event callback failed", exc_info=True)
 
         return result
+
+    # ── C4: Dedup repeated read_file calls ────────────────────────
+
+    def _dedup_read_file(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Remove duplicate read_file tool results for the same path.
+
+        If the same file was read multiple times and NOT written between reads,
+        keep only the last read. Written files invalidate the dedup since content
+        may have changed.
+        """
+        # Build a set of written file paths
+        written_paths: set = set()
+        read_indices: Dict[str, List[int]] = {}  # path → [indices of read messages]
+
+        for i, msg in enumerate(messages):
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") == "tool_use":
+                        name = block.get("name", "")
+                        inp = block.get("input", {})
+                        if isinstance(inp, dict):
+                            path = inp.get("file_path") or inp.get("path", "")
+                            if name in ("read_file", "Read") and path:
+                                read_indices.setdefault(path, []).append(i)
+                            elif name in ("write_file", "Write", "edit_file", "Edit") and path:
+                                written_paths.add(path)
+
+        # Find indices to remove: for each path not written, remove all but last read
+        remove_indices: set = set()
+        for path, indices in read_indices.items():
+            if path in written_paths:
+                continue  # File was modified — keep all reads
+            if len(indices) > 1:
+                # Keep only the last read
+                for idx in indices[:-1]:
+                    remove_indices.add(idx)
+
+        if not remove_indices:
+            return messages
+
+        logger.debug("read_file dedup: removing %d duplicate reads", len(remove_indices))
+        return [m for i, m in enumerate(messages) if i not in remove_indices]
+
+    # ── C4: Recency-weighted compression ──────────────────────────
+
+    def _recency_compress(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Apply graduated compression based on message recency.
+
+        Old messages (first 40%): truncate content to 180 chars
+        Mid messages (next 30%): truncate to 500 chars
+        Recent messages (last 30%): keep up to 900 chars
+
+        More nuanced than binary split — preserves structure while reducing tokens.
+        """
+        n = len(messages)
+        if n < 4:
+            return messages
+
+        old_end = int(n * 0.4)
+        mid_end = int(n * 0.7)
+
+        result = []
+        for i, msg in enumerate(messages):
+            if i < old_end:
+                limit = self._RECENCY_LIMITS["old"]
+            elif i < mid_end:
+                limit = self._RECENCY_LIMITS["mid"]
+            else:
+                limit = self._RECENCY_LIMITS["recent"]
+
+            result.append(self._truncate_message(msg, limit))
+
+        return result
+
+    def _truncate_message(self, msg: Dict[str, Any], max_chars: int) -> Dict[str, Any]:
+        """Truncate a message's text content to max_chars."""
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            if len(content) <= max_chars:
+                return msg
+            return {**msg, "content": content[:max_chars] + "..."}
+        if isinstance(content, list):
+            new_blocks = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text = block.get("text", "")
+                    if len(text) > max_chars:
+                        new_blocks.append({**block, "text": text[:max_chars] + "..."})
+                    else:
+                        new_blocks.append(block)
+                else:
+                    new_blocks.append(block)
+            return {**msg, "content": new_blocks}
+        return msg
 
     def reset_compression_counter(self) -> None:
         """Reset the compression attempt counter. Call at session/turn boundaries."""

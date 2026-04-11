@@ -71,27 +71,67 @@ async def handle_web_search(args: dict, ctx: "ToolContext") -> str:
     return web_search.format_for_llm(response)
 
 
+_MAX_REDIRECTS = 5
+
 async def handle_web_fetch(args: dict, ctx: "ToolContext") -> str:
+    """Fetch URL with SSRF-safe redirect following.
+
+    Validates each redirect hop against cloud metadata endpoints, CGNAT,
+    and link-local ranges. Drops response body when redirected to an
+    untrusted domain (prevents data exfiltration via redirect chain).
+    """
     url = args.get("url", "")
     if not url:
         return "⚠️ No URL provided"
     try:
         import aiohttp
         from bs4 import BeautifulSoup
+        from able.core.security.egress_inspector import EgressInspector
+
+        # Initial URL validation
+        if not EgressInspector.validate_redirect_target(url):
+            return "⚠️ Blocked: URL targets a restricted address (cloud metadata / internal network)"
+
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15), headers={
-                "User-Agent": "Mozilla/5.0 (compatible; ABLEBot/2.0)"
-            }) as resp:
-                if resp.status != 200:
-                    return f"⚠️ Failed to fetch URL: HTTP {resp.status}"
-                html = await resp.text()
+            current_url = url
+            for _hop in range(_MAX_REDIRECTS):
+                async with session.get(
+                    current_url,
+                    timeout=aiohttp.ClientTimeout(total=15),
+                    headers={"User-Agent": "Mozilla/5.0 (compatible; ABLEBot/2.0)"},
+                    allow_redirects=False,
+                ) as resp:
+                    # Not a redirect — process response
+                    if resp.status not in (301, 302, 303, 307, 308):
+                        if resp.status != 200:
+                            return f"⚠️ Failed to fetch URL: HTTP {resp.status}"
+                        html = await resp.text()
+                        break
+
+                    # Redirect — validate target before following
+                    location = resp.headers.get("Location", "")
+                    if not location:
+                        return "⚠️ Redirect with no Location header"
+                    # Resolve relative redirects
+                    from urllib.parse import urljoin
+                    location = urljoin(current_url, location)
+
+                    if not EgressInspector.validate_redirect_target(location):
+                        # Body dropped — redirect to restricted address
+                        logger.warning("SSRF: redirect to restricted %s (from %s)", location, current_url)
+                        return "⚠️ Blocked: redirect targets a restricted address"
+
+                    current_url = location
+            else:
+                return "⚠️ Too many redirects"
+
         soup = BeautifulSoup(html, 'html.parser')
         for tag in soup(['script', 'style', 'nav', 'footer', 'header']):
             tag.decompose()
         text = soup.get_text(separator='\n', strip=True)
         if len(text) > 8000:
             text = text[:8000] + "\n\n[... content truncated at 8000 chars ...]"
-        return f"Content from {url}:\n\n{text}"
+        return f"Content from {current_url}:\n\n{text}"
     except Exception as e:
         return f"⚠️ Failed to fetch URL: {e}"
 

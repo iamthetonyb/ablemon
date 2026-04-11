@@ -16,6 +16,7 @@ from enum import Enum
 
 from able.core.security.command_guard import CommandAnalysis, CommandGuard, CommandVerdict
 from able.core.security.egress_inspector import EgressInspector, EgressRisk
+from able.core.security.subprocess_runner import BLOCKED_ENV_VARS, BLOCKED_ENV_PREFIXES
 
 
 class ApprovalStatus(Enum):
@@ -121,9 +122,13 @@ class SecureShell:
             if env:
                 exec_env.update(env)
 
-            # Strip binary hijack env vars (ported from Claude Code BashTool)
+            # Strip injection env vars — comprehensive blocklist from subprocess_runner
+            # Covers: LD_/DYLD_ linker injection, PYTHONPATH/NODE_OPTIONS runtime injection,
+            # JAVA_TOOL_OPTIONS/RUSTFLAGS language injection, GIT_PROXY_COMMAND/KUBECONFIG
             for key in list(exec_env):
-                if key.startswith(("LD_", "DYLD_")) or key == "PYTHONPATH":
+                if key in BLOCKED_ENV_VARS:
+                    exec_env.pop(key, None)
+                elif any(key.startswith(p) for p in BLOCKED_ENV_PREFIXES):
                     exec_env.pop(key, None)
 
             argv = analysis.parsed_argv
