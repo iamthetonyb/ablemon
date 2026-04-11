@@ -631,6 +631,7 @@ class BuddyState:
     needs_thirst: float = 80.0
     needs_energy: float = 80.0
     needs_last_decay: str = ""
+    last_active_at: str = ""  # B5: ISO timestamp of last system activity
     domains_used_today: List[str] = field(default_factory=list)
     domains_today_date: str = ""
 
@@ -752,12 +753,37 @@ class BuddyState:
         self.needs_energy = needs.energy
         self.needs_last_decay = needs.last_decay_at
 
+    def mark_active(self) -> None:
+        """B5: Record that the system is currently active.
+
+        When active, need decay is suppressed — the buddy doesn't get
+        hungry/tired while you're actively using ABLE.
+        """
+        self.last_active_at = datetime.now(timezone.utc).isoformat()
+
     def apply_needs_decay(self) -> str:
-        """Apply time-based decay since last check. Returns mood."""
+        """Apply time-based decay since last check. Returns mood.
+
+        B5: Suppresses decay if system was active in the last 10 minutes.
+        Active agents shouldn't suffer need decay — decay represents neglect,
+        not usage.
+        """
         from datetime import datetime, timezone
 
         needs = self.get_needs()
         now = datetime.now(timezone.utc)
+
+        # B5: Skip decay if system was active recently (within 10 min)
+        if self.last_active_at:
+            try:
+                last_active = datetime.fromisoformat(self.last_active_at)
+                idle_minutes = (now - last_active).total_seconds() / 60
+                if idle_minutes < 10:
+                    needs.last_decay_at = now.isoformat()
+                    self._sync_needs(needs)
+                    return needs.mood
+            except (ValueError, TypeError):
+                pass
 
         if needs.last_decay_at:
             try:
@@ -976,6 +1002,7 @@ def _serialize_buddy(buddy: BuddyState) -> Dict[str, Any]:
         "needs_thirst": buddy.needs_thirst,
         "needs_energy": buddy.needs_energy,
         "needs_last_decay": buddy.needs_last_decay,
+        "last_active_at": buddy.last_active_at,
         "domains_used_today": buddy.domains_used_today,
         "domains_today_date": buddy.domains_today_date,
     }

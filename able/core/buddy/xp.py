@@ -115,6 +115,9 @@ def award_interaction_xp(
     buddy.award_xp(xp)
     buddy.total_interactions += 1
 
+    # B5: Mark system as active — suppresses need decay during active use
+    buddy.mark_active()
+
     # Update needs — each interaction is a sip of water
     buddy.water("interaction")
     if used_tools:

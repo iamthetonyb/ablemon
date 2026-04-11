@@ -109,6 +109,22 @@ class LayeredMemory:
         if not parts:
             parts.append("ABLE: autonomous business & learning engine")
 
+        # B6: Load buddy state into L0 identity
+        try:
+            from able.core.buddy.model import load_active_buddy
+            buddy = load_active_buddy()
+            if buddy:
+                buddy_summary = (
+                    f"Buddy: {buddy.name} L{buddy.level} "
+                    f"({buddy.species.value})"
+                )
+                needs = buddy.get_needs()
+                if needs.mood != "thriving":
+                    buddy_summary += f" [{needs.mood}]"
+                parts.append(buddy_summary)
+        except Exception:
+            pass  # Buddy system optional
+
         # Try current_objectives.yaml
         if self.config.objectives_path.exists():
             try:
