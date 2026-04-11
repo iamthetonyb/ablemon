@@ -18,20 +18,21 @@ Usage:
 import hashlib
 import json
 import logging
+import os
 import re
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Default context thresholds
-COMPACT_THRESHOLD = 0.80  # Compact when context reaches 80% of limit
-COMPACT_RATIO = 0.60       # Summarize the oldest 60% of messages
-SUMMARY_TOKEN_BUDGET = 500  # Max tokens for the summary itself
+# Default context thresholds (configurable via env vars)
+COMPACT_THRESHOLD = float(os.environ.get("ABLE_COMPACT_THRESHOLD", "0.80"))
+COMPACT_RATIO = float(os.environ.get("ABLE_COMPACT_RATIO", "0.60"))
+SUMMARY_TOKEN_BUDGET = int(os.environ.get("ABLE_SUMMARY_TOKEN_BUDGET", "500"))
 
 # Death spiral prevention (Hermes PR #4750 + post-v0.8 tail protection)
-MAX_COMPRESSION_ATTEMPTS = 3  # Hard cap — prevents compress→fail→compress loops
-MIN_TAIL_MESSAGES = 3         # Always keep at least this many recent messages
+MAX_COMPRESSION_ATTEMPTS = int(os.environ.get("ABLE_MAX_COMPRESSION_ATTEMPTS", "3"))
+MIN_TAIL_MESSAGES = int(os.environ.get("ABLE_MIN_TAIL_MESSAGES", "3"))
 
 # Approximate token counting (1 token ≈ 4 chars for English)
 _CHARS_PER_TOKEN = 4
