@@ -15,6 +15,12 @@ from .swarm import (
     MeshWorkflow,
     ThreeManTeamProtocol,
 )
+from .multi_planner import (
+    MultiPlanner,
+    MultiPlanResult,
+    PlanProposal,
+    PLANNER_PERSONAS,
+)
 
 __all__ = [
     "SwarmCoordinator",
@@ -26,4 +32,8 @@ __all__ = [
     "AgentMessage",
     "MeshWorkflow",
     "ThreeManTeamProtocol",
+    "MultiPlanner",
+    "MultiPlanResult",
+    "PlanProposal",
+    "PLANNER_PERSONAS",
 ]

@@ -52,7 +52,8 @@ class HybridMemory:
         self,
         db_path: Optional[Path] = None,
         embeddings_path: Optional[Path] = None,
-        use_v1_bridge: bool = True
+        use_v1_bridge: bool = True,
+        profile_id: Optional[str] = None,
     ):
         from .db.sqlite_store import SQLiteStore
         from .embeddings.vector_store import VectorStore
@@ -64,6 +65,9 @@ class HybridMemory:
 
         self.use_v1_bridge = use_v1_bridge
         self._v1_path = Path.home() / ".able" / "memory" if use_v1_bridge else None
+
+        # D16: Profile-scoped memory for multi-user contexts (Telegram groups, etc.)
+        self.profile_id = profile_id
 
         # Cache for recent memories
         self._cache: Dict[str, MemoryEntry] = {}
@@ -83,22 +87,34 @@ class HybridMemory:
         metadata: Dict[str, Any] = None,
         client_id: Optional[str] = None,
         session_id: Optional[str] = None,
-        compute_embedding: bool = True
+        compute_embedding: bool = True,
+        profile_id: Optional[str] = None,
     ) -> str:
-        """Store a memory entry"""
+        """Store a memory entry.
+
+        Args:
+            profile_id: Per-user profile scope (D16). Falls back to
+                        instance-level self.profile_id if not provided.
+        """
         entry_id = self._generate_id(content, memory_type)
+        # D16: resolve profile scope
+        effective_profile = profile_id or self.profile_id
 
         # Compute embedding for semantic search
         embedding = None
         if compute_embedding:
             embedding = self.vectors.compute_embedding(content)
 
+        entry_metadata = metadata or {}
+        if effective_profile:
+            entry_metadata["profile_id"] = effective_profile
+
         entry = MemoryEntry(
             id=entry_id,
             content=content,
             memory_type=memory_type,
             timestamp=datetime.utcnow(),
-            metadata=metadata or {},
+            metadata=entry_metadata,
             embedding=embedding,
             client_id=client_id,
             session_id=session_id
@@ -140,12 +156,19 @@ class HybridMemory:
         memory_types: List[MemoryType] = None,
         client_id: Optional[str] = None,
         limit: int = 10,
-        min_score: float = 0.5
+        min_score: float = 0.5,
+        profile_id: Optional[str] = None,
     ) -> List[SearchResult]:
         """
         Hybrid search combining exact and semantic matching.
         Returns results ranked by combined score.
+
+        Args:
+            profile_id: Filter to this profile (D16). Falls back to
+                        instance-level self.profile_id if not provided.
         """
+        # D16: resolve profile scope — stored in metadata, not a column
+        effective_profile = profile_id or self.profile_id
         results = []
 
         # Exact search in SQLite (keyword matching)
@@ -188,6 +211,13 @@ class HybridMemory:
                                 score=score,
                                 match_type="semantic"
                             ))
+
+        # D16: filter by profile_id if set (stored in metadata)
+        if effective_profile:
+            results = [
+                r for r in results
+                if r.entry.metadata.get("profile_id") == effective_profile
+            ]
 
         # Sort by score and return top results
         results.sort(key=lambda x: x.score, reverse=True)
