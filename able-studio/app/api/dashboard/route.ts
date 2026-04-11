@@ -1,10 +1,33 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { db, isDbConfigured } from "@/lib/db";
 import { auditLogs, organizations, featureFlags } from "@/drizzle/schema";
 import { desc, gte, count, sum, and, isNotNull, sql } from "drizzle-orm";
 import { getResources } from "@/lib/control-plane";
 
+const EMPTY_DASHBOARD = {
+  metrics: {
+    organizations: 0,
+    enabledTools: 0,
+    auditEvents24h: 0,
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    totalCostCents: 0,
+  },
+  recentLogs: [],
+  organizations: [],
+  timestamp: new Date().toISOString(),
+};
+
 export async function GET() {
+  // Graceful degradation when DATABASE_URL isn't configured
+  if (!isDbConfigured()) {
+    return NextResponse.json({
+      ...EMPTY_DASHBOARD,
+      _status: "unconfigured",
+      _message: "DATABASE_URL not set — add it in Vercel project settings",
+    });
+  }
+
   try {
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
 

@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { db, isDbConfigured } from "@/lib/db";
 import { organizations, clientSettings } from "@/drizzle/schema";
 import { eq, desc } from "drizzle-orm";
 import { encrypt } from "@/lib/encryption";
 
 export async function GET() {
+  if (!isDbConfigured()) {
+    return NextResponse.json({ organizations: [], _status: "unconfigured" });
+  }
+
   try {
     const orgs = await db
       .select({

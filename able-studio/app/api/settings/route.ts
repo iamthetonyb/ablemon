@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { db, isDbConfigured } from "@/lib/db";
 import { featureFlags } from "@/drizzle/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { getToolCatalog } from "@/lib/control-plane";
 
 // GET /api/settings — used by the settings page AND by the gateway (fetch_tool_settings)
 export async function GET(req: NextRequest) {
+  if (!isDbConfigured()) {
+    return NextResponse.json({ catalog: [], tools: {}, _status: "unconfigured" });
+  }
+
   const { searchParams } = req.nextUrl;
   const orgId = searchParams.get("org_id") ?? undefined;
 

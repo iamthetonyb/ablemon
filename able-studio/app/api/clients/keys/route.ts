@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { db, isDbConfigured } from "@/lib/db";
 import { clientSettings } from "@/drizzle/schema";
 import { eq } from "drizzle-orm";
 import { decrypt } from "@/lib/encryption";
@@ -14,6 +14,10 @@ import { decrypt } from "@/lib/encryption";
  * in production. For now, it's accessible only from the gateway.
  */
 export async function GET(req: NextRequest) {
+  if (!isDbConfigured()) {
+    return NextResponse.json({ error: "DATABASE_URL not configured" }, { status: 503 });
+  }
+
   const orgId = req.nextUrl.searchParams.get("org_id");
 
   if (!orgId) {

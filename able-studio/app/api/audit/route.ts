@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { db, isDbConfigured } from "@/lib/db";
 import { auditLogs } from "@/drizzle/schema";
 import { desc, eq, and, gte, lte, sql } from "drizzle-orm";
 
 export async function GET(req: NextRequest) {
+  if (!isDbConfigured()) {
+    return NextResponse.json({ logs: [], total: 0, _status: "unconfigured" });
+  }
+
   try {
     const { searchParams } = req.nextUrl;
     const limit = Math.min(parseInt(searchParams.get("limit") ?? "50", 10), 200);

@@ -5,7 +5,9 @@ import { useEffect, useRef } from "react";
 const CONTROL_BASE_URL =
   process.env.NEXT_PUBLIC_ABLE_GATEWAY_URL ||
   process.env.ABLE_CONTROL_API_BASE ||
-  "http://127.0.0.1:8080";
+  "";
+
+const MAX_SSE_RETRIES = 5;
 
 export type GatewayEventType =
   | "connected"
@@ -49,6 +51,9 @@ export function useLiveEvents(onEvent: (event: GatewayEvent) => void) {
 
     function connect() {
       if (cancelled) return;
+      // Don't attempt SSE if gateway URL isn't configured
+      if (!CONTROL_BASE_URL) return;
+      if (retries >= MAX_SSE_RETRIES) return;
       try {
         es = new EventSource(`${CONTROL_BASE_URL}/events`);
 
