@@ -445,9 +445,40 @@ Training lanes:
 - Read-before-write enforcement → `able/core/gateway/read_tracker.py`
 - Large file protection (>200 lines blocks full rewrite)
 
-**Remaining high-value patterns identified (future work):**
-- Claurst: layered config resolution, named agent profiles, plugin capability declarations, deterministic gacha bones/soul split, AutoDream memory consolidation
-- Wove: three-tier context architecture (tech-tag filtering), sub-task isolation with fresh context, repo map via tree-sitter, sibling file reference, output discipline guardrails (25-word limit between tool calls)
+**Wave 2 patterns shipped (2026-04-11, later session):**
+- Claurst: layered config resolution → `able/core/config/layered_config.py`
+- Claurst: named agent profiles → `able/core/agents/agent_profiles.py`
+- Claurst: config schema validation at boot → `able/core/config/config_validator.py`
+- Wove: output discipline guardrails → `able/core/gateway/output_discipline.py`
+- Wove: sub-task isolation → `able/core/execution/subtask_isolator.py`
+
+83. **Edit Precision Scorer Bug Fix**:
+    - `interaction_auditor.py` `_edit_precision_score()` had inverted scoring: wasteful rewrites got 1.0 (high), surgical edits got ~0 (low). Fixed to `1.0 - change_ratio`.
+
+84. **Docker/Cron Resilience**:
+    - `sqlite_store.py`: zstandard import now optional (graceful fallback to raw bytes). Fixes memory init crash on slim Docker.
+    - `requirements-core.txt`: Added `zstandard>=0.23.0` and `beautifulsoup4>=4.12.0` for slim profile.
+    - `doctor.py`: Added zstandard, dspy-ai, beautifulsoup4 to dependency checks.
+    - Gateway startup: Doctor health check runs at boot, prints errors/warnings to console.
+
+85. **Unsloth Studio Findings Applied**:
+    - Pinned `unsloth>=2026.4.3` in exporter (Gemma 4 gradient accumulation fix + Qwen 3.5 stability).
+    - Added Gemma 4 loss range warning (10-15 is normal) to notebook.
+    - Added merged GGUF export option (full fine-tuned models, not just LoRA adapters).
+    - HuggingFace API throttle reduction (env vars).
+    - Updated model config descriptions with Gemma 4 E4B 8GB VRAM note.
+
+86. **WebGPU TS Build Fix**: `@webgpu/types` added to devDependencies, tsconfig types array.
+
+87. **SKILL_INDEX.yaml**: media-generation + rtk-compress skills registered.
+
+88. **Full Doc Audit**: ABLE.md, CLAUDE.md, README.md, ROUTING.md synced — Gemma 4 31B replaces Nemotron, Managed Agents + Sonnet Advisor + Qwen 3.6 Plus added.
+
+    **Test results**: 3370 passing, 0 failures.
+
+**Remaining high-value patterns (future work):**
+- Claurst: plugin capability declarations, deterministic gacha bones/soul split, AutoDream memory consolidation
+- Wove: three-tier context architecture (tech-tag filtering), repo map via tree-sitter, sibling file reference
 
 ---
 

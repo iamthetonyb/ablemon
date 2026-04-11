@@ -486,12 +486,11 @@ def _edit_precision_score(row: Dict[str, Any]) -> float:
             total_content = len(old) + len(new)
 
             if total_content > 0:
-                # Precision = how much actually changed / how much was sent
-                # Perfect edit: "8" → "10" in 200 chars = high precision
-                # Wasteful edit: 200 chars replaced by 200 chars = low precision
-                precision = total_change / total_content
-                # Invert: low change ratio = high precision (surgical)
-                precisions.append(min(1.0, precision * 5.0))
+                # Precision = how surgical the edit is
+                # Surgical: change 2 chars in 400-char context → ratio 0.005 → score 0.995
+                # Wasteful: change 400 chars in 400-char context → ratio 1.0 → score 0.0
+                change_ratio = min(1.0, total_change / total_content)
+                precisions.append(1.0 - change_ratio)
 
     except Exception:
         pass

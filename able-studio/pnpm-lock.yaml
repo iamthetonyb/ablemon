@@ -66,6 +66,9 @@ importers:
       '@types/react-dom':
         specifier: ^19.1.0
         version: 19.2.3(@types/react@19.2.14)
+      '@webgpu/types':
+        specifier: ^0.1.69
+        version: 0.1.69
       drizzle-kit:
         specifier: ^0.30.0
         version: 0.30.6
@@ -756,6 +759,9 @@ packages:
   '@vercel/oidc@3.1.0':
     resolution: {integrity: sha512-Fw28YZpRnA3cAHHDlkt7xQHiJ0fcL+NRcIqsocZQUSmbzeIKRpwttJjik5ZGanXP+vlA4SbTg+AbA3bP363l+w==}
     engines: {node: '>= 20'}
+
+  '@webgpu/types@0.1.69':
+    resolution: {integrity: sha512-RPmm6kgRbI8e98zSD3RVACvnuktIja5+yLgDAkTmxLr90BEwdTXRQWNLF3ETTTyH/8mKhznZuN5AveXYFEsMGQ==}
 
   ai@6.0.116:
     resolution: {integrity: sha512-7yM+cTmyRLeNIXwt4Vj+mrrJgVQ9RMIW5WO0ydoLoYkewIvsMcvUmqS4j2RJTUXaF1HphwmSKUMQ/HypNRGOmA==}
@@ -1715,6 +1721,8 @@ snapshots:
       csstype: 3.2.3
 
   '@vercel/oidc@3.1.0': {}
+
+  '@webgpu/types@0.1.69': {}
 
   ai@6.0.116(zod@4.3.6):
     dependencies:

@@ -3615,6 +3615,27 @@ class ABLEGateway:
         )
         print(f"🕰️ ABLE Persistent Scheduler started with {len(self.scheduler.jobs)} autonomous missions")
 
+        # ── Startup Health Report ───────────────────────────────────
+        # Run doctor checks and report degraded subsystems so operator
+        # knows exactly what to fix. This prevents silent cron failures.
+        try:
+            from able.tools.doctor import Doctor
+            _doc = Doctor()
+            _report = _doc.run_all()
+            if _report.error_count > 0:
+                print(f"⚠️  ABLE Doctor: {_report.error_count} errors, {_report.warning_count} warnings")
+                for r in _report.results:
+                    if r.status == "error":
+                        print(f"   ❌ {r.check_name}: {r.message}")
+                        if r.suggestion:
+                            print(f"      Fix: {r.suggestion}")
+            elif _report.warning_count > 0:
+                print(f"⚡ ABLE Doctor: {_report.ok_count} OK, {_report.warning_count} warnings")
+            else:
+                print(f"✅ ABLE Doctor: all {_report.ok_count} checks passed")
+        except Exception as _doc_err:
+            logger.warning("Doctor health check failed: %s", _doc_err)
+
         # Recover any jobs missed during downtime (up to 48h lookback)
         async def _supervised_scheduler():
             while True:

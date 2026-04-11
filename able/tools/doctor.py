@@ -290,6 +290,9 @@ class Doctor:
             ("anthropic", "anthropic", False),
             ("aiohttp", "aiohttp", False),
             ("rich", "rich", False),
+            ("zstandard", "zstandard", False),
+            ("dspy", "dspy-ai", False),
+            ("bs4", "beautifulsoup4", False),
         ]
 
         for module, package, critical in deps:

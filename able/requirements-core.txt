@@ -23,3 +23,9 @@ cryptography>=44.0.0
 
 # Async file I/O
 aiofiles>=24.1.0
+
+# Memory compression (SQLiteStore uses zstd for efficient storage)
+zstandard>=0.23.0
+
+# Web scraping fallback (DuckDuckGo parser for weekly-research)
+beautifulsoup4>=4.12.0

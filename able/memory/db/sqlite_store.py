@@ -24,18 +24,26 @@ class SQLiteStore:
     def __init__(self, db_path: Path):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        import zstandard as zstd
-        self.compressor = zstd.ZstdCompressor(level=3)
-        self.decompressor = zstd.ZstdDecompressor()
+        try:
+            import zstandard as zstd
+            self.compressor = zstd.ZstdCompressor(level=3)
+            self.decompressor = zstd.ZstdDecompressor()
+        except ImportError:
+            self.compressor = None
+            self.decompressor = None
         self._recovered = False  # Track if we already recovered this session
         self._safe_init_db()
 
     def _compress(self, text: str) -> bytes:
+        if self.compressor is None:
+            return text.encode('utf-8')
         return self.compressor.compress(text.encode('utf-8'))
 
     def _decompress(self, data: Any) -> str:
         if isinstance(data, str):
             return data  # Legacy uncompressed text
+        if self.decompressor is None:
+            return data.decode('utf-8', errors='replace') if isinstance(data, bytes) else str(data)
         try:
             return self.decompressor.decompress(data).decode('utf-8')
         except Exception:

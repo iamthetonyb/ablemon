@@ -181,7 +181,8 @@ class UnslothExporter:
         cells.append(self._code_cell(
             "%%capture\n"
             "# Install Unsloth (takes ~2 minutes on Colab)\n"
-            "!pip install unsloth\n"
+            "# Pin >=2026.4.3 for Gemma 4 gradient accumulation fix + Qwen 3.5 stability\n"
+            "!pip install 'unsloth>=2026.4.3'\n"
             "!pip install --no-deps trl peft accelerate bitsandbytes"
         ))
 
@@ -233,7 +234,16 @@ class UnslothExporter:
         cells.append(self._code_cell(
             "from trl import SFTTrainer\n"
             "from transformers import TrainingArguments\n"
-            "from unsloth import is_bfloat16_supported\n\n"
+            "from unsloth import is_bfloat16_supported\n"
+            "import os\n"
+            "# Reduce HuggingFace API calls (Studio finding: 90% fewer throttles)\n"
+            "os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'\n"
+            "os.environ['TRANSFORMERS_NO_ADVISORY_WARNINGS'] = '1'\n\n"
+            + (
+                "# NOTE: Gemma 4 training loss in range 10-15 is NORMAL.\n"
+                "# Do NOT stop training early thinking loss is diverging.\n\n"
+                if "gemma" in config.base_model.lower() else ""
+            ) +
             "trainer = SFTTrainer(\n"
             "    model=model,\n"
             "    tokenizer=tokenizer,\n"
@@ -284,6 +294,13 @@ class UnslothExporter:
             f"        quantization_method=quant,\n"
             f"    )\n"
             f'    print(f"  Done: outputs/{model_name}-gguf")\n\n'
+            f"# Full model GGUF export (merged LoRA, not just adapter)\n"
+            f"# Requires unsloth >=2026.4.3 — exports merged weights to GGUF\n"
+            f"# model.save_pretrained_merged(\n"
+            f'#     f"outputs/{model_name}-merged",\n'
+            f"#     tokenizer,\n"
+            f"#     save_method=\"merged_16bit\",  # or merged_4bit for smaller\n"
+            f"# )\n\n"
             f"# Optional: Push to HuggingFace Hub\n"
             f"# model.push_to_hub_gguf(\n"
             f'#     "{hf_target}",\n'

@@ -187,7 +187,9 @@ ABLE_GEMMA4_31B = StudentModelConfig(
     description=(
         "Gemma 4 31B server model. Apache 2.0. QLoRA in 22GB VRAM. "
         "WARNING: use_cache=False with gradient checkpointing causes "
-        "KV-sharing corruption on Gemma 4. MUST use Unsloth's fix."
+        "KV-sharing corruption on Gemma 4. MUST use Unsloth's fix. "
+        "Gradient accumulation loss explosions fixed in unsloth >=2026.4.3. "
+        "Expected training loss range: 10-15 (normal for Gemma 4)."
     ),
     default_gpu_class="a100_session",
     default_runtime="colab",
@@ -245,8 +247,9 @@ ABLE_GEMMA4_E4B = StudentModelConfig(
     quantization_targets=["UD-Q4_K_XL", "UD-IQ2_M"],
     description=(
         "Gemma 4 E4B edge model. 5.1B total / 4.5B effective via PLE architecture. "
-        "Apache 2.0. Fits on free Colab T4 (~10GB). "
-        "Could replace Qwen 3.5 9B as edge target if evals confirm."
+        "Apache 2.0. Fits on free Colab T4 (~10GB). 8GB VRAM sufficient. "
+        "Could replace Qwen 3.5 9B as edge target if evals confirm. "
+        "Requires unsloth >=2026.4.3 for Gemma 4 gradient accumulation fix."
     ),
     default_gpu_class="t4_colab",
     default_runtime="colab",
