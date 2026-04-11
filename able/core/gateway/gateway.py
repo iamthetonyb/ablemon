@@ -1205,7 +1205,10 @@ class ABLEGateway:
                         _new_msgs = []
                         for d in _compacted_dicts:
                             _role_str = d.get("role", "system")
-                            _role = Role(_role_str) if _role_str in Role.__members__.values() else Role.SYSTEM
+                            try:
+                                _role = Role(_role_str)
+                            except ValueError:
+                                _role = Role.SYSTEM
                             _new_msgs.append(Message(role=_role, content=d["content"]))
                         msgs = _new_msgs
                         logger.info(

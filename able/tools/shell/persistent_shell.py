@@ -171,6 +171,28 @@ class PersistentShell:
             full_cmd = f"{command}\n{_SENTINEL_CMD}\n"
             await self._write(full_cmd)
 
+            # Drain stdout and stderr concurrently to prevent pipe deadlock.
+            # If stderr fills its buffer before stdout emits the sentinel,
+            # the child blocks and this code would time out.
+            stderr_lines: list[str] = []
+
+            async def _drain_stderr() -> None:
+                """Read stderr in background until EOF or parent cancels."""
+                if not self._process or not self._process.stderr:
+                    return
+                try:
+                    while True:
+                        line = await asyncio.wait_for(
+                            self._process.stderr.readline(), timeout=0.5,
+                        )
+                        if not line:
+                            break
+                        stderr_lines.append(line.decode("utf-8", errors="replace"))
+                except (asyncio.TimeoutError, Exception):
+                    pass
+
+            stderr_task = asyncio.create_task(_drain_stderr())
+
             # Read stdout until sentinel
             stdout_lines = []
             exit_code = -1
@@ -195,8 +217,15 @@ class PersistentShell:
                 stdout_lines.append(f"\n[TIMEOUT after {self._timeout}s]")
                 exit_code = -1
 
-            # Capture any stderr (non-blocking)
-            stderr_text = ""
+            # Wait for stderr drain to finish (short grace period)
+            stderr_task.cancel()
+            try:
+                await asyncio.wait_for(stderr_task, timeout=0.5)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+
+            # Capture any remaining stderr (non-blocking)
+            stderr_text = "".join(stderr_lines)
             if self._process.stderr:
                 try:
                     while True:

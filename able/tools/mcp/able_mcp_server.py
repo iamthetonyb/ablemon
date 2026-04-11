@@ -108,6 +108,11 @@ class ABLEToolHandlers:
         self._event_log: collections.deque = collections.deque(
             maxlen=self.MAX_EVENT_LOG_SIZE,
         )
+        self._gateway: Any = None
+
+    def set_gateway(self, gateway: Any) -> None:
+        """Wire in the ABLE gateway for message processing."""
+        self._gateway = gateway
 
     def handle_status(self, args: Dict[str, Any]) -> MCPToolResult:
         """Return current ABLE system status."""
@@ -204,13 +209,38 @@ class ABLEToolHandlers:
             "timestamp": time.time(),
         })
 
-        # In standalone mode, return acknowledgment.
-        # When wired into gateway, this calls gateway.process_message().
+        # Use gateway if wired in, otherwise return acknowledgment
+        if self._gateway is not None:
+            try:
+                import asyncio
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # Already in async context, create task
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                        result = pool.submit(
+                            asyncio.run,
+                            self._gateway.process_message(message),
+                        ).result(timeout=120)
+                else:
+                    result = loop.run_until_complete(
+                        self._gateway.process_message(message)
+                    )
+                return MCPToolResult().text(json.dumps({
+                    "status": "processed",
+                    "response": str(result)[:5000],
+                }))
+            except Exception as e:
+                logger.warning("Gateway processing failed: %s", e)
+                return MCPToolResult().text(json.dumps({
+                    "status": "error",
+                    "error": str(e)[:500],
+                }))
+
         return MCPToolResult().text(json.dumps({
             "status": "received",
             "message_length": len(message),
-            "note": "Gateway processing not available in standalone MCP mode. "
-                    "Wire into ABLEMCPServer.set_gateway() for full processing.",
+            "note": "Gateway not wired in. Use set_gateway() for full processing.",
         }))
 
     def handle_skills(self, args: Dict[str, Any]) -> MCPToolResult:
@@ -453,8 +483,8 @@ class ABLEMCPServer:
 
     def set_gateway(self, gateway: Any) -> None:
         """Wire in the ABLE gateway for full message processing."""
-        # When gateway available, replace stub message handler
-        pass
+        self._gateway = gateway
+        self._handlers.set_gateway(gateway)
 
     def handle_request(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Handle a single JSON-RPC request."""
@@ -566,29 +596,66 @@ class ABLEMCPServer:
     def run_stdio(self) -> None:
         """Run the MCP server over stdio (blocking).
 
-        Reads JSON-RPC messages from stdin (one per line),
-        writes responses to stdout.
+        Supports both Content-Length framed messages (standard MCP stdio
+        protocol used by Claude Desktop, Cursor, etc.) and bare JSON-per-line
+        for simple testing.
         """
         logger.info("ABLE MCP server starting on stdio")
-        for line in sys.stdin:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                request = json.loads(line)
-                response = self.handle_request(request)
-                if response is not None:
-                    sys.stdout.write(json.dumps(response) + "\n")
-                    sys.stdout.flush()
-            except json.JSONDecodeError:
-                err = self._error(None, -32700, "Parse error")
-                sys.stdout.write(json.dumps(err) + "\n")
+        buf = ""
+        content_length: int | None = None
+        for raw_line in sys.stdin:
+            line = raw_line.rstrip("\r\n")
+
+            # Content-Length framing: header phase
+            if content_length is None:
+                if line.startswith("Content-Length:"):
+                    try:
+                        content_length = int(line.split(":", 1)[1].strip())
+                    except (ValueError, IndexError):
+                        pass
+                    continue
+                if line == "":
+                    # Blank line after headers → read body
+                    if content_length is not None:
+                        body = sys.stdin.read(content_length)
+                        content_length = None
+                        self._process_message(body)
+                    continue
+                # No Content-Length header, try bare JSON line
+                if line:
+                    self._process_message(line)
+            else:
+                # Waiting for blank line separator after headers
+                if line == "":
+                    body = sys.stdin.read(content_length)
+                    content_length = None
+                    self._process_message(body)
+                # else: additional header, skip
+
+    def _process_message(self, data: str) -> None:
+        """Parse and handle a single JSON-RPC message."""
+        data = data.strip()
+        if not data:
+            return
+        try:
+            request = json.loads(data)
+            response = self.handle_request(request)
+            if response is not None:
+                body = json.dumps(response)
+                # Write with Content-Length framing
+                sys.stdout.write(f"Content-Length: {len(body)}\r\n\r\n{body}")
                 sys.stdout.flush()
-            except Exception as e:
-                logger.exception("Unhandled error")
-                err = self._error(None, -32603, str(e))
-                sys.stdout.write(json.dumps(err) + "\n")
-                sys.stdout.flush()
+        except json.JSONDecodeError:
+            err = self._error(None, -32700, "Parse error")
+            body = json.dumps(err)
+            sys.stdout.write(f"Content-Length: {len(body)}\r\n\r\n{body}")
+            sys.stdout.flush()
+        except Exception as e:
+            logger.exception("Unhandled error")
+            err = self._error(None, -32603, str(e))
+            body = json.dumps(err)
+            sys.stdout.write(f"Content-Length: {len(body)}\r\n\r\n{body}")
+            sys.stdout.flush()
 
 
 # ── Entry point ────────────────────────────────────────────────
