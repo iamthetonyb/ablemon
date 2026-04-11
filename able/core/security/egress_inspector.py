@@ -408,3 +408,101 @@ class EgressInspector:
             pass  # Not an IP — hostname is fine
 
         return True
+
+
+@dataclass
+class RedirectResult:
+    """Result of redirect chain validation."""
+    safe: bool
+    final_url: str = ""
+    blocked_at: str = ""
+    reason: str = ""
+    hops: int = 0
+    drop_body: bool = False
+
+
+class RedirectChecker:
+    """A5 — Enhanced SSRF guard for HTTP redirect chains.
+
+    After each redirect hop, re-validates the destination. If a redirect
+    lands on a blocked host, blocks the request and drops the response body.
+
+    NOTE on DNS rebinding (TOCTOU limitation): A malicious DNS server can
+    return a safe IP on the first lookup, then a metadata IP on the second.
+    This checker mitigates at the URL/hostname level but cannot prevent
+    DNS rebinding attacks. For full protection, use an egress proxy that
+    pins DNS resolution and checks the resolved IP before connecting.
+    """
+
+    MAX_REDIRECTS = 10
+
+    def __init__(self, safe_hosts: Optional[frozenset] = None):
+        self._safe_hosts = safe_hosts or _SAFE_HOSTS
+
+    def check_redirect_chain(
+        self,
+        initial_url: str,
+        redirect_urls: List[str],
+    ) -> RedirectResult:
+        """Validate an entire redirect chain.
+
+        Args:
+            initial_url: The original request URL.
+            redirect_urls: Ordered list of redirect destination URLs.
+
+        Returns:
+            RedirectResult with safety verdict and metadata.
+        """
+        # Validate initial URL
+        if not EgressInspector.validate_redirect_target(
+            initial_url, self._safe_hosts
+        ):
+            return RedirectResult(
+                safe=False,
+                final_url=initial_url,
+                blocked_at=initial_url,
+                reason="Initial URL blocked",
+                hops=0,
+            )
+
+        if len(redirect_urls) > self.MAX_REDIRECTS:
+            return RedirectResult(
+                safe=False,
+                final_url=redirect_urls[-1] if redirect_urls else initial_url,
+                reason=f"Too many redirects ({len(redirect_urls)} > {self.MAX_REDIRECTS})",
+                hops=len(redirect_urls),
+                drop_body=True,
+            )
+
+        initial_host = urlparse(initial_url).hostname or ""
+
+        for i, redir_url in enumerate(redirect_urls):
+            if not EgressInspector.validate_redirect_target(
+                redir_url, self._safe_hosts
+            ):
+                return RedirectResult(
+                    safe=False,
+                    final_url=redir_url,
+                    blocked_at=redir_url,
+                    reason="Redirect landed on blocked host",
+                    hops=i + 1,
+                    drop_body=True,
+                )
+
+            # Drop body if redirect crosses to a non-allowlisted domain
+            redir_host = urlparse(redir_url).hostname or ""
+            if redir_host != initial_host and redir_host not in self._safe_hosts:
+                return RedirectResult(
+                    safe=True,
+                    final_url=redir_url,
+                    reason="Redirect to non-allowlisted domain — body dropped",
+                    hops=i + 1,
+                    drop_body=True,
+                )
+
+        final = redirect_urls[-1] if redirect_urls else initial_url
+        return RedirectResult(
+            safe=True,
+            final_url=final,
+            hops=len(redirect_urls),
+        )
