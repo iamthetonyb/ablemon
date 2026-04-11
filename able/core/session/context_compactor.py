@@ -443,7 +443,8 @@ class ContextCompactor:
 
         old = inp.get("old_string", "")
         new = inp.get("new_string", "")
-        path = inp.get("file_path", "")
+        # Gateway write_file uses "path", Claude Code Edit uses "file_path"
+        path = inp.get("file_path", "") or inp.get("path", "")
 
         # Edit with old_string/new_string — compute actual diff
         if old and new and len(old) > 100:

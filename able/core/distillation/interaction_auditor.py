@@ -428,9 +428,9 @@ def _edit_precision_score(row: Dict[str, Any]) -> float:
     """
     GEval metric: how surgical were Edit operations?
 
-    Measures the ratio of changed content to total content in edit operations.
-    High precision (small change, small old_string) = 1.0.
-    Low precision (1 word changed in 8-line old_string) = low score.
+    Estimates precision from raw_input which contains the Edit tool_use blocks
+    with old_string/new_string. Computes the actual diff ratio between them:
+    how much of old_string actually changed vs. was repeated verbatim?
 
     Returns 0.0–1.0 where 1.0 = maximally surgical edits.
     Only meaningful when Edit/Write tools were used.
@@ -449,39 +449,63 @@ def _edit_precision_score(row: Dict[str, Any]) -> float:
     if not edit_tools:
         return -1.0  # no edits — not applicable
 
-    # Estimate precision from raw_output: look for Edit tool patterns
-    raw_out = row.get("raw_output") or ""
-    if not raw_out:
-        return 0.5  # can't assess without output
+    # Parse raw_input for Edit tool_use blocks to measure actual precision
+    raw_in = row.get("raw_input") or ""
+    if not raw_in:
+        return 0.5  # can't assess without input
 
-    # Count edit operations and estimate their precision
-    # Pattern: old_string of N chars replaced by new_string of M chars
-    # Precision = 1.0 - (overlap / max(len_old, len_new))
-    # Without exact old/new strings, we estimate from the output patterns
+    # Extract old_string/new_string pairs from the raw input
+    # These appear as JSON in the tool_use input blocks
+    precisions = []
+    try:
+        import re as _re
+        # Match "old_string": "..." and "new_string": "..." patterns
+        old_strings = _re.findall(r'"old_string"\s*:\s*"((?:[^"\\]|\\.)*)"', raw_in)
+        new_strings = _re.findall(r'"new_string"\s*:\s*"((?:[^"\\]|\\.)*)"', raw_in)
+
+        for old, new in zip(old_strings, new_strings):
+            if not old:
+                continue
+            # Compute actual change ratio
+            # Find common prefix + suffix to isolate the diff
+            prefix = 0
+            for a, b in zip(old, new):
+                if a == b:
+                    prefix += 1
+                else:
+                    break
+            suffix = 0
+            for a, b in zip(reversed(old), reversed(new)):
+                if a == b and suffix < len(old) - prefix and suffix < len(new) - prefix:
+                    suffix += 1
+                else:
+                    break
+            changed_old = len(old) - prefix - suffix
+            changed_new = len(new) - prefix - suffix
+            total_change = changed_old + changed_new
+            total_content = len(old) + len(new)
+
+            if total_content > 0:
+                # Precision = how much actually changed / how much was sent
+                # Perfect edit: "8" → "10" in 200 chars = high precision
+                # Wasteful edit: 200 chars replaced by 200 chars = low precision
+                precision = total_change / total_content
+                # Invert: low change ratio = high precision (surgical)
+                precisions.append(min(1.0, precision * 5.0))
+
+    except Exception:
+        pass
+
+    if precisions:
+        # Average precision across all edits in the interaction
+        avg = sum(precisions) / len(precisions)
+        return round(avg, 3)
+
+    # Fallback: estimate from edit count (less accurate)
     edit_count = len(edit_tools)
-    total_tools = len(tools)
-
-    # Heuristic: if edits are a small fraction of total tool calls,
-    # the session was doing more than just editing — less signal
-    edit_ratio = edit_count / max(total_tools, 1)
-
-    # Base precision: fewer edit calls for the same work = more surgical
-    # A session with 1 edit is more precise than one with 5 small edits
-    # (assuming same total change)
     if edit_count <= 2:
-        base = 0.9
-    elif edit_count <= 5:
-        base = 0.7
-    elif edit_count <= 10:
-        base = 0.5
-    else:
-        base = 0.3  # many edits = likely wasteful
-
-    # Adjust by edit ratio (heavily edit-focused sessions are fine)
-    if edit_ratio > 0.8:
-        base = min(1.0, base + 0.1)  # editing IS the work — don't penalize
-
-    return round(base, 3)
+        return 0.5  # unknown precision, neutral
+    return round(max(0.2, 0.6 - edit_count * 0.05), 3)
 
 
 # ── Main auditor class ────────────────────────────────────────────────────────
