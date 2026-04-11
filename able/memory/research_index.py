@@ -403,13 +403,32 @@ class ResearchIndex:
         bm25_ranked = [(str(r.title), r.score) for r in bm25_results]
 
         # Tier 2: Vector similarity (optional)
+        # Note: vector IDs may differ from BM25 titles. Build a mapping so
+        # vector-only hits can still contribute to RRF even if they don't
+        # appear in the BM25 result_map. We match by checking if a vector ID
+        # is a substring of any BM25 title (handles ID=entry_id vs title=full_title).
         vector_ranked: List[Tuple[str, float]] = []
+        _vec_to_title: dict = {}
         if vector_store is not None:
             try:
                 query_embedding = vector_store.compute_embedding(query)
                 if query_embedding:
                     vec_results = vector_store.search(query_embedding, limit=limit * 3)
-                    vector_ranked = [(eid, score) for eid, score in vec_results]
+                    bm25_title_set = {str(r.title) for r in bm25_results}
+                    for eid, score in vec_results:
+                        # Try to map vector ID to a BM25 title
+                        matched_title = None
+                        if eid in bm25_title_set:
+                            matched_title = eid
+                        else:
+                            # Fuzzy match: vector ID might be a hash or partial key
+                            for t in bm25_title_set:
+                                if eid in t or t in str(eid):
+                                    matched_title = t
+                                    break
+                        key = matched_title or str(eid)
+                        _vec_to_title[str(eid)] = key
+                        vector_ranked.append((key, score))
             except Exception as e:
                 logger.debug(f"Vector search skipped: {e}")
 
@@ -420,14 +439,22 @@ class ResearchIndex:
             fused = bm25_ranked
 
         # Map fused scores back to IndexResult objects
+        # Key by both title (BM25 IDs) and any vector entry IDs
         result_map = {str(r.title): r for r in bm25_results}
+        seen_titles: set = set()
         fused_results = []
         for item_id, rrf_score in fused[:limit * 2]:
-            if item_id in result_map:
-                r = result_map[item_id]
-                r.score = rrf_score
-                r.match_type = "hybrid" if vector_ranked else "fts"
-                fused_results.append(r)
+            r = result_map.get(item_id)
+            if r is None:
+                # Vector-only hit — create a minimal IndexResult if we can
+                # look it up. For now, skip (vector store doesn't return full metadata).
+                continue
+            if r.title in seen_titles:
+                continue
+            seen_titles.add(r.title)
+            r.score = rrf_score
+            r.match_type = "hybrid" if vector_ranked else "fts"
+            fused_results.append(r)
 
         # Tier 3: LLM reranking (optional)
         if rerank_fn and len(fused_results) > limit:

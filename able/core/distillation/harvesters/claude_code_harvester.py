@@ -311,7 +311,9 @@ class ClaudeCodeHarvester(BaseHarvester):
     # ── Compression mode detection ──────────────────────────────
 
     # Wenyan indicators: CJK unified ideographs + common classical particles
-    _WENYAN_RE = re.compile(r"[\u4e00-\u9fff]{2,}")
+    # Wenyan-ultra uses specific bridge chars (因→bc 及→& 或→| 至→→ 從→← 約→~)
+    # Match these specific wenyan bridge chars, not any CJK text
+    _WENYAN_RE = re.compile(r"[因及或至從約]")
     # Caveman-ultra indicators: hyper-shorthand patterns
     _CAVEMAN_PATTERNS = re.compile(
         r"\bu\b(?=/| )|→|←|\bw/o?\b|\b#s\b|\bb4\b|\bbc\b|\bbtwn\b|\bthru\b|\bur\b"
@@ -342,7 +344,7 @@ class ClaudeCodeHarvester(BaseHarvester):
         # Sample first 3000 chars for efficiency
         sample = assistant_text[:3000]
 
-        has_wenyan = bool(cls._WENYAN_RE.search(sample))
+        has_wenyan = len(cls._WENYAN_RE.findall(sample)) >= 2
         has_caveman = len(cls._CAVEMAN_PATTERNS.findall(sample)) >= 3
         has_tech = len(cls._TECH_ABBREVS.findall(sample)) >= 3
 

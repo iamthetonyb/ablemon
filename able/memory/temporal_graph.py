@@ -142,10 +142,13 @@ class TemporalKnowledgeGraph:
         conn = self._connect()
         try:
             # Invalidate existing current triple with same (subject, predicate)
+            # ONLY if the new fact is newer than the existing one — prevents
+            # out-of-order backfills from corrupting the timeline.
             conn.execute(
                 "UPDATE triples SET valid_to = ? "
-                "WHERE subject = ? AND predicate = ? AND valid_to IS NULL",
-                (now, subject, predicate),
+                "WHERE subject = ? AND predicate = ? AND valid_to IS NULL "
+                "AND valid_from <= ?",
+                (now, subject, predicate, now),
             )
 
             cur = conn.execute(

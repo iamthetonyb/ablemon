@@ -2186,14 +2186,16 @@ class ABLEGateway:
         if not text:
             return ""
         import re
-        _cjk = len(re.findall(r'[\u4e00-\u9fff]', text))
-        _cu = len(re.findall(r'→|←|\b(?:ur|b4|bc|btwn|thru|w/o?|#s)\b', text))
+        # Wenyan-ultra: specific bridge chars (因→bc 及→& 或→| 至→→ 從→← 約→~)
+        # NOT generic CJK — that false-positives on any Chinese text
+        _wenyan = len(re.findall(r'[因及或至從約]', text[:3000]))
+        _cu = len(re.findall(r'→|←|\b(?:ur|b4|bc|btwn|thru|w/o?|#s)\b', text[:3000]))
         _tech = len(re.findall(
             r'\b(?:DB|auth|mw|EP|param|comp|tmpl|conn|txn|sched|ctr|infra|k8s|i18n'
-            r'|impl|fn|srv|dep|pkg|msg|err|req|res)\b', text
+            r'|impl|fn|srv|dep|pkg|msg|err|req|res)\b', text[:3000]
         ))
-        has_wenyan = _cjk >= 3
-        has_caveman = (_cu + _tech) >= 3
+        has_wenyan = _wenyan >= 2
+        has_caveman = _cu >= 3 or _tech >= 3
         if has_wenyan and has_caveman:
             return "ultramode"
         if has_wenyan:

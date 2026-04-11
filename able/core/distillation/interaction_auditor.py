@@ -617,8 +617,11 @@ class InteractionAuditor:
                 "tool_correctness": _tool_correct,
             }
             # Compression efficiency (only when compression was attempted)
+            # Use the just-computed audit_score, not the DB row (which is still NULL)
             if row.get("compression_attempted"):
-                notes["compression_efficiency"] = _compression_efficiency_score(row)
+                _row_with_score = dict(row)
+                _row_with_score["audit_score"] = audit_score
+                notes["compression_efficiency"] = _compression_efficiency_score(_row_with_score)
             if judge_detail is not None:
                 notes.update({
                     "accuracy": judge_detail.get("accuracy"),
