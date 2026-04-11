@@ -15,7 +15,7 @@ Simple questions hit GPT 5.4 Mini through your ChatGPT subscription — $0 per t
 Every conversation is evaluated, scored, and turned into training data. Wins get reinforced. Corrections get captured. Over time it builds a fine-tuned local model that sounds like your actual use case.
 
 **It doesn't crash when conversations get long.**  
-A 8-layer robustness stack handles context overflow, stuck tool loops, and provider disconnects automatically. Context gets compacted, large outputs get persisted to disk, idle agents get pressure, spinning agents get killed. You don't notice any of it.
+A 10-layer robustness stack handles context overflow, stuck tool loops, and provider disconnects automatically. Context gets compacted, large outputs get persisted to disk, idle agents get pressure, spinning agents get killed. You don't notice any of it.
 
 **It has a companion that grows with it.**  
 Your buddy starts at a level based on how you already use AI. Feed it, train it, watch it evolve. It's not decorative — it reflects real system activity.
@@ -69,11 +69,12 @@ Every message gets complexity-scored in under 5ms. No LLM call needed.
 
 | Complexity | Tier | Model | Cost |
 |-----------|------|-------|------|
-| < 0.4 | T1 | GPT 5.4 Mini (ChatGPT sub) | **$0** |
-| 0.4–0.7 | T2 | GPT 5.4 (ChatGPT sub) | **$0** |
-| > 0.7 | T4 | Claude Opus 4.6 | $15/$75/M |
+| < 0.4 | T1 | GPT 5.4 Mini (ChatGPT sub) → Gemma 4 31B (NIM free) | **$0** |
+| 0.4–0.7 | T2 | GPT 5.4 (ChatGPT sub) → Qwen 3.6 Plus → Gemma 4 26B → MiMo | **$0** |
+| 0.5–0.7 | T2.5 | Sonnet + Opus advisor (API fallback only) | ~$3/$15/M |
+| > 0.7 | T4 | Managed Agents Opus → Claude Code CLI → Opus API | **$0** (Max sub) |
 | Background | T3 | MiniMax M2.7 | $0.30/$1.20/M |
-| Offline | T5 | Ollama local | **Free** |
+| Offline | T5 | Gemma 4 31B cloud → Qwen 3.5 27B/9B local | **Free** |
 
 The routing weights self-tune every 6 hours using a background daemon.
 
@@ -155,7 +156,7 @@ Docker auto-installs on the server. Pre-built image pulls from GHCR. Done.
 | `ABLE_OWNER_TELEGRAM_ID` | Your Telegram user ID |
 | `OPENROUTER_API_KEY` | Fallback models + evolution daemon |
 | `ANTHROPIC_API_KEY` | Claude Opus 4.6 (T4 premium tier) |
-| `NVIDIA_API_KEY` | Nemotron 120B (free T1 fallback) |
+| `NVIDIA_API_KEY` | Gemma 4 31B (free T1 fallback via NIM) |
 | `TRILIUM_ETAPI_TOKEN` | TriliumNext knowledge base |
 | `XCRAWL_API_KEY` | XCrawl structured web scraping |
 
@@ -181,7 +182,7 @@ PROFILE=full docker compose up -d --build
 ```
 able/
 ├── core/gateway/        AI request pipeline (routing, tools, Telegram)
-├── core/routing/        Complexity scorer + provider chain
+├── core/routing/        Complexity scorer + provider chain + effort levels + budget tracker
 ├── core/buddy/          Companion system (XP, evolution, renderer)
 ├── core/evolution/      Self-tuning weights + cumulative research scout
 ├── core/distillation/   Training data pipeline (harvest → score → export)
@@ -193,8 +194,11 @@ able/
 ├── tools/trilium/       TriliumNext knowledge base (wiki, research ingestion)
 ├── tools/xcrawl/        Structured web scraping for deep research
 ├── tools/graphify/      Knowledge graph builder (D3 + mermaid)
+├── tools/rtk/           Token compression (60-90% savings on tool outputs)
+├── tools/media/         Media generation fallback (DALL-E, ElevenLabs, placeholder)
 ├── tools/               Browser, search, GitHub, DigitalOcean, Vercel, codex audit
-└── skills/              25+ auto-triggered skills (copywriting, security, deploy, research)
+├── memory/              SQLite + vector + layered memory + temporal graph + freshness
+└── skills/              30+ auto-triggered skills (copywriting, security, deploy, research, media)
 ```
 
 ---
@@ -234,6 +238,9 @@ Web dashboard at `localhost:3000` — buddy status, metrics, live event stream, 
 | Egress Inspector | Catches URLs, S3 paths, git remotes before shell execution |
 | Malware Scanner | Scans new skills before registration |
 | Codex Cross-Audit | 3-layer code review (codex -> claude -> rule-based) |
+| PII Redactor | Strips emails, phones, SSNs, API keys before external calls |
+| Read Tracker | Blocks writes to unread files, blocks full rewrites on large files |
+| Arg Sanitizer | Scans tool arguments for path traversal, shell injection, null bytes |
 
 Config: `config/tool_permissions.yaml`
 

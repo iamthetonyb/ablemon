@@ -43,13 +43,17 @@ export async function detectWebGPU(): Promise<WebGPUCapabilities> {
     return { available: false, adapter: null, estimatedVRAM_MB: 0, reason: "Feature flag disabled" };
   }
 
-  if (typeof navigator === "undefined" || !("gpu" in navigator)) {
+  if (typeof navigator === "undefined") {
+    return { available: false, adapter: null, estimatedVRAM_MB: 0, reason: "WebGPU API not available" };
+  }
+
+  const nav = navigator as Navigator & { gpu?: GPU };
+  if (!nav.gpu) {
     return { available: false, adapter: null, estimatedVRAM_MB: 0, reason: "WebGPU API not available" };
   }
 
   try {
-    const gpu = navigator.gpu;
-    const adapter = await gpu.requestAdapter({ powerPreference: "high-performance" });
+    const adapter = await nav.gpu.requestAdapter({ powerPreference: "high-performance" });
 
     if (!adapter) {
       return { available: false, adapter: null, estimatedVRAM_MB: 0, reason: "No GPU adapter found" };

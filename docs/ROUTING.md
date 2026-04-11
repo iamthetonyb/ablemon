@@ -41,15 +41,20 @@ Response                           |
 | Tier | Provider | Model | Cost (in/out per M) | Context | Use Case |
 |------|----------|-------|---------------------|---------|----------|
 | 1 | GPT 5.4 Mini (xhigh) | gpt-5.4-mini (OpenAI OAuth) | $0 (sub) | 400K | Default -- 70-80% of requests |
-| 1 (fallback) | Nemotron 120B | nvidia/nemotron-3-super-120b-a12b (NIM) | $0.30/$0.80 | 262K | Mini unavailable |
-| 1 (last resort) | Nemotron 120B | nvidia/nemotron-3-super-120b-a12b:free (OpenRouter) | $0 | 262K | NIM down too |
+| 1 (fallback) | Gemma 4 31B | google/gemma-4-31b-it (NIM free) | $0 | 131K | Mini unavailable |
+| 1 (last resort) | Gemma 4 31B | google/gemma-4-31b-it (OpenRouter) | $0.14/$0.40 | 131K | NIM down too |
 | 2 | GPT 5.4 (xhigh) | gpt-5.4 (OpenAI OAuth) | $0 (sub) | 1M | Complex reasoning |
-| 2 (fallback) | MiMo-V2-Pro | xiaomi/mimo-v2-pro (OpenRouter) | $1.00/$3.00 | 131K | GPT 5.4 fallback |
+| 2 (fallback A) | Qwen 3.6 Plus | qwen/qwen3.6-plus:free (OpenRouter) | $0 | 1M | Always-on reasoning, free tier |
+| 2 (fallback B) | Gemma 4 26B A4B | google/gemma-4-27b-it (OpenRouter) | $0.13/$0.40 | 256K | MoE 3.8B active, fast |
+| 2 (fallback C) | MiMo-V2-Pro | xiaomi/mimo-v2-pro (OpenRouter) | $1.00/$3.00 | 131K | Last T2 fallback |
+| 2.5 | Sonnet + Opus Advisor | claude-sonnet-4-6 + advisor (Anthropic) | $3.00/$15.00 | 200K | Borderline complexity (API fallback only) |
 | 3 | MiniMax M2.7 | minimax/minimax-m2.7 (OpenRouter) | $0.30/$1.20 | 1M | **Background-only** (evolution daemon) |
-| 4 | Claude Opus 4.6 | claude-opus-4-6 (Anthropic) | $15.00/$75.00 | 200K | Premium -- budget-gated |
-| 5 | Qwen 3.5 27B | qwen3.5-27b-ud (Ollama) | $0 | 131K | Offline / distillation base |
-| 5 (fallback) | Qwen 3.5 9B Edge | qwen3.5-9b-edge (Ollama) | $0 | 131K | Edge/mobile deployment |
-| 5 (last resort) | Qwen 3.5 9B Balanced | qwen3.5-9b-balanced (Ollama) | $0 | 131K | Balanced edge option |
+| 4 | Managed Agents Opus | managed-agent-opus (Anthropic SSE) | $0.08/hr | 200K | Premium -- primary T4 |
+| 4 (fallback) | Claude Code CLI | claude-opus-4-6 (Max sub) | $0 | 200K | Managed Agents unavailable |
+| 4 (last resort) | Claude Opus 4.6 API | claude-opus-4-6 (Anthropic API) | $15.00/$75.00 | 200K | Budget-gated API fallback |
+| 5 | Gemma 4 31B cloud | gemma4:31b-cloud (Ollama cloud) | $0 | 131K | Primary offline |
+| 5 (fallback) | Qwen 3.5 27B | qwen3.5-27b-ud (Ollama local) | $0 | 131K | Distillation base |
+| 5 (edge) | Qwen 3.5 9B | qwen3.5-9b-edge (Ollama local) | $0 | 131K | Edge/mobile deployment |
 | 0 (future) | able-student-27b | Custom fine-tuned (Ollama) | $0 | 131K | Self-hosted student model |
 
 **M2.7 is never user-facing.** It only runs as the evolution daemon's analysis brain.
@@ -111,14 +116,24 @@ A/B test definitions for routing changes. Created/managed by the split test mana
 
 ```yaml
 budget:
-  opus_daily_usd: 15.00
-  opus_monthly_usd: 100.00
-  evolution_daily_usd: 5.00
+  opus_api_daily_usd: 25.00        # Anthropic API fallback only (primary is $0 via Max)
+  opus_api_monthly_usd: 150.00
+  evolution_daily_usd: 5.00        # M2.7 on OpenRouter
   evolution_monthly_usd: 50.00
-  total_monthly_usd: 200.00
+  openrouter_monthly_usd: 75.00   # MiMo fallback + M2.7
+  total_monthly_cap_usd: 250.00
 ```
 
 When Opus budget is exhausted, the scorer caps Tier 4 requests at Tier 2 and marks `budget_gated: true` in the interaction log.
+
+### Runtime Budget Tracker (`able/core/routing/budget_tracker.py`)
+
+Millicent-based (1/100,000 USD) integer tracking to avoid floating-point accumulation errors. `ABLE_MAX_BUDGET_USD` env var (0 = unlimited). Auto-downgrade: <20% remaining T4→T2, exhausted→T5.
+
+### Effort Levels (`able/core/routing/effort_levels.py`)
+
+User-controllable routing override via `ABLE_EFFORT_LEVEL` env var:
+- `LOW` → forces T1, `MEDIUM` → default scoring, `HIGH` → +0.15 score boost, `MAX` → forces T4 (session-scoped for cost protection)
 
 ## Interaction Logging
 
@@ -305,7 +320,11 @@ JSON endpoints for routing observability:
 | `config/routing_config.yaml` | Provider registry config |
 | `config/scorer_weights.yaml` | Scorer weights (evolution-tunable) |
 | `config/split_tests.yaml` | A/B test definitions |
+| `able/core/routing/effort_levels.py` | User effort level overrides (LOW/MEDIUM/HIGH/MAX) |
+| `able/core/routing/budget_tracker.py` | Millicent-based budget tracking with auto-downgrade |
 | `able/tests/test_routing.py` | 56 tests across 5 phases |
+| `able/tests/test_effort_levels.py` | 12 effort level tests |
+| `able/tests/test_budget_tracker.py` | 12 budget tracker tests |
 
 ## Environment Variables
 
@@ -313,8 +332,10 @@ JSON endpoints for routing observability:
 |----------|-------------|
 | *(OpenAI OAuth)* | GPT 5.4 Mini (T1), GPT 5.4 (T2) -- `python scripts/able-auth.py` |
 | `OPENROUTER_API_KEY` | MiMo (Tier 2 fallback), M2.7 (Tier 3 evolution) |
-| `NVIDIA_API_KEY` | Nemotron 120B (Tier 1 fallback, free NIM) |
-| `ANTHROPIC_API_KEY` | Claude Opus 4.6 (Tier 4) |
+| `NVIDIA_API_KEY` | Gemma 4 31B (Tier 1 fallback, free NIM) |
+| `ANTHROPIC_API_KEY` | Claude Opus 4.6 (Tier 4), Sonnet Advisor (Tier 2.5) |
+| `ABLE_EFFORT_LEVEL` | Effort level override (LOW/MEDIUM/HIGH/MAX) |
+| `ABLE_MAX_BUDGET_USD` | Runtime budget cap (0 = unlimited) |
 
 ## Future: T5 Prefix Cache-Aware Routing
 

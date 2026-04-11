@@ -17,11 +17,12 @@ ABLE uses a **complexity-scored 5-tier routing system** (see `docs/ROUTING.md` f
 
 | Score | Tier | Provider | Cost |
 |-------|------|----------|------|
-| < 0.4 | 1 | GPT 5.4 Mini xhigh (OAuth) → Nemotron 120B (NIM free fallback) | $0 (subscription) |
-| 0.4–0.7 | 2 | GPT 5.4 xhigh (OAuth) → MiMo-V2-Pro (OpenRouter fallback) | $0 (subscription) |
-| > 0.7 | 4 | Claude Opus 4.6 (budget-gated) | $15/$75 per M |
+| < 0.4 | 1 | GPT 5.4 Mini xhigh (OAuth) → Gemma 4 31B (NIM free) → Gemma 4 31B (OpenRouter) | $0 (subscription) |
+| 0.4–0.7 | 2 | GPT 5.4 xhigh (OAuth) → Qwen 3.6 Plus (free) → Gemma 4 26B A4B → MiMo-V2-Pro | $0 (subscription) |
+| 0.5–0.7 | 2.5 | Claude Sonnet 4.6 + Opus advisor (API fallback only) | ~$3/$15 per M |
+| > 0.7 | 4 | Managed Agents Opus (SSE) → Claude Code CLI (Max sub) → Opus API ($15/$75) | $0 (Max sub) |
 | background | 3 | MiniMax M2.7 (evolution daemon only, OpenRouter) | $0.30/$1.20 per M |
-| offline | 5 | Ollama Qwen 3.5 27B/9B UD (local, distillation base) | FREE |
+| offline | 5 | Gemma 4 31B cloud (Ollama) → Qwen 3.5 27B/9B UD (local, distillation base) | FREE |
 
 Pipeline: User → TrustGate → Scanner → Auditor → **Enricher** → Scorer → Provider
 
@@ -80,12 +81,18 @@ Auto-trigger skills based on intent — don't wait to be told.
 | File | Purpose |
 |------|---------|
 | `SOUL.md` | Core personality — anti-sycophancy, directness, proactive thinking |
-| `ABLE.md` | Full system documentation (~700 lines — reference, don't load fully) |
+| `ABLE.md` | Full system documentation (~950 lines — reference, don't load fully) |
 | `able/skills/SKILL_INDEX.yaml` | All registered skills with triggers and trust levels |
 | `able/core/orchestrator.py` | Intent detection → skill dispatch → execution |
 | `able/core/agi/self_improvement.py` | Self-improvement engine |
 | `able/core/agi/planner.py` | Goal decomposition and planning |
 | `able/core/security/trust_gate.py` | Message trust scoring (0.0–1.0) |
+| `able/core/routing/effort_levels.py` | User effort level overrides (LOW/MEDIUM/HIGH/MAX) |
+| `able/core/routing/budget_tracker.py` | Millicent-based budget tracking with auto-downgrade |
+| `able/core/gateway/read_tracker.py` | Read-before-write enforcement (Wove pattern) |
+| `able/memory/freshness.py` | Memory staleness warnings with age brackets |
+| `able/tools/rtk/wrapper.py` | RTK token compression wrapper (60-90% savings) |
+| `able/tools/media/generator.py` | Media generation fallback (DALL-E → SD → placeholder) |
 | `able/audit/git_trail.py` | Git-based audit trail for reversibility |
 | `able/tools/webhooks/server.py` | Webhook receiver + /status dashboard |
 | `able/memory/hybrid_memory.py` | SQLite + vector semantic memory |
@@ -113,9 +120,28 @@ From SOUL.md — internalize these:
 2. Load identity, objectives, today's daily file, pending queue, recent learnings
 3. Produce status report, then process queue or await instructions
 
-## Distillation Pipeline (Current State — 2026-04-07)
+## Effort Levels & Budget Tracking (2026-04-11)
 
-Corpus v046 live: 579 pairs → 339 eligible → 153 domain-balanced training pairs. Unsloth notebooks generated.
+**Effort levels** (`able/core/routing/effort_levels.py`): User-controllable routing override via `ABLE_EFFORT_LEVEL` env var.
+- LOW → forces T1, MEDIUM → default scoring, HIGH → +0.15 score boost, MAX → forces T4 (session-scoped)
+
+**Budget tracker** (`able/core/routing/budget_tracker.py`): Millicent-based (1/100,000 USD) integer tracking.
+- `ABLE_MAX_BUDGET_USD` env var (0 = unlimited). Auto-downgrade: <20% remaining T4→T2, exhausted→T5.
+- Tier rates: T1/T2/T5 = free, T3 = $0.30/$1.20, T4 = $15/$75 per M tokens.
+
+**Read tracker** (`able/core/gateway/read_tracker.py`): Wove pattern — blocks write to files not read first, blocks full rewrites on files >200 lines. LRU eviction, max 500 tracked files.
+
+**Memory freshness** (`able/memory/freshness.py`): Claurst pattern — age-bracket warnings (<1d fresh, 2-7d verify, 7-30d STALE, 90d+ archival). Auto-annotates stale memories with caveats.
+
+**RTK compression** (`able/tools/rtk/wrapper.py` + `tracking.py`): Wraps compressible commands (git, ls, find, tree, docker, kubectl) through RTK for 60-90% token savings. SQLite analytics tracking.
+
+**Media generation** (`able/tools/media/generator.py`): Auto-fallback per media type: Image (DALL-E 3 → placeholder), Audio (ElevenLabs → placeholder), Video (placeholder). Intent detection via regex.
+
+**WebGPU inference** (`able-studio/lib/webgpu-inference.ts`): Browser-based Gemma 4 E4B via WebLLM. Feature flag `NEXT_PUBLIC_ENABLE_WEBGPU`. Fallback: WebGPU → Ollama → cloud.
+
+## Distillation Pipeline (Current State — 2026-04-11)
+
+Corpus v048 live: 684 pairs → 165 domain-balanced training pairs. Unsloth notebooks generated.
 
 | File | Role |
 |------|------|

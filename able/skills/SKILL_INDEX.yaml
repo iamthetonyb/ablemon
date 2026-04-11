@@ -3,7 +3,7 @@
 # Skills are loaded from skills/library/[name]/ directories
 
 version: "2.0"
-last_updated: "2026-03-10"
+last_updated: "2026-04-11"
 
 skills:
 
@@ -552,6 +552,48 @@ skills:
     trust_level: "L3_ACT"
     requires_approval: false
     created: "2026-03-21"
+    use_count: 0
+
+  # ══════════════════════════════════════════════════════════════
+  # MEDIA & COMPRESSION SKILLS (Plan items D2, F12)
+  # ══════════════════════════════════════════════════════════════
+
+  media-generation:
+    description: "Auto-fallback media generation. Detects media intent from user requests and routes to best available provider. Image (DALL-E 3 → placeholder), Audio (ElevenLabs → placeholder), Video (placeholder)."
+    triggers:
+      - "generate image"
+      - "create image"
+      - "make image"
+      - "generate audio"
+      - "text to speech"
+      - "TTS"
+      - "make video"
+      - "media"
+      - "dall-e"
+      - "elevenlabs"
+    type: "tool"
+    trust_level: "L2_SUGGEST"
+    tools_used: [media_generator]
+    requires_approval: false
+    env_optional:
+      - "OPENAI_API_KEY"
+      - "ELEVENLABS_API_KEY"
+    created: "2026-04-11"
+    use_count: 0
+
+  rtk-compress:
+    description: "RTK token compression for shell command outputs. Wraps compressible commands (git, ls, find, tree, docker, kubectl) through RTK for 60-90% token savings. Tracks analytics in SQLite."
+    triggers:
+      - "compress output"
+      - "rtk"
+      - "reduce tokens"
+      - "token savings"
+      - "token compression"
+    type: "tool"
+    trust_level: "L1_OBSERVE"
+    tools_used: [rtk_wrapper]
+    requires_approval: false
+    created: "2026-04-11"
     use_count: 0
 
 # ══════════════════════════════════════════════════════════════

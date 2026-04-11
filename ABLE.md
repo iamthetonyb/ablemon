@@ -2,7 +2,7 @@
 
 > **READ THIS COMPLETELY ON EVERY SESSION START.**
 > This file defines your identity, operating parameters, and behavioral directives.
-> Last updated: 2026-04-07
+> Last updated: 2026-04-11
 
 ---
 
@@ -95,12 +95,20 @@ User Input → TrustGate → Scanner → Auditor → PromptEnricher → Complexi
 | Tier | Model | Provider | Reasoning | Context | Use Case |
 |------|-------|----------|-----------|---------|----------|
 | 1 | **GPT 5.4 Mini** | ChatGPT sub (OAuth) | **`xhigh`** | 400K | Default — 70-80% of requests |
-| 1 (fallback) | Nemotron 120B | NVIDIA NIM (free) | — | 262K | Mini unavailable |
+| 1 (fallback) | Gemma 4 31B | NVIDIA NIM (free) | — | 131K | Mini unavailable |
+| 1 (last resort) | Gemma 4 31B | OpenRouter ($0.14/$0.40/M) | — | 131K | NIM down too |
 | 2 | **GPT 5.4** | ChatGPT sub (OAuth) | **`xhigh`** | 1M | Complex tasks, deep reasoning |
-| 2 (fallback) | MiMo-V2-Pro | OpenRouter ($1/$3/M) | — | 131K | GPT 5.4 unavailable |
+| 2 (fallback A) | Qwen 3.6 Plus | OpenRouter (free) | always-on | 1M | GPT 5.4 unavailable |
+| 2 (fallback B) | Gemma 4 26B A4B | OpenRouter ($0.13/$0.40/M) | — | 256K | MoE, 3.8B active |
+| 2 (fallback C) | MiMo-V2-Pro | OpenRouter ($1/$3/M) | inherent | 131K | Last T2 fallback |
+| 2.5 | Sonnet 4.6 + Opus advisor | Anthropic API | advisor | 200K | Borderline complexity (API fallback only) |
 | 3 | MiniMax M2.7 | OpenRouter ($0.30/$1.20/M) | — | 1M | **Background-only** — evolution daemon |
-| 4 | **Claude Opus 4.6** | Anthropic ($15/$75/M) | — | 200K | Premium — budget-gated |
-| 5 | Qwen 3.5 27B UD-Q4_K_XL → 9B UD-IQ2_M → 9B UD-Q4_K_XL | Ollama (local, free) | — | 131K | Offline + distillation base |
+| 4 | **Managed Agents Opus** | Anthropic SSE ($0.08/hr) | — | 200K | Premium — primary T4 |
+| 4 (fallback) | Claude Code CLI | Max subscription ($0) | — | 200K | Managed Agents unavailable |
+| 4 (last resort) | Claude Opus 4.6 API | Anthropic ($15/$75/M) | — | 200K | Budget-gated API fallback |
+| 5 | Gemma 4 31B cloud | Ollama cloud | — | 131K | Primary offline |
+| 5 (fallback) | Qwen 3.5 27B UD | Ollama local (free) | — | 131K | Distillation base |
+| 5 (edge) | Qwen 3.5 9B UD | Ollama local (free) | — | 131K | Edge/mobile |
 
 **T1 and T2 cost $0 per token** — routed through your ChatGPT subscription via OAuth PKCE.
 **Both tiers run at `xhigh` reasoning effort** — maximum thinking depth on every request.
@@ -833,7 +841,9 @@ Weekly self-review: optimize high-use skills, archive zero-use, identify gaps, r
 | *(OpenAI OAuth)* | GPT 5.4 Nano (T1), GPT 5.4 (T2) | ChatGPT subscription via OAuth — `python scripts/able-auth.py` |
 | `ANTHROPIC_API_KEY` | Claude Opus 4.6 (T4) | Budget-gated premium tier |
 | `OPENROUTER_API_KEY` | MiMo (T2 fallback), M2.7 (T3 evolution) | Fallback + background |
-| `NVIDIA_API_KEY` | Nemotron 120B (T1 fallback) | Free NIM tier |
+| `NVIDIA_API_KEY` | Gemma 4 31B (T1 fallback) | Free NIM tier |
+| `ABLE_EFFORT_LEVEL` | Effort level override | LOW/MEDIUM/HIGH/MAX |
+| `ABLE_MAX_BUDGET_USD` | Budget tracker cap | 0 = unlimited |
 | `TELEGRAM_BOT_TOKEN` | Telegram channel | Primary communication |
 | `ABLE_STUDIO_URL` | Studio dashboard | Default: `http://localhost:3000` |
 | `ABLE_SERVICE_TOKEN` | Studio API auth | Dashboard integration |
@@ -869,7 +879,7 @@ ABLE/
 │   ├── core/
 │   │   ├── orchestrator.py     <- Main execution + swarm dispatcher
 │   │   ├── gateway/            <- Gateway server, Telegram handler, execution monitor
-│   │   ├── routing/            <- Complexity scorer, provider registry, enricher
+│   │   ├── routing/            <- Complexity scorer, provider registry, enricher, effort levels, budget tracker
 │   │   ├── evolution/          <- Self-evolving daemon (5-step cycle)
 │   │   ├── providers/          <- OpenAI, Anthropic, OpenRouter, NIM, Ollama
 │   │   ├── agents/             <- Scanner, Auditor, Executor
@@ -887,7 +897,7 @@ ABLE/
 │   │   ├── ratelimit/          <- Token bucket + sliding window
 │   │   └── commands/           <- Slash command handlers
 │   ├── channels/               <- Telegram, Discord, Slack adapters
-│   ├── memory/                 <- SQLite + vector + knowledge graph
+│   ├── memory/                 <- SQLite + vector + knowledge graph + freshness + layered + temporal
 │   ├── tools/
 │   │   ├── browser/            <- Playwright automation
 │   │   ├── search/             <- Web search (DuckDuckGo, Google, Bing)
@@ -898,7 +908,9 @@ ABLE/
 │   │   ├── sandbox/            <- Code execution sandbox
 │   │   ├── webhooks/           <- Incoming webhook server
 │   │   ├── voice/              <- Whisper transcription
-│   │   ├── mcp/                <- MCP server bridge
+│   │   ├── mcp/                <- MCP server bridge (stdio + HTTP)
+│   │   ├── rtk/                <- RTK token compression wrapper + tracking
+│   │   ├── media/              <- Media generation fallback (DALL-E, ElevenLabs, placeholder)
 │   │   ├── trilium/            <- TriliumNext ETAPI client, wiki skill, historic upload
 │   │   ├── codex_audit.py      <- Codex cross-audit (3-layer fallback)
 │   │   └── skills_sh/          <- External skill registry
