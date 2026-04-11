@@ -636,6 +636,10 @@ class ABLEGateway:
         # Context compactor — prevents context window overflow in long sessions
         self.context_compactor = ContextCompactor()
 
+        # Shared scratchpad — cross-agent knowledge cache (macOS Universal Clipboard pattern)
+        from able.core.session.shared_scratchpad import SharedScratchpad
+        self.scratchpad = SharedScratchpad()
+
         # Pre-build tier-specific chains for scored routing
         self.tier_chains = {}
         if hasattr(self, 'provider_registry') and self.provider_registry:
@@ -1093,8 +1097,17 @@ class ABLEGateway:
                 except Exception as e:
                     logger.warning(f"[PIPELINE] Memory recall failed: {e}")
 
+            # Scratchpad context — inject prior agent findings into system prompt
+            try:
+                _sp_block = self.scratchpad.get_context_block()
+                if _sp_block:
+                    active_system_prompt += f"\n\n{_sp_block}"
+                    logger.info("[PIPELINE] Scratchpad: %d chars injected", len(_sp_block))
+            except Exception:
+                pass  # Non-critical
+
             msgs = [Message(role=Role.SYSTEM, content=active_system_prompt)]
-            
+
             # Inject Persistent Memory Context
             target_id = client_id or "master"
             history = self.transcript_manager.get_recent_messages(target_id, limit=20)
@@ -1460,6 +1473,19 @@ class ABLEGateway:
                                 "[PIPELINE] Tool output persisted to disk: %s (%d chars)",
                                 tool_call.name, len(tool_output),
                             )
+
+                        # Scratchpad: cache file reads for cross-agent reuse
+                        if tool_call.name in ("read_file", "Read") and _tc_success:
+                            _read_path = _tc_args.get("file_path", _tc_args.get("path", ""))
+                            if _read_path and len(tool_output) > 200:
+                                try:
+                                    self.scratchpad.put_file_summary(
+                                        _read_path,
+                                        tool_output[:500],
+                                        source_agent="gateway",
+                                    )
+                                except Exception:
+                                    pass  # Non-critical
 
                         # Inject tool observation into prompt
                         _wrapped_tool_content = (

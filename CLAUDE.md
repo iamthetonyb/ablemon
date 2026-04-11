@@ -202,11 +202,19 @@ Claude and other models emit synthetic declarations that never run — those are
 
 ### Context Compaction (`able/core/session/context_compactor.py`)
 - **Wired into gateway** — runs before each LLM call in the tool loop
-- At 80% context window: summarizes oldest 60%, replaces with `[CONTEXT SUMMARY]`
+- At 80% context window: compacts to 25% of max tokens, freeing 75% for new work
 - **Strip-thinking recovery** (gemma-gem pattern): before full compaction, strips `<think>` blocks from assistant messages — cheaper and preserves more context. Only falls back to full compaction if stripping is insufficient
 - **Death spiral prevention** (Hermes PR #4750): max 3 compression attempts per session, verifies each attempt actually reduces message count, min 3 tail messages always preserved
 - **Disconnect reclassification**: `RemoteProtocolError`, `ServerDisconnectedError`, `ConnectionResetError`, `ReadTimeout` treated as context-length errors (providers disconnect instead of returning 413)
 - **413 auto-compress + retry**: provider errors caught in gateway, auto-compacts and retries if `is_context_length_error()` returns True
+
+### Shared Scratchpad (`able/core/session/shared_scratchpad.py`)
+- **macOS Universal Clipboard pattern** — cross-agent knowledge cache
+- SQLite-backed k-v store w/ 24h TTL auto-expiry
+- Gateway auto-caches file reads → sibling agents skip re-reading
+- `get_context_block()` generates UM-compressed summary for agent injection
+- Convenience: `put_file_summary()`, `put_decision()`, `list_keys()`, `stats()`
+- Namespaced: global (cross-session), per-session, per-agent
 
 ### Tool Result Persistence (`able/core/gateway/tool_result_storage.py`)
 - **3-layer defense** against context overflow from large tool outputs (Hermes PR #5210 + #6085):
