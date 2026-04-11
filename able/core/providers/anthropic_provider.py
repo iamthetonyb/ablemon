@@ -61,6 +61,7 @@ class AnthropicProvider(LLMProvider):
         use_premium: bool = False,
         extended_thinking: bool = False,
         thinking_budget_tokens: int = 16000,
+        prompt_caching: bool = True,
     ):
         model = model or (self.PREMIUM_MODEL if use_premium else self.DEFAULT_MODEL)
         pricing = self.MODEL_PRICING.get(model, {"input": 5.00, "output": 25.00})
@@ -77,6 +78,9 @@ class AnthropicProvider(LLMProvider):
         self._session: Optional[aiohttp.ClientSession] = None
         self.extended_thinking = extended_thinking
         self.thinking_budget_tokens = thinking_budget_tokens
+        self._prompt_caching = prompt_caching
+        # E3: Cache hit/miss stats for observability
+        self.cache_stats = {"creation_tokens": 0, "read_tokens": 0, "hits": 0, "misses": 0}
 
     @classmethod
     def advisor_tool(cls, max_uses: int = 3, advisor_model: str = None) -> Dict:
@@ -108,17 +112,43 @@ class AnthropicProvider(LLMProvider):
             )
         return self._session
 
-    def _convert_messages(self, messages: List[Message]) -> tuple:
-        """
-        Convert to Anthropic format.
-        Returns (system_message, messages_list)
+    def _convert_messages(
+        self,
+        messages: List[Message],
+        *,
+        enable_cache: bool = False,
+        cache_breakpoints: int = 2,
+    ) -> tuple:
+        """Convert to Anthropic format.
+
+        Returns (system_content, messages_list).
+
+        When *enable_cache* is True, adds ``cache_control`` markers to the
+        system prompt and the first *cache_breakpoints* conversation turns.
+        Anthropic's prompt cache keeps a prefix hash — identical prefixes
+        across requests hit the cache automatically, reducing cost and
+        latency on multi-turn sessions (~90% input token savings on cache
+        hits).  See: https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching
+
+        The system prompt is returned as a list of content blocks (with
+        cache_control) when caching is enabled, or as a plain string when not.
         """
         system = None
         converted = []
 
         for msg in messages:
             if msg.role == Role.SYSTEM:
-                system = msg.content
+                if enable_cache:
+                    # Structured system block with cache_control
+                    system = [
+                        {
+                            "type": "text",
+                            "text": msg.content,
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ]
+                else:
+                    system = msg.content
             elif msg.role == Role.USER:
                 converted.append({
                     "role": "user",
@@ -149,6 +179,28 @@ class AnthropicProvider(LLMProvider):
                         "content": msg.content
                     }]
                 })
+
+        # Add cache_control to the first N conversation turns so the
+        # prefix up to that point is cached server-side.
+        if enable_cache and converted:
+            _marked = 0
+            for entry in converted:
+                if _marked >= cache_breakpoints:
+                    break
+                content = entry.get("content")
+                if isinstance(content, str) and content:
+                    entry["content"] = [
+                        {
+                            "type": "text",
+                            "text": content,
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ]
+                    _marked += 1
+                elif isinstance(content, list) and content:
+                    # Tag the last block in the list
+                    content[-1]["cache_control"] = {"type": "ephemeral"}
+                    _marked += 1
 
         return system, converted
 
@@ -185,6 +237,9 @@ class AnthropicProvider(LLMProvider):
     ) -> CompletionResult:
         session = await self._get_session()
 
+        # E3: prompt caching — opt-in via kwarg or instance default
+        _enable_cache = kwargs.pop("enable_cache", self._prompt_caching)
+
         headers = {
             "x-api-key": self.config.api_key,
             "anthropic-version": self.API_VERSION,
@@ -192,10 +247,17 @@ class AnthropicProvider(LLMProvider):
         }
 
         # Extended thinking requires beta header
+        _betas = []
         if self.extended_thinking:
-            headers["anthropic-beta"] = "interleaved-thinking-2025-05-14"
+            _betas.append("interleaved-thinking-2025-05-14")
+        if _enable_cache:
+            _betas.append("prompt-caching-2024-07-31")
+        if _betas:
+            headers["anthropic-beta"] = ",".join(_betas)
 
-        system, converted_messages = self._convert_messages(messages)
+        system, converted_messages = self._convert_messages(
+            messages, enable_cache=_enable_cache
+        )
 
         payload = {
             "model": self.config.model,
@@ -281,6 +343,22 @@ class AnthropicProvider(LLMProvider):
                 input_tokens = usage.get("input_tokens", 0)
                 output_tokens = usage.get("output_tokens", 0)
 
+                # E3: Track prompt cache performance
+                _cache_creation = usage.get("cache_creation_input_tokens", 0)
+                _cache_read = usage.get("cache_read_input_tokens", 0)
+                if _cache_creation or _cache_read:
+                    self.cache_stats["creation_tokens"] += _cache_creation
+                    self.cache_stats["read_tokens"] += _cache_read
+                    if _cache_read > 0:
+                        self.cache_stats["hits"] += 1
+                    else:
+                        self.cache_stats["misses"] += 1
+                    logger.info(
+                        "Prompt cache: %d created, %d read (cumulative: %d hits, %d misses)",
+                        _cache_creation, _cache_read,
+                        self.cache_stats["hits"], self.cache_stats["misses"],
+                    )
+
                 # Advisor strategy: track advisor token usage separately
                 advisor_usage = None
                 advisor_data = usage.get("advisor_usage")
@@ -333,17 +411,25 @@ class AnthropicProvider(LLMProvider):
     ) -> AsyncIterator[str]:
         session = await self._get_session()
 
+        _enable_cache = kwargs.pop("enable_cache", self._prompt_caching)
+
         headers = {
             "x-api-key": self.config.api_key,
             "anthropic-version": self.API_VERSION,
             "Content-Type": "application/json"
         }
 
-        # Extended thinking requires beta header (same as complete())
+        _betas = []
         if self.extended_thinking:
-            headers["anthropic-beta"] = "interleaved-thinking-2025-05-14"
+            _betas.append("interleaved-thinking-2025-05-14")
+        if _enable_cache:
+            _betas.append("prompt-caching-2024-07-31")
+        if _betas:
+            headers["anthropic-beta"] = ",".join(_betas)
 
-        system, converted_messages = self._convert_messages(messages)
+        system, converted_messages = self._convert_messages(
+            messages, enable_cache=_enable_cache
+        )
 
         payload = {
             "model": self.config.model,

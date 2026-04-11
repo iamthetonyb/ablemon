@@ -3627,17 +3627,21 @@ class ABLEGateway:
         asyncio.create_task(_supervised_scheduler())
 
         # ── Config hot-reload polling (60s interval) ──────────────────
-        # Detects changes to routing_config.yaml and scorer_weights.yaml,
-        # rebuilds provider chains and scorer weights without restart.
+        # Detects changes to routing_config.yaml, scorer_weights.yaml,
+        # and tool_permissions.yaml — rebuilds in-memory state w/o restart.
         _routing_config_path = _PROJECT_ROOT / "config" / "routing_config.yaml"
         _scorer_weights_path = _PROJECT_ROOT / "config" / "scorer_weights.yaml"
+        _tool_perms_path = _PROJECT_ROOT / "config" / "tool_permissions.yaml"
 
         async def _config_reload_poller():
             import hashlib
             _last_scorer_hash = ""
+            _last_perms_hash = ""
             try:
                 if _scorer_weights_path.exists():
                     _last_scorer_hash = hashlib.md5(_scorer_weights_path.read_bytes()).hexdigest()
+                if _tool_perms_path.exists():
+                    _last_perms_hash = hashlib.md5(_tool_perms_path.read_bytes()).hexdigest()
             except OSError:
                 pass
 
@@ -3660,6 +3664,23 @@ class ABLEGateway:
                             self.complexity_scorer.reload_weights()
                             _last_scorer_hash = new_hash
                             logger.info("Scorer weights hot-reloaded (v%d)", self.complexity_scorer.version)
+
+                    # E6: Check tool_permissions.yaml for permission changes
+                    if _tool_perms_path.exists():
+                        new_hash = hashlib.md5(_tool_perms_path.read_bytes()).hexdigest()
+                        if new_hash != _last_perms_hash:
+                            _last_perms_hash = new_hash
+                            # Reload CommandGuard permissions
+                            if hasattr(self, 'command_guard') and self.command_guard:
+                                self.command_guard._yaml_permissions = self.command_guard._load_yaml_permissions()
+                                self.command_guard._policy_engine = self.command_guard._load_policy_engine()
+                                logger.info("Tool permissions hot-reloaded from %s", _tool_perms_path)
+                            # Reload ShellSource permissions if wired
+                            try:
+                                from able.tools.sources.shell_source import _load_yaml_permissions as _reload_shell_perms
+                                _reload_shell_perms()
+                            except Exception:
+                                pass
                 except Exception as e:
                     logger.debug("Config reload check failed: %s", e)
 

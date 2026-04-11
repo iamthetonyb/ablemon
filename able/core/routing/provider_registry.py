@@ -98,9 +98,39 @@ class ProviderRegistry:
             self._providers[p.name] = p
             self._by_tier.setdefault(p.tier, []).append(p)
 
+    @staticmethod
+    def _substitute_env_vars(data):
+        """Recursively substitute ``${ENV_VAR}`` placeholders in YAML values.
+
+        Supports ``${VAR}`` and ``${VAR:-default}`` syntax.  Only string
+        values are touched — numbers and booleans pass through unchanged.
+        """
+        import re
+        _ENV_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-(.*?))?\}")
+
+        def _sub(value):
+            if isinstance(value, str):
+                def _replacer(m):
+                    var_name = m.group(1)
+                    default = m.group(2) if m.group(2) is not None else ""
+                    return os.environ.get(var_name, default)
+                return _ENV_RE.sub(_replacer, value)
+            if isinstance(value, dict):
+                return {k: _sub(v) for k, v in value.items()}
+            if isinstance(value, list):
+                return [_sub(item) for item in value]
+            return value
+
+        return _sub(data)
+
     @classmethod
     def from_yaml(cls, config_path: str | Path) -> "ProviderRegistry":
-        """Load registry from a YAML config file."""
+        """Load registry from a YAML config file.
+
+        Supports ``${ENV_VAR}`` and ``${VAR:-default}`` substitution in
+        all string values — useful for API keys and endpoints that differ
+        between environments.
+        """
         path = Path(config_path)
         if not path.exists():
             logger.warning(f"Routing config not found at {path}, using empty registry")
@@ -108,6 +138,9 @@ class ProviderRegistry:
 
         with open(path) as f:
             data = yaml.safe_load(f)
+
+        # E6: environment variable substitution
+        data = cls._substitute_env_vars(data)
 
         providers = []
         for entry in data.get("providers", []):
