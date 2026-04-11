@@ -439,7 +439,8 @@ def _macos_memory_pressure() -> float:
         result = subprocess.run(
             ["vm_stat"], capture_output=True, text=True, timeout=5,
         )
-        lines = result.stdout.strip().split("\n")
+        # Cap parsed output to 50 lines (vm_stat typically produces ~15)
+        lines = result.stdout.strip().split("\n")[:50]
         stats: Dict[str, int] = {}
         for line in lines[1:]:
             parts = line.split(":")

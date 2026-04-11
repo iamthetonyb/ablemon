@@ -69,10 +69,18 @@ class WatcherStats:
         )
 
 
+# Max file size to hash (10 MB) — prevents OOM on unexpected large files
+_MAX_HASH_FILE_SIZE = 10 * 1024 * 1024
+
+
 def _file_hash(path: str) -> str:
-    """MD5 hash of file contents."""
+    """MD5 hash of file contents. Skips files > 10 MB."""
     try:
-        data = Path(path).read_bytes()
+        p = Path(path)
+        if p.stat().st_size > _MAX_HASH_FILE_SIZE:
+            logger.warning("Config file too large to hash: %s", path)
+            return ""
+        data = p.read_bytes()
         return hashlib.md5(data).hexdigest()
     except (OSError, IOError):
         return ""

@@ -197,10 +197,18 @@ class ThreadManager:
 
         return self._config.reply_mode
 
-    def extract_mentions(self, text: str) -> List[MentionMatch]:
-        """Extract @mentions from message text."""
+    def extract_mentions(
+        self, text: str, max_mentions: int = 50,
+    ) -> List[MentionMatch]:
+        """Extract @mentions from message text.
+
+        Args:
+            text: Message text to scan.
+            max_mentions: Cap on mentions extracted (prevents abuse).
+        """
         mentions = []
-        for match in re.finditer(r"@(\w+)", text):
+        # \w{1,64} caps username length to 64 chars
+        for match in re.finditer(r"@(\w{1,64})", text):
             username = match.group(1)
             is_bot = username.lower() in [
                 n.lower() for n in self._config.bot_names
@@ -211,6 +219,8 @@ class ThreadManager:
                 is_bot=is_bot,
                 position=match.start(),
             ))
+            if len(mentions) >= max_mentions:
+                break
         return mentions
 
     def _contains_mention(self, text: str) -> bool:

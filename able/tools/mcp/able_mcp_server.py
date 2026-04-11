@@ -35,6 +35,7 @@ Integration (Claude Desktop config):
 
 from __future__ import annotations
 
+import collections
 import json
 import logging
 import sys
@@ -99,9 +100,14 @@ class ABLEToolHandlers:
     basic status/discovery.
     """
 
+    # Max events retained in memory to prevent OOM on long-running servers
+    MAX_EVENT_LOG_SIZE = 1000
+
     def __init__(self):
         self._start_time = time.time()
-        self._event_log: List[Dict[str, Any]] = []
+        self._event_log: collections.deque = collections.deque(
+            maxlen=self.MAX_EVENT_LOG_SIZE,
+        )
 
     def handle_status(self, args: Dict[str, Any]) -> MCPToolResult:
         """Return current ABLE system status."""
@@ -226,7 +232,7 @@ class ABLEToolHandlers:
     def handle_events_poll(self, args: Dict[str, Any]) -> MCPToolResult:
         """Poll recent events."""
         limit = args.get("limit", 10)
-        events = self._event_log[-limit:]
+        events = list(self._event_log)[-limit:]
         return MCPToolResult().text(json.dumps(events, indent=2))
 
     def handle_permissions(self, args: Dict[str, Any]) -> MCPToolResult:

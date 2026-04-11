@@ -143,6 +143,18 @@ class ApprovalRouter:
         self._pending[request.id] = request
         total_timeout = timeout_s or self._default_timeout
 
+        try:
+            return await self._route_through_channels(request, total_timeout)
+        finally:
+            # Always clean up pending, even on unexpected errors
+            self._pending.pop(request.id, None)
+
+    async def _route_through_channels(
+        self,
+        request: ApprovalRequest,
+        total_timeout: float,
+    ) -> ApprovalResponse:
+        """Internal: try each channel in priority order."""
         # Sort channels by priority
         active_channels = sorted(
             [c for c in self._channels.values() if c.is_active],
@@ -181,7 +193,6 @@ class ApprovalRouter:
                     elif response.decision == ApprovalDecision.DENIED:
                         self._stats.denied += 1
 
-                    self._pending.pop(request.id, None)
                     return response
 
             except asyncio.TimeoutError:
@@ -199,7 +210,6 @@ class ApprovalRouter:
 
         # All channels failed
         self._stats.timed_out += 1
-        self._pending.pop(request.id, None)
         return ApprovalResponse(
             request_id=request.id,
             decision=ApprovalDecision.TIMEOUT,

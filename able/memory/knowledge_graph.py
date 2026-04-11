@@ -151,6 +151,8 @@ class KnowledgeGraph:
         max_depth: int = 2,
         max_results: int = 50,
     ) -> QueryResult:
+        # Clamp max_depth to prevent unbounded BFS traversal
+        max_depth = max(0, min(max_depth, 20))
         """Query the graph for an entity and its neighborhood.
 
         Uses BFS to find connected entities up to max_depth hops.
@@ -189,13 +191,23 @@ class KnowledgeGraph:
             depth=max_depth,
         )
 
-    def find_by_predicate(self, predicate: str) -> List[Relation]:
-        """Find all relations with a given predicate."""
+    def find_by_predicate(
+        self, predicate: str, max_results: int = 500,
+    ) -> List[Relation]:
+        """Find all relations with a given predicate.
+
+        Args:
+            predicate: The predicate to search for.
+            max_results: Maximum results to return (default 500, capped at 5000).
+        """
+        max_results = max(1, min(max_results, 5000))
         results = []
         for rels in self._outgoing.values():
             for rel in rels:
                 if rel.predicate == predicate:
                     results.append(rel)
+                    if len(results) >= max_results:
+                        return results
         return results
 
     def find_tunnels(self, min_cluster_size: int = 2) -> List[Tunnel]:
