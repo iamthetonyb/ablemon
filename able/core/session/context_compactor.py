@@ -199,6 +199,12 @@ class ContextCompactor:
             return messages
 
         self._compression_attempts += 1
+
+        # ── Scratchpad bridge: preserve key findings before discarding ──
+        # Extract decisions and file modifications from messages about to be
+        # compacted, cache them in scratchpad so they survive across compactions.
+        self._bridge_to_scratchpad(messages)
+
         original_len = len(messages)
         total = len(messages)
         compact_count = int(total * self.ratio)
@@ -289,6 +295,60 @@ class ContextCompactor:
                 logger.debug("Compression event callback failed", exc_info=True)
 
         return result
+
+    # ── Scratchpad bridge: survive compaction ──────────────────────
+
+    def _bridge_to_scratchpad(self, messages: List[Dict[str, Any]]) -> None:
+        """Extract key findings from messages about to be compacted.
+
+        Saves decisions and file modifications to scratchpad so they
+        survive across multiple compaction cycles. Non-critical — fails silently.
+        """
+        try:
+            from able.core.session.shared_scratchpad import SharedScratchpad
+            sp = SharedScratchpad()
+
+            for msg in messages:
+                content = self._get_text(msg)
+                if not content:
+                    continue
+
+                # Cache file modifications
+                m = self._EDIT_SUCCESS_RE.search(content)
+                if m:
+                    path = m.group(1) or m.group(2) or ""
+                    if path:
+                        sp.put(
+                            f"modified:{path}",
+                            f"File modified during session",
+                            source_agent="compactor",
+                            entry_type="file_summary",
+                            ttl_seconds=43200,  # 12h
+                        )
+
+                # Cache key decisions from assistant messages
+                if msg.get("role") == "assistant" and len(content) > 100:
+                    # Extract last meaningful sentence as decision marker
+                    for marker in ("decided", "fix:", "changed", "added", "created", "removed"):
+                        if marker in content.lower():
+                            # Find the sentence containing the marker
+                            idx = content.lower().index(marker)
+                            start = content.rfind(".", 0, idx) + 1
+                            end = content.find(".", idx)
+                            if end == -1:
+                                end = min(idx + 150, len(content))
+                            snippet = content[start:end].strip()[:200]
+                            if snippet:
+                                sp.put(
+                                    f"decision:{hash(snippet) % 100000}",
+                                    snippet,
+                                    source_agent="compactor",
+                                    entry_type="decision",
+                                    ttl_seconds=43200,
+                                )
+                            break  # One decision per message
+        except Exception:
+            pass  # Non-critical — don't break compaction
 
     # ── C4: Dedup repeated read_file calls ────────────────────────
 
@@ -846,6 +906,32 @@ class ContextCompactor:
             elif current_section is not None and stripped:
                 sections[current_section].append(line)
         return sections
+
+    def _bridge_to_scratchpad(self, messages: List[Dict[str, Any]]) -> None:
+        """Preserve key decisions from messages about to be compacted.
+
+        Extracts file modifications, caches in scratchpad so they survive
+        across compaction cycles. Best-effort — failures silently ignored.
+        """
+        try:
+            from able.core.session.shared_scratchpad import SharedScratchpad
+            sp = SharedScratchpad()
+            for msg in messages:
+                content = msg.get("content", "")
+                if not isinstance(content, list):
+                    continue
+                for block in content:
+                    if not isinstance(block, dict) or block.get("type") != "tool_use":
+                        continue
+                    name = block.get("name", "")
+                    inp = block.get("input", {})
+                    if isinstance(inp, dict) and name in ("Edit", "Write", "edit_file", "write_file"):
+                        path = inp.get("file_path", "") or inp.get("path", "")
+                        if path:
+                            sp.put(f"modified:{path}", f"modified by {name}",
+                                   entry_type="decision", source_agent="compactor")
+        except Exception:
+            pass  # Non-critical
 
     def snapshot_hash(self, messages: List[Dict[str, Any]]) -> str:
         """Compute a SHA-256 hash of the current context state (Merkle-style)."""
