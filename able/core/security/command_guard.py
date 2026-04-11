@@ -13,13 +13,19 @@ Security patterns ported from Claude Code's BashTool (12K+ LOC):
 
 from __future__ import annotations
 
+import json
+import logging
 import re
 import shlex
+import sqlite3
 import unicodedata
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 
 class CommandVerdict(Enum):
@@ -141,12 +147,211 @@ ALWAYS_DENIED = {
     "source", ".",           # Script sourcing
 }
 
+# ── A8: Smart Approvals That Learn ──────────────────────────────────────
+
+# Commands that NEVER get auto-approved, regardless of history.
+# Destructive, irreversible, or secret-touching patterns.
+_NEVER_AUTO_APPROVE = re.compile(
+    r"(?:"
+    r"rm\s+-r|rmdir|DROP\s+TABLE|DROP\s+DATABASE"
+    r"|--force|--hard|--no-verify"
+    r"|git\s+push\s+--force|git\s+reset\s+--hard"
+    r"|\.env|\.secrets|credentials|token\.json|id_rsa"
+    r"|sudo|su\s+"
+    r")",
+    re.IGNORECASE,
+)
+
+_DEFAULT_APPROVALS_DB = Path(__file__).parent.parent.parent / "db" / "smart_approvals.db"
+_AUTO_APPROVE_THRESHOLD = 5     # Approve after N prior approvals
+_APPROVAL_DECAY_DAYS = 30       # Approvals older than this don't count
+
+
+class SmartApprovals:
+    """SQLite-backed approval learning for command patterns.
+
+    Tracks which command patterns have been approved before.
+    After N approvals of the same pattern (default 5), auto-approves
+    future occurrences. 30-day decay for stale approvals.
+    Never auto-approves destructive commands.
+    """
+
+    def __init__(
+        self,
+        db_path: Optional[Path] = None,
+        threshold: int = _AUTO_APPROVE_THRESHOLD,
+        decay_days: int = _APPROVAL_DECAY_DAYS,
+    ):
+        self._db_path = str(db_path or _DEFAULT_APPROVALS_DB)
+        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._threshold = threshold
+        self._decay_days = decay_days
+        self._init_db()
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self._db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self):
+        conn = self._connect()
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS approvals (
+                    pattern TEXT PRIMARY KEY,
+                    approved_count INTEGER DEFAULT 0,
+                    denied_count INTEGER DEFAULT 0,
+                    last_approved_at TEXT,
+                    last_denied_at TEXT,
+                    created_at TEXT DEFAULT (datetime('now'))
+                )
+            """)
+            conn.commit()
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _normalize_pattern(command: str) -> str:
+        """Normalize a command to a pattern for matching.
+
+        Strips arguments that vary between invocations (file paths, hashes)
+        but preserves the command structure: base_cmd + subcommand + flags.
+        """
+        parts = command.split()
+        if not parts:
+            return ""
+        # Keep base command + first subcommand + flags only
+        pattern_parts = [parts[0]]
+        for part in parts[1:]:
+            if part.startswith("-"):
+                pattern_parts.append(part)
+            elif "/" not in part and "." not in part and len(part) < 20:
+                # Short non-path args (like "status", "log", "list")
+                pattern_parts.append(part)
+            # Skip file paths, hashes, long args
+        return " ".join(pattern_parts[:6])  # Cap pattern length
+
+    def record_approval(self, command: str) -> None:
+        """Record that a command was approved by the user."""
+        pattern = self._normalize_pattern(command)
+        if not pattern:
+            return
+        now = datetime.now(timezone.utc).isoformat()
+        conn = self._connect()
+        try:
+            conn.execute(
+                "INSERT INTO approvals (pattern, approved_count, last_approved_at) "
+                "VALUES (?, 1, ?) "
+                "ON CONFLICT(pattern) DO UPDATE SET "
+                "  approved_count = approved_count + 1, "
+                "  last_approved_at = ?",
+                (pattern, now, now),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def record_denial(self, command: str) -> None:
+        """Record that a command was denied by the user."""
+        pattern = self._normalize_pattern(command)
+        if not pattern:
+            return
+        now = datetime.now(timezone.utc).isoformat()
+        conn = self._connect()
+        try:
+            conn.execute(
+                "INSERT INTO approvals (pattern, denied_count, last_denied_at) "
+                "VALUES (?, 1, ?) "
+                "ON CONFLICT(pattern) DO UPDATE SET "
+                "  denied_count = denied_count + 1, "
+                "  last_denied_at = ?",
+                (pattern, now, now),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def should_auto_approve(self, command: str) -> bool:
+        """Check if a command should be auto-approved based on history.
+
+        Returns True only if:
+        - The command pattern has been approved >= threshold times
+        - The most recent approval is within decay_days
+        - The command is NOT in the never-auto-approve list
+        - The command has never been denied
+        """
+        # Never auto-approve destructive commands
+        if _NEVER_AUTO_APPROVE.search(command):
+            return False
+
+        pattern = self._normalize_pattern(command)
+        if not pattern:
+            return False
+
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=self._decay_days)).isoformat()
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT approved_count, denied_count, last_approved_at "
+                "FROM approvals WHERE pattern = ?",
+                (pattern,),
+            ).fetchone()
+            if not row:
+                return False
+            # Any denial blocks auto-approval
+            if row["denied_count"] and row["denied_count"] > 0:
+                return False
+            # Must meet threshold
+            if row["approved_count"] < self._threshold:
+                return False
+            # Must be recent
+            if row["last_approved_at"] and row["last_approved_at"] < cutoff:
+                return False
+            return True
+        finally:
+            conn.close()
+
+    def get_stats(self) -> dict:
+        """Return approval history stats."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) as total, "
+                "SUM(approved_count) as approvals, "
+                "SUM(denied_count) as denials "
+                "FROM approvals"
+            ).fetchone()
+            return {
+                "patterns": row["total"] or 0,
+                "total_approvals": row["approvals"] or 0,
+                "total_denials": row["denials"] or 0,
+            }
+        finally:
+            conn.close()
+
+    def prune_stale(self) -> int:
+        """Remove approval records older than decay_days. Returns count removed."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=self._decay_days)).isoformat()
+        conn = self._connect()
+        try:
+            cur = conn.execute(
+                "DELETE FROM approvals WHERE last_approved_at < ? AND last_approved_at IS NOT NULL",
+                (cutoff,),
+            )
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
+
 class CommandGuard:
-    def __init__(self, trust_tier: int = 1):
+    def __init__(self, trust_tier: int = 1, smart_approvals: Optional[SmartApprovals] = None):
         self.trust_tier = trust_tier  # 1-4, higher = more permissions
         self._yaml_permissions = self._load_yaml_permissions()
         # Enhanced policy engine (supports priority ordering, globs, scopes)
         self._policy_engine = self._load_policy_engine()
+        # A8: Smart approval learning
+        self.smart_approvals = smart_approvals or SmartApprovals()
 
     @staticmethod
     def _load_yaml_permissions() -> Optional[dict]:
@@ -602,6 +807,20 @@ class CommandGuard:
                 parsed_argv=argv,
                 reason=f"Command '{base_cmd}' is in allowlist",
                 risk_level=risk,
+                uses_shell_syntax=uses_shell_syntax,
+            )
+
+        # A8: Check smart approvals before requiring human approval
+        if self.smart_approvals and self.smart_approvals.should_auto_approve(command):
+            logger.debug("Smart auto-approve: %s", command[:80])
+            return CommandAnalysis(
+                verdict=CommandVerdict.ALLOWED,
+                command=command,
+                base_command=base_cmd,
+                parsed_args=args,
+                parsed_argv=argv,
+                reason=f"Auto-approved: '{base_cmd}' has prior approval history",
+                risk_level=4,
                 uses_shell_syntax=uses_shell_syntax,
             )
 
