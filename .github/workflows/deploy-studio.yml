@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'able-studio/**'
+      - '.github/workflows/deploy-studio.yml'
   workflow_dispatch:
 
 jobs:
