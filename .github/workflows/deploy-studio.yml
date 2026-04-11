@@ -40,6 +40,6 @@ jobs:
       - name: Deploy to Vercel
         working-directory: able-studio
         run: |
-          URL=$(pnpm dlx vercel@latest deploy --prod --token=${{ secrets.VERCEL_TOKEN }})
+          URL=$(pnpm dlx vercel@latest deploy --prod --yes --token=${{ secrets.VERCEL_TOKEN }})
           echo "Deployed to: $URL"
           echo "DEPLOY_URL=$URL" >> $GITHUB_ENV
