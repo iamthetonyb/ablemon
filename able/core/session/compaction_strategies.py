@@ -61,18 +61,37 @@ class CompactionStrategy(Protocol):
 # ── Built-in strategies ──────────────────────────────────────────
 
 
-class StripThinkingStrategy:
-    """Remove <think> blocks from assistant messages.
+class CompressThinkingStrategy:
+    """Compress <think> blocks instead of stripping them.
 
-    Cheapest strategy — no information loss for user-facing content.
+    Thinking blocks are gold training data for ABLE distillation.
+    Compresses to ~20% — drops hedging/filler, keeps decisions/analysis.
+    Preserves <think> tags so harvesters still recognize the format.
     """
-    name = "strip-thinking"
-    aggressiveness = 0.1
+    name = "compress-thinking"
+    aggressiveness = 0.15
 
     _THINK_RE = re.compile(
         r'<think>.*?</think>\s*|'
         r'\[Internal reasoning\].*?\[/Internal reasoning\]\s*',
         re.DOTALL | re.IGNORECASE,
+    )
+
+    # Filler phrases to drop from thinking
+    _FILLER_STARTS = (
+        'let me ', 'i need to ', 'i should ', 'okay,', 'ok,',
+        'now,', 'alright', 'hmm', 'so,', 'well,',
+        'the user', 'they want', 'they are',
+        'i think ', 'i believe ', 'i wonder ',
+        'wait,', 'actually,', 'let\'s see',
+    )
+
+    # Decision verbs that rescue a filler line
+    _DECISION_VERBS = (
+        'decided', 'fix', 'change', 'create', 'add',
+        'remove', 'update', 'implement', 'use ', 'set ',
+        'need to check', 'the issue is', 'root cause',
+        'because', 'critical', 'important', 'key ',
     )
 
     def compact(
@@ -85,12 +104,70 @@ class StripThinkingStrategy:
         for msg in messages:
             content = msg.get("content", "")
             if msg.get("role") == "assistant" and isinstance(content, str):
-                stripped = self._THINK_RE.sub("", content).strip()
-                if stripped != content:
-                    result.append({**msg, "content": stripped})
+                matches = list(self._THINK_RE.finditer(content))
+                if not matches:
+                    result.append(msg)
                     continue
-            result.append(msg)
+
+                new_content = content
+                for match in reversed(matches):
+                    original = match.group(0)
+                    if len(original) < 200:
+                        continue
+                    compressed = self._compress_block(original)
+                    new_content = (
+                        new_content[:match.start()]
+                        + compressed
+                        + new_content[match.end():]
+                    )
+
+                if new_content != content:
+                    result.append({**msg, "content": new_content})
+                else:
+                    result.append(msg)
+            else:
+                result.append(msg)
         return result
+
+    def _compress_block(self, think_block: str) -> str:
+        """Compress a single thinking block to ~20% of original."""
+        inner = re.sub(r'</?think[^>]*>', '', think_block, flags=re.IGNORECASE).strip()
+        if not inner:
+            return think_block
+
+        lines = [l.strip() for l in inner.split('\n') if l.strip()]
+        kept = []
+        seen_starts: set = set()
+
+        for line in lines:
+            lower = line.lower()
+            if any(lower.startswith(p) for p in self._FILLER_STARTS):
+                if not any(dv in lower for dv in self._DECISION_VERBS):
+                    continue
+            start = line[:30]
+            if start in seen_starts:
+                continue
+            seen_starts.add(start)
+            kept.append(line)
+
+        max_lines = max(3, len(lines) // 5)
+        if len(kept) > max_lines:
+            scored = []
+            for line in kept:
+                score = 0
+                if '/' in line or '.' in line:
+                    score += 2
+                if any(c in line for c in ('→', '=', '`', ':')):
+                    score += 1
+                if any(w in line.lower() for w in ('error', 'fix', 'decided', 'because', 'changed')):
+                    score += 2
+                if len(line) > 50:
+                    score += 1
+                scored.append((score, line))
+            scored.sort(key=lambda x: x[0], reverse=True)
+            kept = [s[1] for s in scored[:max_lines]]
+
+        return f'<think>\n{chr(10).join(kept)}\n</think>'
 
 
 class TruncateOldStrategy:
@@ -225,7 +302,7 @@ class DedupReadFileStrategy:
 # ── Strategy registry ────────────────────────────────────────────
 
 _BUILTIN_STRATEGIES = [
-    StripThinkingStrategy,
+    CompressThinkingStrategy,
     DedupReadFileStrategy,
     TruncateOldStrategy,
     AggressiveSummaryStrategy,
@@ -278,7 +355,7 @@ class CompactionStrategyRegistry:
 
         # Plenty of room → gentle
         if budget_ratio > 0.5:
-            return self._strategies["strip-thinking"]
+            return self._strategies["compress-thinking"]
 
         # Moderate pressure → truncate
         if budget_ratio > 0.2:

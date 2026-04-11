@@ -192,13 +192,17 @@ class TestLayeredCompaction:
         assert result_tokens < original_tokens
 
     def test_thinking_strip_first(self, compactor):
-        """Thinking blocks should be stripped before other layers."""
+        """Thinking blocks should be compressed (not stripped) before other layers."""
+        # Use filler content that the compressor can actually reduce
+        filler = "\n".join([f"Let me think about step {i}. I need to consider this." for i in range(30)])
         msgs = [
-            _msg("assistant", "<think>long thinking block " + "x" * 500 + "</think>Short answer."),
+            _msg("assistant", f"<think>{filler}</think>Short answer."),
         ] * 10
-        stripped = compactor._strip_thinking_blocks(msgs)
-        for m in stripped:
-            assert "<think>" not in m["content"]
+        compressed = compactor._compress_thinking_blocks(msgs)
+        for m in compressed:
+            # Tags preserved (for harvester), but content shorter
+            assert "<think>" in m["content"]
+            assert len(m["content"]) < len(msgs[0]["content"])
 
     def test_death_spiral_guard_still_works(self, compactor):
         """Compression attempts counter should still prevent loops."""

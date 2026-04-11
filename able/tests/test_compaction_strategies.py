@@ -9,7 +9,7 @@ from able.core.session.compaction_strategies import (
     AggressiveSummaryStrategy,
     CompactionStrategyRegistry,
     DedupReadFileStrategy,
-    StripThinkingStrategy,
+    CompressThinkingStrategy,
     TruncateOldStrategy,
 )
 
@@ -29,29 +29,40 @@ def _make_msgs(count, content_len=200):
 
 # ── Strip thinking ───────────────────────────────────────────────
 
-class TestStripThinking:
+class TestCompressThinking:
 
-    def test_removes_think_blocks(self):
-        s = StripThinkingStrategy()
+    def test_compresses_think_blocks(self):
+        s = CompressThinkingStrategy()
+        # Build a long thinking block (>200 chars) to trigger compression
+        thinking = "Let me think about this. " * 20  # ~500 chars of filler
         msgs = [
-            {"role": "assistant", "content": "<think>internal</think>Visible answer"},
+            {"role": "assistant", "content": f"<think>{thinking}</think>Visible answer"},
             {"role": "user", "content": "question"},
         ]
         result = s.compact(msgs)
-        assert "<think>" not in result[0]["content"]
+        # Thinking is compressed, not stripped — tags preserved
+        assert "<think>" in result[0]["content"]
         assert "Visible answer" in result[0]["content"]
+        assert len(result[0]["content"]) < len(msgs[0]["content"])
 
     def test_leaves_non_assistant(self):
-        s = StripThinkingStrategy()
-        msgs = [{"role": "user", "content": "<think>not stripped</think>"}]
+        s = CompressThinkingStrategy()
+        msgs = [{"role": "user", "content": "<think>not compressed</think>"}]
         result = s.compact(msgs)
         assert "<think>" in result[0]["content"]
 
     def test_no_change_when_no_thinking(self):
-        s = StripThinkingStrategy()
+        s = CompressThinkingStrategy()
         msgs = [{"role": "assistant", "content": "plain answer"}]
         result = s.compact(msgs)
         assert result[0]["content"] == "plain answer"
+
+    def test_short_thinking_not_compressed(self):
+        s = CompressThinkingStrategy()
+        msgs = [{"role": "assistant", "content": "<think>short</think>answer"}]
+        result = s.compact(msgs)
+        # Short thinking (<200 chars) stays as-is
+        assert result[0]["content"] == msgs[0]["content"]
 
 
 # ── Truncate old ─────────────────────────────────────────────────
@@ -152,9 +163,9 @@ class TestRegistry:
         assert len(registry.available()) == 4
 
     def test_get_strategy(self, registry):
-        s = registry.get("strip-thinking")
+        s = registry.get("compress-thinking")
         assert s is not None
-        assert s.name == "strip-thinking"
+        assert s.name == "compress-thinking"
 
     def test_get_nonexistent(self, registry):
         assert registry.get("nope") is None
@@ -191,4 +202,4 @@ class TestRegistry:
     def test_stats(self, registry):
         stats = registry.stats()
         assert stats["count"] == 4
-        assert "strip-thinking" in stats["strategies"]
+        assert "compress-thinking" in stats["strategies"]

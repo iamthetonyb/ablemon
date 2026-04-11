@@ -105,62 +105,65 @@ def test_compaction_summary_has_structure(compactor):
     assert "User requests" in summary or "CONTEXT SUMMARY" in summary
 
 
-# ── Strip-thinking recovery ──────────────────────────────────────
+# ── Thinking compression (not stripping) ─────────────────────────
 
-def test_strip_thinking_removes_think_blocks(compactor):
+def test_compress_thinking_preserves_tags(compactor):
+    """Thinking blocks are compressed, not stripped — tags preserved for harvesters."""
+    thinking_content = "Let me think about this. " * 20  # >200 chars triggers compression
     msgs = [
         {"role": "user", "content": "What is 2+2?"},
-        {"role": "assistant", "content": "<think>Let me calculate... 2+2=4</think>The answer is 4."},
+        {"role": "assistant", "content": f"<think>{thinking_content}</think>The answer is 4."},
     ]
-    result = compactor._strip_thinking_blocks(msgs)
-    assert "<think>" not in result[1]["content"]
+    result = compactor._compress_thinking_blocks(msgs)
+    # Tags preserved, content compressed, visible answer kept
+    assert "<think>" in result[1]["content"]
     assert "The answer is 4." in result[1]["content"]
+    assert len(result[1]["content"]) < len(msgs[1]["content"])
 
 
-def test_strip_thinking_removes_internal_reasoning(compactor):
-    msgs = [
-        {"role": "assistant", "content": "[Internal reasoning]Deep analysis here[/Internal reasoning]The conclusion."},
-    ]
-    result = compactor._strip_thinking_blocks(msgs)
-    assert "[Internal reasoning]" not in result[0]["content"]
-    assert "The conclusion." in result[0]["content"]
-
-
-def test_strip_thinking_preserves_user_messages(compactor):
+def test_compress_thinking_preserves_user_messages(compactor):
     msgs = [
         {"role": "user", "content": "The <think> tag is used in XML"},
     ]
-    result = compactor._strip_thinking_blocks(msgs)
+    result = compactor._compress_thinking_blocks(msgs)
     assert result[0]["content"] == msgs[0]["content"]
 
 
-def test_strip_thinking_does_not_mutate_original(compactor):
-    original_content = "<think>reasoning</think>Answer."
+def test_compress_thinking_does_not_mutate_original(compactor):
+    thinking = "Let me analyze this carefully. " * 15
+    original_content = f"<think>{thinking}</think>Answer."
     msgs = [{"role": "assistant", "content": original_content}]
-    compactor._strip_thinking_blocks(msgs)
-    # Original should be untouched
+    compactor._compress_thinking_blocks(msgs)
     assert msgs[0]["content"] == original_content
 
 
-def test_strip_thinking_recovery_skips_full_compaction(compactor):
-    """If stripping thinking blocks alone reclaims enough space, skip full compaction."""
-    # Create messages where thinking blocks are the bulk of the content
-    thinking = "<think>" + "x" * 3000 + "</think>"
+def test_compress_thinking_short_blocks_unchanged(compactor):
+    """Short thinking blocks (<200 chars) are not worth compressing."""
+    msgs = [
+        {"role": "assistant", "content": "<think>short</think>Answer."},
+    ]
+    result = compactor._compress_thinking_blocks(msgs)
+    assert result[0]["content"] == msgs[0]["content"]
+
+
+def test_compress_thinking_recovery_skips_full_compaction(compactor):
+    """If compressing thinking alone reclaims enough space, skip full compaction."""
+    # Build verbose thinking with lots of filler
+    filler = "\n".join([f"Let me think about step {i}. " * 5 for i in range(20)])
+    thinking = f"<think>{filler}</think>"
     msgs = [
         {"role": "user", "content": "short question"},
         {"role": "assistant", "content": thinking + "Short answer."},
         {"role": "user", "content": "follow-up"},
         {"role": "assistant", "content": thinking + "Another answer."},
     ]
-    # Set context_limit so full content exceeds threshold but stripped doesn't
     full_tokens = compactor.estimate_tokens(msgs)
-    # Threshold where full is over but stripped is under
     limit = int(full_tokens / COMPACT_THRESHOLD) - 50
-    stripped_tokens = compactor.estimate_tokens(compactor._strip_thinking_blocks(msgs))
+    compressed_tokens = compactor.estimate_tokens(compactor._compress_thinking_blocks(msgs))
 
-    if stripped_tokens < limit * COMPACT_THRESHOLD:
+    if compressed_tokens < limit * COMPACT_THRESHOLD:
         result = compactor.compact_if_needed(msgs, context_limit=limit)
-        # Should return stripped messages (no summary), not compacted
+        # Should return compressed messages (no summary), not fully compacted
         assert "[CONTEXT SUMMARY" not in str(result)
         assert len(result) == len(msgs)
 
