@@ -147,17 +147,20 @@ class ContextCompactor:
         if not self.needs_compaction(messages, context_limit):
             return messages
 
-        # ── Layer 1: Strip-thinking recovery (gemma-gem pattern) ──
-        stripped = self._strip_thinking_blocks(messages)
-        if not self.needs_compaction(stripped, context_limit):
-            _saved_tokens = self.estimate_tokens(messages) - self.estimate_tokens(stripped)
+        # ── Layer 1: Compress thinking blocks (preserve for distillation) ──
+        # Don't strip — thinking blocks are gold training data for ABLE distills.
+        # Instead, compress them: extract key reasoning, cache originals in
+        # scratchpad for harvester access, keep <think> tags for recognition.
+        compressed_thinking = self._compress_thinking_blocks(messages)
+        if not self.needs_compaction(compressed_thinking, context_limit):
+            _saved_tokens = self.estimate_tokens(messages) - self.estimate_tokens(compressed_thinking)
             logger.info(
-                "Strip-thinking recovery sufficient: reclaimed ~%d tokens, "
-                "skipping full compaction",
+                "Thinking compression sufficient: reclaimed ~%d tokens "
+                "(originals cached in scratchpad for distillation)",
                 _saved_tokens,
             )
-            return stripped
-        messages = stripped
+            return compressed_thinking
+        messages = compressed_thinking
 
         # ── Layer 2: Dedup repeated read_file calls (C4) ──────────
         deduped = self._dedup_read_file(messages)
@@ -699,24 +702,137 @@ class ContextCompactor:
         re.DOTALL | re.IGNORECASE,
     )
 
-    def _strip_thinking_blocks(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _compress_thinking_blocks(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Strip thinking/reasoning blocks from message content.
+        Compress thinking blocks instead of stripping them.
 
-        Cheaper than full summarization — just removes <think>...</think>
-        and [Internal reasoning] blocks from assistant messages.
+        Thinking blocks are gold training data for ABLE's distillation pipeline.
+        Instead of deleting, we:
+        1. Cache originals in scratchpad (harvesters can access later)
+        2. Compress to ~20% of original: keep decisions, drop hedging/restating
+        3. Preserve <think> tags so harvesters recognize the format
+
         Returns a new list (does not mutate the original).
         """
         result = []
         for msg in messages:
             content = msg.get("content", "")
             if msg.get("role") == "assistant" and isinstance(content, str):
-                stripped = self._THINK_RE.sub("", content).strip()
-                if stripped != content:
-                    result.append({**msg, "content": stripped})
+                matches = list(self._THINK_RE.finditer(content))
+                if not matches:
+                    result.append(msg)
                     continue
-            result.append(msg)
+
+                new_content = content
+                for match in reversed(matches):  # Reverse to preserve indices
+                    original = match.group(0)
+                    if len(original) < 200:
+                        continue  # Short thinking — not worth compressing
+
+                    # Cache original in scratchpad for harvester access
+                    self._cache_thinking_for_distill(original)
+
+                    # Compress: extract key reasoning lines
+                    compressed = self._compress_thinking_text(original)
+                    new_content = (
+                        new_content[:match.start()]
+                        + compressed
+                        + new_content[match.end():]
+                    )
+
+                if new_content != content:
+                    result.append({**msg, "content": new_content})
+                else:
+                    result.append(msg)
+            else:
+                result.append(msg)
         return result
+
+    def _compress_thinking_text(self, think_block: str) -> str:
+        """Compress a single thinking block to ~20% of original size.
+
+        Keeps: decisions, conclusions, key analysis, file paths, code refs.
+        Drops: hedging, restating the problem, narrative filler, pleasantries.
+        """
+        # Extract inner content (between tags)
+        inner = re.sub(r'</?think[^>]*>', '', think_block, flags=re.IGNORECASE).strip()
+        if not inner:
+            return think_block
+
+        lines = inner.split('\n')
+        kept = []
+        seen_starts = set()
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            # Skip filler patterns
+            lower = line.lower()
+            if any(lower.startswith(p) for p in (
+                'let me ', 'i need to ', 'i should ', 'okay,', 'ok,',
+                'now,', 'alright', 'hmm', 'so,', 'well,',
+                'the user', 'they want', 'they are',
+                'i think ', 'i believe ', 'i wonder ',
+                'wait,', 'actually,', 'let\'s see',
+            )):
+                # Keep only if it contains a decision verb
+                if not any(dv in lower for dv in (
+                    'decided', 'fix', 'change', 'create', 'add',
+                    'remove', 'update', 'implement', 'use ', 'set ',
+                    'need to check', 'the issue is', 'root cause',
+                    'because', 'critical', 'important', 'key ',
+                )):
+                    continue
+
+            # Deduplicate similar starts (catches restating)
+            start = line[:30]
+            if start in seen_starts:
+                continue
+            seen_starts.add(start)
+
+            # Keep substantive lines
+            kept.append(line)
+
+        # Budget: max 20% of original line count, min 3 lines
+        max_lines = max(3, len(lines) // 5)
+        if len(kept) > max_lines:
+            # Prioritize lines with: file paths, code, decisions, errors
+            scored = []
+            for line in kept:
+                score = 0
+                if '/' in line or '.' in line:  # File paths
+                    score += 2
+                if any(c in line for c in ('→', '=', '`', ':')):  # Structure
+                    score += 1
+                if any(w in line.lower() for w in ('error', 'fix', 'decided', 'because', 'changed')):
+                    score += 2
+                if len(line) > 50:  # Substantive
+                    score += 1
+                scored.append((score, line))
+            scored.sort(key=lambda x: x[0], reverse=True)
+            kept = [s[1] for s in scored[:max_lines]]
+
+        compressed = '\n'.join(kept)
+        return f'<think>\n{compressed}\n</think>'
+
+    def _cache_thinking_for_distill(self, think_block: str) -> None:
+        """Cache original thinking block in scratchpad for harvester access."""
+        try:
+            from able.core.session.shared_scratchpad import SharedScratchpad
+            sp = SharedScratchpad()
+            # Use hash as key to avoid collisions, keep full content
+            block_hash = hashlib.sha256(think_block.encode()).hexdigest()[:12]
+            sp.put(
+                f"thinking:{block_hash}",
+                think_block[:2000],  # Cap at 2K chars for storage
+                source_agent="compactor",
+                entry_type="thinking",
+                ttl_seconds=86400,  # 24h — harvesters run nightly
+            )
+        except Exception:
+            pass  # Non-critical
 
     def _extractive_summary(self, messages: List[Dict[str, Any]]) -> str:
         """Build a summary by extracting key decisions and tool results."""

@@ -203,7 +203,7 @@ Claude and other models emit synthetic declarations that never run — those are
 ### Context Compaction (`able/core/session/context_compactor.py`)
 - **Wired into gateway** — runs before each LLM call in the tool loop
 - At 80% context window: compacts 75% of messages into summary, keeping recent 25%
-- **Strip-thinking recovery** (gemma-gem pattern): before full compaction, strips `<think>` blocks from assistant messages — cheaper and preserves more context. Only falls back to full compaction if stripping is insufficient
+- **Thinking compression** (NOT stripping): `<think>` blocks are gold training data for distillation. Layer 1 compresses them to ~20% (drops hedging/filler, keeps decisions/analysis), caches originals in scratchpad for harvester access. Harvesters still see `<think>` tags. No reasoning data lost
 - **Death spiral prevention** (Hermes PR #4750): max 3 compression attempts per session, verifies each attempt actually reduces message count, min 3 tail messages always preserved
 - **Disconnect reclassification**: `RemoteProtocolError`, `ServerDisconnectedError`, `ConnectionResetError`, `ReadTimeout` treated as context-length errors (providers disconnect instead of returning 413)
 - **413 auto-compress + retry**: provider errors caught in gateway, auto-compacts and retries if `is_context_length_error()` returns True
