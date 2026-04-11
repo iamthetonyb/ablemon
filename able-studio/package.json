@@ -13,21 +13,21 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^3.0.41",
-    "@ai-sdk/react": "^3.0.118",
+    "@ai-sdk/openai": "^3.0.52",
+    "@ai-sdk/react": "^3.0.160",
     "@auth/drizzle-adapter": "^1.7.0",
     "@neondatabase/serverless": "^0.10.0",
-    "@tailwindcss/postcss": "^4.1.0",
-    "ai": "^6.0.116",
+    "@tailwindcss/postcss": "^4.2.2",
+    "ai": "^6.0.158",
     "bcryptjs": "^2.4.3",
-    "drizzle-orm": "^0.44.0",
+    "drizzle-orm": "^0.44.7",
     "lucide-react": "^0.577.0",
-    "next": "^16.2.0",
+    "next": "^16.2.3",
     "next-auth": "^5.0.0-beta.25",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
     "swr": "^2.4.1",
-    "tailwindcss": "^4.1.0"
+    "tailwindcss": "^4.2.2"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

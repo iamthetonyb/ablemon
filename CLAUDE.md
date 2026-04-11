@@ -22,7 +22,7 @@ ABLE uses a **complexity-scored 5-tier routing system** (see `docs/ROUTING.md` f
 | 0.5–0.7 | 2.5 | Claude Sonnet 4.6 + Opus advisor (API fallback only) | ~$3/$15 per M |
 | > 0.7 | 4 | Managed Agents Opus (SSE) → Claude Code CLI (Max sub) → Opus API ($15/$75) | $0 (Max sub) |
 | background | 3 | MiniMax M2.7 (evolution daemon only, OpenRouter) | $0.30/$1.20 per M |
-| offline | 5 | Gemma 4 31B cloud (Ollama) → Qwen 3.5 27B/9B UD (local, distillation base) | FREE |
+| offline | 5 | Gemma 4 E4B (Ollama, primary) → Gemma 4 31B cloud → Qwen 3.5 27B/9B UD (local) | FREE |
 
 Pipeline: User → TrustGate → Scanner → Auditor → **Enricher** → Scorer → Provider
 
@@ -142,7 +142,20 @@ From SOUL.md — internalize these:
 
 ## Distillation Pipeline (Current State — 2026-04-11)
 
-Corpus v048 live: 684 pairs → 165 domain-balanced training pairs. Unsloth notebooks generated.
+**Primary model: Gemma 4 E4B** (5.1B params, 4.5B effective via PLE, Apache 2.0, fits free Colab T4).
+
+Corpus v048 live: 684 pairs → 165 domain-balanced training pairs.
+
+**End-to-end flow:** harvest → corpus build → Colab train (E4B on free T4) → GGUF export → `ollama create` → T5 routing.
+
+**Training artifacts** (all in `notebooks/`):
+- `unsloth_finetune_able-*.ipynb` — Colab notebooks (CUDA + Unsloth, 4 models)
+- `local_finetune_able-*.ipynb` — VS Code local notebooks (auto-detect MPS/CUDA/CPU)
+- `able_finetune_local.ipynb` — Universal handcrafted local notebook (E4B default)
+- `train_able-*.py` — Standalone Python trainers (Unsloth + CUDA)
+- `train_mlx_able-*.sh` — Apple Silicon MLX scripts (native, no PEFT)
+
+**Safety:** Gemma 4 models block PEFT path on non-CUDA (KV-sharing corruption). MLX scripts emit correct Gemma 4 Ollama template (`<start_of_turn>`). Corpus path auto-resolves from any working directory.
 
 | File | Role |
 |------|------|
