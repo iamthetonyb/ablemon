@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ABLE Distillation — Local MLX LoRA Fine-Tuning
 # Generated: 2026-04-11 21:45 UTC
-# Model: Qwen/Qwen3.5-9B (edge)
+# Model: Qwen/Qwen3.5-27B (server)
 # Runtime: Apple Silicon MLX (unified memory)
 #
 # Requirements:
@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-MODEL="Qwen/Qwen3.5-9B-4bit"
+MODEL="Qwen/Qwen3.5-27B-4bit"
 _RAW_CORPUS="data/corpus/default/v048/train.jsonl"
 # Resolve corpus: try as-is, then parent dir, then ~/.able harvest output
 if [ -f "$_RAW_CORPUS" ]; then
@@ -31,12 +31,12 @@ else
     fi
 fi
 echo "Using corpus: $CORPUS_DIR"
-ADAPTER_DIR="adapters/able-nano-9b"
-FUSED_DIR="fused/able-nano-9b"
-GGUF_DIR="gguf/able-nano-9b"
+ADAPTER_DIR="adapters/able-student-27b"
+FUSED_DIR="fused/able-student-27b"
+GGUF_DIR="gguf/able-student-27b"
 
 echo "══════════════════════════════════════════════════════════"
-echo "  ABLE MLX LoRA Training: Qwen/Qwen3.5-9B"
+echo "  ABLE MLX LoRA Training: Qwen/Qwen3.5-27B"
 echo "  Corpus: data/corpus/default/v048/train.jsonl"
 echo "  Iterations: 600 | Batch: 1 | Layers: 8"
 echo "══════════════════════════════════════════════════════════"
@@ -54,7 +54,7 @@ python3 -m mlx_lm.lora \
     --adapter-path "$ADAPTER_DIR" \
     --batch-size 1 \
     --num-layers 8 \
-    --lora-rank 16 \
+    --lora-rank 32 \
     --iters 600 \
     --grad-checkpoint \
     --mask-prompt
@@ -91,24 +91,24 @@ mkdir -p "$GGUF_DIR"
 if python3 -c "import llama_cpp" &>/dev/null || [ -d "llama.cpp" ]; then
     # If llama.cpp is available locally
     python3 llama.cpp/convert_hf_to_gguf.py "$FUSED_DIR" \
-        --outfile "$GGUF_DIR/able-nano-9b-f16.gguf" \
+        --outfile "$GGUF_DIR/able-student-27b-f16.gguf" \
         --outtype f16
-    echo "▸ GGUF exported: $GGUF_DIR/able-nano-9b-f16.gguf"
+    echo "▸ GGUF exported: $GGUF_DIR/able-student-27b-f16.gguf"
     echo ""
     echo "  To quantize further:"
-    echo "    llama.cpp/llama-quantize $GGUF_DIR/able-nano-9b-f16.gguf $GGUF_DIR/able-nano-9b-q4_k_m.gguf q4_k_m"
+    echo "    llama.cpp/llama-quantize $GGUF_DIR/able-student-27b-f16.gguf $GGUF_DIR/able-student-27b-q4_k_m.gguf q4_k_m"
 else
     echo "▸ llama.cpp not found. Clone it for GGUF conversion:"
     echo "    git clone https://github.com/ggml-org/llama.cpp"
     echo "    pip install -r llama.cpp/requirements.txt"
-    echo "    python3 llama.cpp/convert_hf_to_gguf.py $FUSED_DIR --outfile $GGUF_DIR/able-nano-9b-f16.gguf --outtype f16"
+    echo "    python3 llama.cpp/convert_hf_to_gguf.py $FUSED_DIR --outfile $GGUF_DIR/able-student-27b-f16.gguf --outtype f16"
 fi
 
 # ── Step 6: Register in Ollama ───────────────────────────────
 echo ""
 echo "▸ To deploy in Ollama:"
 echo "    cat > Modelfile <<MODELFILE"
-echo "FROM ./$GGUF_DIR/able-nano-9b-q4_k_m.gguf"
+echo "FROM ./$GGUF_DIR/able-student-27b-q4_k_m.gguf"
 echo "TEMPLATE \"{{- if .System }}<|im_start|>system"
 echo "{{ .System }}<|im_end|>"
 echo "{{- end }}<|im_start|>user"

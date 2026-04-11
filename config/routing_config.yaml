@@ -310,11 +310,30 @@ providers:
     supports_vision: true
     throughput_tps: 22
     enabled: true
-    fallback_to: "ollama-edge"
+    fallback_to: "ollama-gemma4-e4b"
 
-  # ── Tier 5: Ollama (Edge/Mobile) — Qwen 3.5 9B UD-IQ2_M ──────
-  # Ultra-compact 3.65GB — primary edge target for mobile/offline.
-  # Distillation target: fine-tune on H100, deploy to edge devices.
+  # ── Tier 5: Ollama (Primary Edge) — Gemma 4 E4B ──────────────
+  # PRIMARY distillation target. 5.1B total / 4.5B effective via PLE.
+  # Apache 2.0. Fits on free Colab T4 (~8GB VRAM). Smallest, fastest edge model.
+  # Train: notebooks/unsloth_finetune_able-gemma4-e4b.ipynb (free Colab T4, 2-3h)
+  # Setup: ollama create gemma4-e4b -f config/ollama/Modelfile.gemma4-e4b
+  - name: "ollama-gemma4-e4b"
+    tier: 5
+    provider_type: "ollama"
+    endpoint: "http://localhost:11434"
+    model_id: "gemma4-e4b"
+    cost_per_m_input: 0.00
+    cost_per_m_output: 0.00
+    max_context: 32768
+    supports_tools: true
+    supports_vision: false
+    throughput_tps: 65
+    enabled: true
+    fallback_to: "ollama-edge"
+    api_key_env: ""
+
+  # ── Tier 5: Ollama (Edge Fallback) — Qwen 3.5 9B UD-IQ2_M ───
+  # Ultra-compact 3.65GB — secondary edge target when E4B unavailable.
   # Setup: ollama create qwen3.5-9b-edge -f config/ollama/Modelfile.9b-edge
   - name: "ollama-edge"
     tier: 5

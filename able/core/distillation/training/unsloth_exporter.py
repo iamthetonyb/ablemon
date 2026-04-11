@@ -216,7 +216,7 @@ class UnslothExporter:
             f'CORPUS_PATH = "train.jsonl"  # Local: {corpus_path}\n\n'
             "def format_chatml(example):\n"
             '    """Format a single training example as ChatML."""\n'
-            "    messages = example.get('messages', [])\n"
+            "    messages = example.get('messages', example.get('conversations', []))\n"
             "    formatted = tokenizer.apply_chat_template(\n"
             "        messages, tokenize=False, add_generation_prompt=False\n"
             "    )\n"
@@ -466,7 +466,7 @@ from datetime import datetime, timezone
 
 # ── Config ─────────────────────────────────────────────────────
 MODEL_NAME = "{config.base_model}"
-CORPUS_PATH = "{corpus_path}"
+_CORPUS_RAW = "{corpus_path}"
 MAX_SEQ_LENGTH = {lora["max_seq_length"]}
 LORA_R = {lora["r"]}
 LORA_ALPHA = {lora["lora_alpha"]}
@@ -475,6 +475,21 @@ BATCH_SIZE = {config.micro_batch_size}
 GRAD_ACCUM = {config.gradient_accumulation}
 LR = {config.learning_rate}
 QUANTS = {quants}
+
+# ── Resolve corpus path (works from repo root or notebooks/ dir) ──
+from pathlib import Path as _P
+_corpus = _P(_CORPUS_RAW).expanduser()
+if not _corpus.exists():
+    _corpus = _P("..") / _CORPUS_RAW  # Running from notebooks/ subdir
+if not _corpus.exists():
+    import glob as _g
+    _candidates = sorted(_g.glob(str(_P.home() / ".able/distillation/corpus/default/v*/train.jsonl")))
+    if _candidates:
+        _corpus = _P(_candidates[-1])
+if not _corpus.exists():
+    raise FileNotFoundError(f"Corpus not found: {{_CORPUS_RAW}} — run harvest first or set path manually")
+CORPUS_PATH = str(_corpus)
+print(f"Corpus: {{CORPUS_PATH}}")
 
 # ── Load model ─────────────────────────────────────────────────
 print(f"Loading {{MODEL_NAME}}...")
@@ -498,7 +513,7 @@ print(f"Trainable params: {{model.get_nb_trainable_parameters()}}")
 
 # ── Load corpus ────────────────────────────────────────────────
 def format_chatml(example):
-    messages = example.get("messages", [])
+    messages = example.get("messages", example.get("conversations", []))
     return {{"text": tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=False
     )}}
@@ -605,6 +620,7 @@ print(f"Create Ollama model: ollama create {model_name} -f Modelfile")
             raise ValueError(f"Unknown model: {model_name}")
 
         lora = _UNSLOTH_LORA_DEFAULTS.get(model_name, _UNSLOTH_LORA_DEFAULTS["able-nano-9b"])
+        is_gemma4 = model_name in _GEMMA4_MODELS
 
         # MLX expects a 4-bit quantized model ID or local path
         mlx_model = f"{config.base_model}-4bit"
@@ -625,7 +641,23 @@ print(f"Create Ollama model: ollama create {model_name} -f Modelfile")
 set -euo pipefail
 
 MODEL="{mlx_model}"
-CORPUS_DIR="$(dirname "{corpus_path}")"
+_RAW_CORPUS="{corpus_path}"
+# Resolve corpus: try as-is, then parent dir, then ~/.able harvest output
+if [ -f "$_RAW_CORPUS" ]; then
+    CORPUS_DIR="$(dirname "$_RAW_CORPUS")"
+elif [ -f "../$_RAW_CORPUS" ]; then
+    CORPUS_DIR="$(dirname "../$_RAW_CORPUS")"
+else
+    _LATEST=$(ls -d ~/.able/distillation/corpus/default/v*/train.jsonl 2>/dev/null | sort | tail -1)
+    if [ -n "$_LATEST" ]; then
+        CORPUS_DIR="$(dirname "$_LATEST")"
+    else
+        echo "ERROR: Corpus not found: $_RAW_CORPUS"
+        echo "Run harvest first or set path manually."
+        exit 1
+    fi
+fi
+echo "Using corpus: $CORPUS_DIR"
 ADAPTER_DIR="adapters/{model_name}"
 FUSED_DIR="fused/{model_name}"
 GGUF_DIR="gguf/{model_name}"
@@ -704,14 +736,28 @@ echo ""
 echo "▸ To deploy in Ollama:"
 echo "    cat > Modelfile <<MODELFILE"
 echo "FROM ./$GGUF_DIR/{model_name}-q4_k_m.gguf"
-echo "TEMPLATE \\"{{{{- if .System }}}}<|im_start|>system"
+''' + (
+            # Gemma 4 uses <start_of_turn>/<end_of_turn> template
+            f'''echo "TEMPLATE \\"{{{{- if .System }}}}<start_of_turn>user"
+echo "{{{{ .System }}}}<end_of_turn>"
+echo "{{{{ end }}}}{{{{- range .Messages }}}}<start_of_turn>{{{{ if eq .Role \\\\"assistant\\\\" }}}}model{{{{ else }}}}{{{{ .Role }}}}{{{{ end }}}}"
+echo "{{{{ .Content }}}}<end_of_turn>"
+echo "{{{{ end }}}}<start_of_turn>model\\""
+echo "PARAMETER temperature 0.7"
+echo "PARAMETER flash_attention on"
+echo "PARAMETER stop \\"<end_of_turn>\\""
+echo "PARAMETER stop \\"<start_of_turn>\\""'''
+            if is_gemma4 else
+            # ChatML template for Qwen models
+            f'''echo "TEMPLATE \\"{{{{- if .System }}}}<|im_start|>system"
 echo "{{{{ .System }}}}<|im_end|>"
 echo "{{{{- end }}}}<|im_start|>user"
 echo "{{{{ .Prompt }}}}<|im_end|>"
 echo "<|im_start|>assistant"
 echo "{{{{ .Response }}}}<|im_end|>\\""
 echo "PARAMETER temperature 0.7"
-echo "PARAMETER stop \\"<|im_end|>\\""
+echo "PARAMETER stop \\"<|im_end|>\\""'''
+        ) + '''
 echo "SYSTEM You are ABLE, an autonomous AI agent."
 echo "MODELFILE"
 echo ""
@@ -732,6 +778,263 @@ echo "════════════════════════�
         filepath.chmod(0o755)
 
         logger.info("Generated MLX training script: %s", filepath)
+        return filepath
+
+    def export_local_notebook(
+        self,
+        model_name: str,
+        corpus_path: str,
+        epochs: int = 3,
+    ) -> Path:
+        """Generate a local VS Code-compatible training notebook.
+
+        Works on MPS (Apple Silicon), CUDA, or CPU. Auto-detects hardware
+        and uses Unsloth (CUDA) or standard PEFT (MPS/CPU) accordingly.
+
+        Args:
+            model_name: Key from MODEL_REGISTRY (e.g., "able-nano-9b").
+            corpus_path: Path to training JSONL (ChatML format).
+            epochs: Training epochs.
+
+        Returns:
+            Path to the generated .ipynb file.
+        """
+        config = MODEL_REGISTRY.get(model_name)
+        if not config:
+            raise ValueError(f"Unknown model: {model_name}. Available: {list(MODEL_REGISTRY)}")
+
+        lora = _UNSLOTH_LORA_DEFAULTS.get(model_name, _UNSLOTH_LORA_DEFAULTS["able-nano-9b"])
+        quants = _GGUF_QUANTS.get(model_name, ["q4_k_m"])
+        is_gemma4 = model_name in _GEMMA4_MODELS
+
+        cells = []
+
+        # ── Title ────────────────────────────────────────────────
+        cells.append(self._markdown_cell(
+            f"# ABLE Distillation: Local Fine-Tune {config.base_model}\n\n"
+            f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n\n"
+            f"**Model**: {config.base_model} ({config.role})\n"
+            f"**Corpus**: `{corpus_path}`\n"
+            f"**Epochs**: {epochs}\n\n"
+            f"Auto-detects hardware: **CUDA** (Unsloth 2x faster) | "
+            f"**MPS** (PEFT LoRA) | **CPU** (testing only)\n\n"
+            f"Run in VS Code Jupyter, JupyterLab, or any local notebook environment."
+        ))
+
+        # ── Config cell ──────────────────────────────────────────
+        cells.append(self._code_cell(
+            f'MODEL_NAME = "{model_name}"\n'
+            f'BASE_MODEL = "{config.base_model}"\n'
+            f'CORPUS_PATH = "{corpus_path}"\n'
+            f"EPOCHS = {epochs}\n"
+            f"LEARNING_RATE = {config.learning_rate}\n"
+            f"MAX_SEQ_LENGTH = {lora['max_seq_length']}\n"
+            f"LORA_R = {lora['r']}\n"
+            f"LORA_ALPHA = {lora['lora_alpha']}\n"
+            f"IS_GEMMA4 = {is_gemma4}\n"
+            f"QUANT_METHODS = {quants}"
+        ))
+
+        # ── Environment detection ────────────────────────────────
+        cells.append(self._code_cell(
+            "import sys, platform, subprocess, torch\n"
+            "from pathlib import Path\n\n"
+            "DEVICE = 'cpu'\nUSE_UNSLOTH = False\nDTYPE = 'float32'\nMEMORY_GB = 0.0\n\n"
+            "if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():\n"
+            "    DEVICE = 'mps'\n"
+            "    DTYPE = 'float16'\n"
+            "    try:\n"
+            "        r = subprocess.run(['sysctl', '-n', 'hw.memsize'],\n"
+            "                           capture_output=True, text=True, timeout=5)\n"
+            "        MEMORY_GB = round(int(r.stdout.strip()) / (1024**3), 1)\n"
+            "    except Exception:\n"
+            "        MEMORY_GB = 16.0\n"
+            "elif torch.cuda.is_available():\n"
+            "    DEVICE = 'cuda'\n"
+            "    MEMORY_GB = round(torch.cuda.get_device_properties(0).total_mem / (1024**3), 1)\n"
+            "    cap = torch.cuda.get_device_capability(0)\n"
+            "    DTYPE = 'bfloat16' if cap[0] >= 8 else 'float16'\n"
+            "    USE_UNSLOTH = True\n\n"
+            "# Auto batch sizing\n"
+            "if MEMORY_GB >= 64: BATCH_SIZE, GRAD_ACCUM = 8, 2\n"
+            "elif MEMORY_GB >= 32: BATCH_SIZE, GRAD_ACCUM = 4, 4\n"
+            "elif MEMORY_GB >= 16: BATCH_SIZE, GRAD_ACCUM = 2, 8\n"
+            "else: BATCH_SIZE, GRAD_ACCUM = 1, 16\n\n"
+            "print(f'Device: {DEVICE} | Memory: {MEMORY_GB}GB | '\n"
+            "      f'Unsloth: {USE_UNSLOTH} | Batch: {BATCH_SIZE}x{GRAD_ACCUM}')"
+        ))
+
+        # ── Install deps ─────────────────────────────────────────
+        cells.append(self._code_cell(
+            "import subprocess, sys, os\n"
+            "def pip_install(*pkgs):\n"
+            "    subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-q'] + list(pkgs))\n\n"
+            "if USE_UNSLOTH:\n"
+            "    pip_install('unsloth>=2026.4.3')\n"
+            "    pip_install('--no-deps', 'trl', 'peft', 'accelerate', 'bitsandbytes')\n"
+            "else:\n"
+            "    pip_install('torch', 'transformers', 'peft', 'trl', 'accelerate', 'datasets')\n\n"
+            "os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'\n"
+            "os.environ['TRANSFORMERS_NO_ADVISORY_WARNINGS'] = '1'\n"
+            "print('Dependencies installed.')"
+        ))
+
+        # ── Load model ───────────────────────────────────────────
+        target_modules_str = str(lora.get("target_modules", [
+            "q_proj", "k_proj", "v_proj", "o_proj",
+            "gate_proj", "up_proj", "down_proj",
+        ]))
+        cells.append(self._code_cell(
+            "import torch\n\n"
+            "if USE_UNSLOTH:\n"
+            "    from unsloth import FastLanguageModel\n"
+            f"    model, tokenizer = FastLanguageModel.from_pretrained(\n"
+            f"        model_name=BASE_MODEL, max_seq_length=MAX_SEQ_LENGTH,\n"
+            f"        load_in_4bit=True, dtype=None)\n"
+            f"    model = FastLanguageModel.get_peft_model(model, r=LORA_R,\n"
+            f"        target_modules={target_modules_str},\n"
+            f"        lora_alpha=LORA_ALPHA, lora_dropout=0,\n"
+            f"        use_gradient_checkpointing='unsloth')\n"
+            "else:\n"
+            + (
+                "    if IS_GEMMA4:\n"
+                "        print('\\n' + '='*60)\n"
+                "        print('ERROR: Gemma 4 requires Unsloth (CUDA) for safe training.')\n"
+                "        print('KV-sharing corruption occurs with vanilla PEFT + gradient checkpointing.')\n"
+                "        print('Options:')\n"
+                "        print('  1. Use the Colab notebook (free T4 GPU, 24h runtime)')\n"
+                "        print('  2. Use the MLX script (Apple Silicon native, no PEFT)')\n"
+                "        print('  3. Use a CUDA machine with Unsloth installed')\n"
+                "        print('='*60 + '\\n')\n"
+                "        import sys; sys.exit(1)\n"
+            if is_gemma4 else "") +
+            "    from transformers import AutoModelForCausalLM, AutoTokenizer\n"
+            "    from peft import LoraConfig, get_peft_model\n"
+            "    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)\n"
+            "    if tokenizer.pad_token is None: tokenizer.pad_token = tokenizer.eos_token\n"
+            "    load_dtype = torch.float16 if DEVICE == 'mps' else torch.float32\n"
+            "    model = AutoModelForCausalLM.from_pretrained(BASE_MODEL,\n"
+            "        torch_dtype=load_dtype, attn_implementation='eager', low_cpu_mem_usage=True)\n"
+            "    if DEVICE == 'mps': model = model.to('mps')\n"
+            "    model.gradient_checkpointing_enable()\n"
+            f"    lora_config = LoraConfig(r=LORA_R, lora_alpha=LORA_ALPHA,\n"
+            f"        target_modules={target_modules_str},\n"
+            f"        lora_dropout=0, task_type='CAUSAL_LM')\n"
+            "    model = get_peft_model(model, lora_config)\n\n"
+            "trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)\n"
+            "total = sum(p.numel() for p in model.parameters())\n"
+            "print(f'Model: {BASE_MODEL} — {trainable:,}/{total:,} trainable ({trainable/total*100:.2f}%)')"
+        ))
+
+        # ── Load corpus ──────────────────────────────────────────
+        cells.append(self._code_cell(
+            "from datasets import load_dataset\nfrom pathlib import Path\n\n"
+            "corpus = Path(CORPUS_PATH)\n"
+            "if not corpus.exists(): corpus = Path('../') / CORPUS_PATH\n"
+            "if not corpus.exists(): raise FileNotFoundError(f'Corpus not found: {CORPUS_PATH}')\n\n"
+            "def format_chatml(example):\n"
+            "    messages = example.get('messages', example.get('conversations', []))\n"
+            "    return {'text': tokenizer.apply_chat_template(\n"
+            "        messages, tokenize=False, add_generation_prompt=False)}\n\n"
+            "dataset = load_dataset('json', data_files=str(corpus), split='train')\n"
+            "dataset = dataset.map(format_chatml)\n"
+            "print(f'Loaded {len(dataset)} training examples')"
+        ))
+
+        # ── Train ────────────────────────────────────────────────
+        gemma_note = (
+            "if IS_GEMMA4:\n"
+            "    print('NOTE: Gemma 4 training loss 10-15 is NORMAL. Do not stop early.')\n\n"
+        ) if is_gemma4 else ""
+
+        cells.append(self._code_cell(
+            "from trl import SFTTrainer\nfrom transformers import TrainingArguments\n\n"
+            + gemma_note +
+            "training_kwargs = dict(\n"
+            "    per_device_train_batch_size=BATCH_SIZE, gradient_accumulation_steps=GRAD_ACCUM,\n"
+            "    num_train_epochs=EPOCHS, learning_rate=LEARNING_RATE,\n"
+            "    logging_steps=10, save_strategy='steps', save_steps=100,\n"
+            f"    output_dir=f'outputs/{model_name}', warmup_steps=5,\n"
+            "    weight_decay=0.01, lr_scheduler_type='linear', seed=42, report_to='none')\n\n"
+            "if USE_UNSLOTH:\n"
+            "    from unsloth import is_bfloat16_supported\n"
+            "    training_kwargs.update(fp16=not is_bfloat16_supported(),\n"
+            "        bf16=is_bfloat16_supported(), optim='adamw_8bit')\n"
+            "elif DEVICE == 'mps':\n"
+            "    training_kwargs.update(fp16=False, bf16=False,\n"
+            "        dataloader_pin_memory=False, optim='adamw_torch')\n"
+            "else:\n"
+            "    training_kwargs.update(fp16=False, bf16=False, no_cuda=True, optim='adamw_torch')\n\n"
+            "trainer = SFTTrainer(model=model, tokenizer=tokenizer,\n"
+            "    train_dataset=dataset, dataset_text_field='text',\n"
+            "    max_seq_length=MAX_SEQ_LENGTH, dataset_num_proc=2,\n"
+            "    args=TrainingArguments(**training_kwargs))\n\n"
+            "trainer_stats = trainer.train()\n"
+            "print(f'Training complete. Loss: {trainer_stats.training_loss:.4f}')"
+        ))
+
+        # ── Export GGUF ──────────────────────────────────────────
+        cells.append(self._markdown_cell(
+            "## Export to GGUF for Ollama"
+        ))
+
+        quant_list = ", ".join(f'"{q}"' for q in quants)
+        cells.append(self._code_cell(
+            "import os\n"
+            f"os.makedirs(f'outputs/{model_name}-gguf', exist_ok=True)\n\n"
+            "if USE_UNSLOTH:\n"
+            f"    for quant in [{quant_list}]:\n"
+            f"        print(f'Exporting {{quant}}...')\n"
+            f"        model.save_pretrained_gguf(f'outputs/{model_name}-gguf',\n"
+            f"            tokenizer, quantization_method=quant)\n"
+            "else:\n"
+            "    merged = model.merge_and_unload()\n"
+            f"    merged.save_pretrained(f'outputs/{model_name}-merged')\n"
+            f"    tokenizer.save_pretrained(f'outputs/{model_name}-merged')\n"
+            f"    print(f'Merged model saved. Convert to GGUF with llama.cpp:')\n"
+            f"    print(f'  python3 llama.cpp/convert_hf_to_gguf.py outputs/{model_name}-merged \\\\')\n"
+            f"    print(f'    --outfile outputs/{model_name}-gguf/{model_name}-f16.gguf --outtype f16')"
+        ))
+
+        # ── Stats ────────────────────────────────────────────────
+        cells.append(self._code_cell(
+            "import json\nfrom datetime import datetime, timezone\n\n"
+            "stats = {\n"
+            f"    'model': '{model_name}', 'base': BASE_MODEL,\n"
+            f"    'corpus_size': len(dataset), 'epochs': EPOCHS,\n"
+            f"    'device': DEVICE, 'backend': 'unsloth' if USE_UNSLOTH else 'peft',\n"
+            f"    'loss': trainer_stats.training_loss,\n"
+            f"    'completed_at': datetime.now(timezone.utc).isoformat(),\n"
+            "}\n"
+            f"with open(f'outputs/{model_name}_training_stats.json', 'w') as f:\n"
+            "    json.dump(stats, f, indent=2)\n"
+            "print(json.dumps(stats, indent=2))"
+        ))
+
+        # ── Build notebook ───────────────────────────────────────
+        notebook = {
+            "nbformat": 4,
+            "nbformat_minor": 0,
+            "metadata": {
+                "kernelspec": {
+                    "name": "python3",
+                    "display_name": "Python 3 (ipykernel)",
+                },
+                "language_info": {
+                    "name": "python",
+                },
+            },
+            "cells": cells,
+        }
+
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"local_finetune_{model_name}.ipynb"
+        filepath = self.output_dir / filename
+
+        with open(filepath, "w") as f:
+            json.dump(notebook, f, indent=2)
+
+        logger.info("Generated local notebook: %s (%d cells)", filepath, len(cells))
         return filepath
 
     # ── Notebook cell helpers ─────────────────────────────────────

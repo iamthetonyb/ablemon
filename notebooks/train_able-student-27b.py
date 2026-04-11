@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""ABLE distillation training script — Unsloth + Qwen/Qwen3.5-9B
+"""ABLE distillation training script — Unsloth + Qwen/Qwen3.5-27B
 
 Generated: 2026-04-11 21:45 UTC
-Model: Qwen/Qwen3.5-9B (edge)
+Model: Qwen/Qwen3.5-27B (server)
 Corpus: data/corpus/default/v048/train.jsonl
 
 Run via VS Code connected to Colab runtime, or directly with a GPU:
-    python train_able-nano-9b.py
+    python train_able-student-27b.py
 """
 
 from unsloth import FastLanguageModel, is_bfloat16_supported
@@ -17,16 +17,16 @@ import json
 from datetime import datetime, timezone
 
 # ── Config ─────────────────────────────────────────────────────
-MODEL_NAME = "Qwen/Qwen3.5-9B"
+MODEL_NAME = "Qwen/Qwen3.5-27B"
 _CORPUS_RAW = "data/corpus/default/v048/train.jsonl"
-MAX_SEQ_LENGTH = 2048
-LORA_R = 16
-LORA_ALPHA = 16
+MAX_SEQ_LENGTH = 4096
+LORA_R = 32
+LORA_ALPHA = 32
 EPOCHS = 3
 BATCH_SIZE = 1
 GRAD_ACCUM = 8
-LR = 0.0002
-QUANTS = ['q4_k_m', 'iq2_m', 'q8_0']
+LR = 0.00015
+QUANTS = ['q4_k_m', 'q5_k_m', 'q8_0']
 
 # ── Resolve corpus path (works from repo root or notebooks/ dir) ──
 from pathlib import Path as _P
@@ -92,7 +92,7 @@ trainer = SFTTrainer(
         logging_steps=10,
         save_strategy="steps",
         save_steps=100,
-        output_dir=f"outputs/able-nano-9b",
+        output_dir=f"outputs/able-student-27b",
         optim="adamw_8bit",
         warmup_steps=5,
         weight_decay=0.01,
@@ -108,14 +108,14 @@ print(f"Training complete: loss={stats.training_loss:.4f}")
 for quant in QUANTS:
     print(f"Exporting {quant}...")
     model.save_pretrained_gguf(
-        f"outputs/able-nano-9b-gguf",
+        f"outputs/able-student-27b-gguf",
         tokenizer,
         quantization_method=quant,
     )
 
 # ── Save stats ─────────────────────────────────────────────────
 training_stats = {
-    "model": "able-nano-9b",
+    "model": "able-student-27b",
     "base": MODEL_NAME,
     "corpus_size": len(dataset),
     "epochs": EPOCHS,
@@ -123,9 +123,9 @@ training_stats = {
     "quants": QUANTS,
     "completed_at": datetime.now(timezone.utc).isoformat(),
 }
-with open(f"outputs/able-nano-9b_training_stats.json", "w") as f:
+with open(f"outputs/able-student-27b_training_stats.json", "w") as f:
     json.dump(training_stats, f, indent=2)
 
 print(json.dumps(training_stats, indent=2))
-print(f"\nGGUF files in outputs/able-nano-9b-gguf/")
-print(f"Create Ollama model: ollama create able-nano-9b -f Modelfile")
+print(f"\nGGUF files in outputs/able-student-27b-gguf/")
+print(f"Create Ollama model: ollama create able-student-27b -f Modelfile")
