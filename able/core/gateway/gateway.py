@@ -1184,6 +1184,7 @@ class ABLEGateway:
                     logger.warning("[PIPELINE] Advisor tool injection failed: %s", _adv_err)
 
             self.context_compactor.reset_compression_counter()
+            self.context_compactor._last_compaction_event = None  # Clear stale events
 
             for loop_iteration in range(_MAX_ITERATIONS):
                 # ── Context compaction check (Phase 0b) ──────────────
@@ -1741,6 +1742,16 @@ class ABLEGateway:
                                 result.advisor_usage.get("calls", 0)
                                 if hasattr(result, 'advisor_usage') and result.advisor_usage else None
                             ),
+                            # Compression telemetry — read from compactor's last event
+                            **({
+                                "compression_attempted": True,
+                                "compression_ratio": _ce["ratio"],
+                                "tokens_before_compression": _ce["tokens_before"],
+                                "tokens_after_compression": _ce["tokens_after"],
+                                "compression_mode": self._detect_compression_mode(
+                                    result.content[:1000] if result.content else ""
+                                ),
+                            } if (_ce := getattr(self.context_compactor, '_last_compaction_event', None)) else {}),
                         )
                     except Exception as log_e:
                         logger.warning(f"Failed to update interaction log: {log_e}")
@@ -2168,6 +2179,28 @@ class ABLEGateway:
                 break
 
         return "\n".join(notifications)
+
+    @staticmethod
+    def _detect_compression_mode(text: str) -> str:
+        """Detect ultramode compression style from response text sample."""
+        if not text:
+            return ""
+        import re
+        _cjk = len(re.findall(r'[\u4e00-\u9fff]', text))
+        _cu = len(re.findall(r'→|←|\b(?:ur|b4|bc|btwn|thru|w/o?|#s)\b', text))
+        _tech = len(re.findall(
+            r'\b(?:DB|auth|mw|EP|param|comp|tmpl|conn|txn|sched|ctr|infra|k8s|i18n'
+            r'|impl|fn|srv|dep|pkg|msg|err|req|res)\b', text
+        ))
+        has_wenyan = _cjk >= 3
+        has_caveman = (_cu + _tech) >= 3
+        if has_wenyan and has_caveman:
+            return "ultramode"
+        if has_wenyan:
+            return "wenyan-ultra"
+        if has_caveman:
+            return "caveman-ultra"
+        return ""
 
     async def _handle_tool_call(self, tool_call, update: Optional[Update], user_id: str, msgs: List["Message"] = None) -> str:
         """Dispatch a tool call from the AI to the correct client, with approval for writes."""

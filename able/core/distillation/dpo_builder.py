@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -56,6 +57,20 @@ _DEFAULT_OUTPUT = "data/distillation_dpo.jsonl"
 def _chatml_prompt(user_input: str) -> str:
     """Wrap user input in the ChatML assistant-turn prefix used during training."""
     return f"<|im_start|>user\n{user_input}<|im_end|>\n<|im_start|>assistant\n"
+
+
+# Compression mode detection patterns for DPO preference pairing
+_COMPRESSION_RE = re.compile(
+    r"→|←|\b(?:ur|b4|bc|btwn|thru|w/o?|#s)\b"
+)
+
+
+def _is_compressed(text: str) -> bool:
+    """Heuristic: does this response use ultramode compression patterns?"""
+    if not text:
+        return False
+    sample = text[:1000]
+    return len(_COMPRESSION_RE.findall(sample)) >= 3
 
 
 def _band_for(score: float) -> tuple:
@@ -212,8 +227,9 @@ class DPOBuilder:
         domain: str,
         score_rejected: float,
         score_chosen: float,
+        compression_mode: str = "",
     ) -> Dict[str, Any]:
-        return {
+        pair: Dict[str, Any] = {
             "prompt": _chatml_prompt(prompt),
             "chosen": chosen,
             "rejected": rejected,
@@ -222,6 +238,13 @@ class DPOBuilder:
             "audit_score_rejected": round(score_rejected, 3),
             "audit_score_chosen": round(score_chosen, 3),
         }
+        # Track compression preference: teaches model to prefer efficient output
+        if compression_mode:
+            pair["compression_mode"] = compression_mode
+            pair["compression_preferred"] = (
+                score_chosen >= _CHOSEN_SCORE_FLOOR and _is_compressed(chosen)
+            )
+        return pair
 
     def build_pairs(self, since_hours: int = 24) -> List[Dict[str, Any]]:
         """
@@ -243,6 +266,8 @@ class DPOBuilder:
             score_rejected = float(row.get("audit_score") or 0.0)
             source = "correction" if row.get("correction_detected") else "rlhf"
 
+            comp_mode: str = row.get("compression_mode") or ""
+
             if feedback_text:
                 # User provided an explicit correction → that IS the chosen response
                 pairs.append(
@@ -254,6 +279,7 @@ class DPOBuilder:
                         domain=domain,
                         score_rejected=score_rejected,
                         score_chosen=_CHOSEN_SCORE_FLOOR,  # assume user correction is good
+                        compression_mode=comp_mode,
                     )
                 )
             else:
@@ -286,6 +312,7 @@ class DPOBuilder:
                         domain=domain,
                         score_rejected=score_rejected,
                         score_chosen=float(chosen_row.get("audit_score") or _CHOSEN_SCORE_FLOOR),
+                        compression_mode=comp_mode,
                     )
                 )
 
@@ -322,6 +349,7 @@ class DPOBuilder:
                     domain=domain,
                     score_rejected=score_rejected,
                     score_chosen=float(chosen_row.get("audit_score") or _CHOSEN_SCORE_FLOOR),
+                    compression_mode=row.get("compression_mode") or "",
                 )
             )
 

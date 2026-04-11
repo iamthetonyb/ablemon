@@ -167,6 +167,8 @@ class ClaudeCodeHarvester(BaseHarvester):
         if not domain:
             domain = self._detect_domain(messages)
 
+        compression_mode = self._detect_compression_mode(messages)
+
         convo = HarvestedConversation(
             id=str(uuid.uuid5(uuid.NAMESPACE_URL, str(path))),
             source=self.source_name,
@@ -176,7 +178,10 @@ class ClaudeCodeHarvester(BaseHarvester):
             domain=domain,
             thinking_blocks=thinking_blocks,
             tool_uses=tool_uses,
-            metadata={"file": str(path)},
+            metadata={
+                "file": str(path),
+                "compression_mode": compression_mode,
+            },
         )
         return [convo]
 
@@ -302,6 +307,52 @@ class ClaudeCodeHarvester(BaseHarvester):
                 suffix = Path(val).suffix.lower()
                 if suffix:
                     exts.add(suffix)
+
+    # ── Compression mode detection ──────────────────────────────
+
+    # Wenyan indicators: CJK unified ideographs + common classical particles
+    _WENYAN_RE = re.compile(r"[\u4e00-\u9fff]{2,}")
+    # Caveman-ultra indicators: hyper-shorthand patterns
+    _CAVEMAN_PATTERNS = re.compile(
+        r"\bu\b(?=/| )|→|←|\bw/o?\b|\b#s\b|\bb4\b|\bbc\b|\bbtwn\b|\bthru\b|\bur\b"
+    )
+    # Tech abbreviations common in ultramode
+    _TECH_ABBREVS = re.compile(
+        r"\b(?:DB|auth|mw|EP|param|comp|tmpl|conn|txn|sched|ctr|infra|k8s|i18n"
+        r"|impl|fn|srv|dep|pkg|msg|err|req|res)\b"
+    )
+
+    @classmethod
+    def _detect_compression_mode(cls, messages: list[dict]) -> str:
+        """Heuristic detection of compression mode from message content.
+
+        Scans assistant messages for ultramode patterns:
+        - wenyan chars + tech abbrevs → "wenyan-ultra"
+        - caveman shorthand (u/ur, →, w/, b4, bc, #s) → "caveman-ultra"
+        - Both layers present → "ultramode"
+        - None detected → ""
+        """
+        assistant_text = " ".join(
+            m.get("content", "") for m in messages
+            if m.get("role") == "assistant" and isinstance(m.get("content"), str)
+        )
+        if not assistant_text:
+            return ""
+
+        # Sample first 3000 chars for efficiency
+        sample = assistant_text[:3000]
+
+        has_wenyan = bool(cls._WENYAN_RE.search(sample))
+        has_caveman = len(cls._CAVEMAN_PATTERNS.findall(sample)) >= 3
+        has_tech = len(cls._TECH_ABBREVS.findall(sample)) >= 3
+
+        if has_wenyan and (has_caveman or has_tech):
+            return "ultramode"  # Both layers detected (dual-mode)
+        if has_wenyan:
+            return "wenyan-ultra"
+        if has_caveman or has_tech:
+            return "caveman-ultra"
+        return ""
 
     @staticmethod
     def _domain_from_extensions(exts: set[str]) -> str:

@@ -353,6 +353,9 @@ class CorpusBuilder:
             "tier": tier,
             "quality_threshold": self.quality_threshold,
             "max_domain_pct": self.max_domain_pct,
+            "compression_mode_distribution": self._count_compression_modes(
+                train + val + test
+            ),
         }
 
         meta_path = version_dir / "metadata.yaml"
@@ -507,8 +510,26 @@ class CorpusBuilder:
             record.setdefault("response_accepted", True)
             record.setdefault("escalated", False)
             record.setdefault("tenant_id", "default")
+            # Promote compression_mode from nested metadata (harvester writes there)
+            if not record.get("compression_mode") and isinstance(record.get("metadata"), dict):
+                record["compression_mode"] = record["metadata"].get("compression_mode", "")
+            record.setdefault("compression_mode", "")
             canonical.append(record)
         return canonical
+
+    @staticmethod
+    def _count_compression_modes(pairs: list) -> Dict[str, int]:
+        """Count compression mode distribution across training pairs."""
+        counts: Dict[str, int] = {}
+        for p in pairs:
+            mode = ""
+            if isinstance(p, dict):
+                mode = p.get("compression_mode", "") or ""
+            elif hasattr(p, "compression_mode"):
+                mode = getattr(p, "compression_mode", "") or ""
+            key = mode if mode else "none"
+            counts[key] = counts.get(key, 0) + 1
+        return counts
 
     def build_tenant_with_able_base(
         self,

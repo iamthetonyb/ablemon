@@ -695,6 +695,67 @@ def register_default_jobs(
         description="Rotate and archive audit logs",
     )
 
+    # ── Compression metrics collection — every 6h ──────────────
+    async def collect_compression_metrics():
+        from able.core.routing.interaction_log import InteractionLogger
+        from datetime import datetime, timedelta, timezone
+
+        since = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
+        il = InteractionLogger()
+        stats = il.get_compression_stats(since)
+        logger.info(
+            "Compression metrics: %d compressed, avg_ratio=%.3f, saved=%d tokens",
+            stats.get("compressed_count", 0),
+            stats.get("avg_ratio", 0.0),
+            stats.get("total_tokens_saved", 0),
+        )
+        return stats
+
+    scheduler.add_job(
+        "compression-metrics-collect",
+        "0 */6 * * *",  # Every 6 hours
+        collect_compression_metrics,
+        description="Collect compression telemetry for evolution daemon",
+        timeout=60.0,
+    )
+
+    # ── Compression XP award — every 6h (offset 30min) ────────
+    async def award_compression_xp_job():
+        from able.core.routing.interaction_log import InteractionLogger
+        from able.core.buddy.xp import award_compression_xp
+        from datetime import datetime, timedelta, timezone
+
+        since = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
+        il = InteractionLogger()
+        stats = il.get_compression_stats(since)
+
+        saved = stats.get("total_tokens_saved", 0)
+        ratio = stats.get("avg_ratio", 1.0)
+        count = stats.get("compressed_count", 0)
+        avg_audit = stats.get("avg_audit_score", 0.0)
+
+        if count == 0 or saved < 100:
+            return {"skipped": True, "reason": "insufficient compression data"}
+
+        # Quality gate: require avg audit score >= 3.5 (out of 5.0)
+        # If auditor hasn't scored yet (avg_audit=0), assume quality maintained
+        quality_ok = avg_audit >= 3.5 or avg_audit == 0.0
+
+        xp = award_compression_xp(
+            tokens_saved=saved,
+            compression_ratio=ratio,
+            quality_maintained=quality_ok,
+        )
+        return {"xp_awarded": xp, "tokens_saved": saved, "ratio": ratio, "quality_ok": quality_ok}
+
+    scheduler.add_job(
+        "compression-xp-award",
+        "30 */6 * * *",  # Every 6 hours, offset 30 min from metrics collection
+        award_compression_xp_job,
+        description="Award buddy XP for efficient compression",
+        timeout=60.0,
+    )
+
     # ── Evolution daemon — nightly at 3am ───────────────────────
     async def run_evolution_daemon():
         from able.core.evolution.daemon import EvolutionDaemon, EvolutionConfig

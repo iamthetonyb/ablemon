@@ -112,6 +112,7 @@ def _classify_failures(parsed_evals: List[Dict]) -> Dict[str, List[Dict]]:
         "over_routing": [],      # T4 fail, T1 pass (wasted spend)
         "enricher_gap": [],      # enriched didn't help
         "skill_gap": [],         # skill-specific failures
+        "compression_failure": [],  # compressed output unclear/ambiguous/lost detail
     }
 
     for ev in parsed_evals:
@@ -152,6 +153,8 @@ def _classify_failures(parsed_evals: List[Dict]) -> Dict[str, List[Dict]]:
                     categories["format_violation"].append(record)
                 elif any(w in reason for w in ["quality", "depth", "detail", "specific"]):
                     categories["content_quality"].append(record)
+                elif any(w in reason for w in ["unclear", "ambiguous", "missing detail", "compressed", "abbreviat"]):
+                    categories["compression_failure"].append(record)
                 else:
                     # Determine if it's a skill or enricher issue
                     if "enricher" in desc.lower():

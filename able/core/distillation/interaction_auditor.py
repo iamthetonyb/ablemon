@@ -391,6 +391,39 @@ def _tool_correctness_score(row: Dict[str, Any]) -> float:
     return round(min(1.0, 0.5 + recall * 0.5), 3)
 
 
+def _compression_efficiency_score(row: Dict[str, Any]) -> float:
+    """
+    GEval metric: compression quality — did compression save tokens while
+    maintaining response quality?
+
+    Returns 0.0–5.0 where 5.0 = maximum savings with quality preserved.
+    Only called when compression_attempted is True.
+
+    Formula: quality_preserved * savings_factor * 5.0
+    - quality_preserved: audit_score / 5.0 (1.0 if audit not yet run)
+    - savings_factor: 1.0 - compression_ratio (higher = more savings)
+    """
+    audit = float(row.get("audit_score") or 0.0)
+    ratio = float(row.get("compression_ratio") or 1.0)
+    attempted = row.get("compression_attempted", False)
+
+    # Guard: skip scoring if compression wasn't attempted or audit hasn't run
+    if not attempted:
+        return 0.0
+
+    # Quality preservation (0.0–1.0): how much quality was maintained
+    # audit==0 means auditor hasn't scored yet — return sentinel -1.0 (pending)
+    if audit <= 0:
+        return -1.0
+    quality_preserved = audit / 5.0
+
+    # Savings factor (0.0–1.0): how much was saved (1 - ratio since ratio = after/before)
+    savings_factor = max(0.0, 1.0 - ratio)
+
+    score = quality_preserved * savings_factor * 5.0
+    return round(max(0.0, min(5.0, score)), 3)
+
+
 # ── Main auditor class ────────────────────────────────────────────────────────
 
 class InteractionAuditor:
@@ -583,6 +616,9 @@ class InteractionAuditor:
                 "routing_accuracy": _routing_acc,
                 "tool_correctness": _tool_correct,
             }
+            # Compression efficiency (only when compression was attempted)
+            if row.get("compression_attempted"):
+                notes["compression_efficiency"] = _compression_efficiency_score(row)
             if judge_detail is not None:
                 notes.update({
                     "accuracy": judge_detail.get("accuracy"),

@@ -105,6 +105,15 @@ class InteractionRecord:
     advisor_output_tokens: int = 0          # Advisor (Opus) output tokens
     advisor_calls: int = 0                  # Number of advisor invocations in this request
 
+    # ── Compression telemetry (2026-04-10) ────────────────────
+    # Tracks ultramode compression mode and token savings per interaction.
+    # Used by evolution daemon to analyze compression efficiency.
+    compression_mode: str = ""              # "ultramode"|"caveman-ultra"|"wenyan-ultra"|""
+    compression_attempted: bool = False
+    compression_ratio: float = 0.0          # tokens_after / tokens_before (lower = more savings)
+    tokens_before_compression: int = 0
+    tokens_after_compression: int = 0
+
 
 class InteractionLogger:
     """
@@ -183,6 +192,12 @@ class InteractionLogger:
         ("advisor_input_tokens", "INTEGER DEFAULT 0"),
         ("advisor_output_tokens", "INTEGER DEFAULT 0"),
         ("advisor_calls", "INTEGER DEFAULT 0"),
+        # Compression telemetry (2026-04-10) — ultramode token savings
+        ("compression_mode", "TEXT DEFAULT ''"),
+        ("compression_attempted", "INTEGER DEFAULT 0"),
+        ("compression_ratio", "REAL DEFAULT 0.0"),
+        ("tokens_before_compression", "INTEGER DEFAULT 0"),
+        ("tokens_after_compression", "INTEGER DEFAULT 0"),
     ]
 
     def __init__(self, db_path: str = DEFAULT_DB_PATH):
@@ -331,6 +346,11 @@ class InteractionLogger:
         advisor_input_tokens: Optional[int] = None,   # Advisor (Opus) input tokens
         advisor_output_tokens: Optional[int] = None,  # Advisor (Opus) output tokens
         advisor_calls: Optional[int] = None,          # Number of advisor invocations
+        compression_mode: Optional[str] = None,       # "ultramode"|"caveman-ultra"|"wenyan-ultra"
+        compression_attempted: Optional[bool] = None,
+        compression_ratio: Optional[float] = None,    # tokens_after / tokens_before
+        tokens_before_compression: Optional[int] = None,
+        tokens_after_compression: Optional[int] = None,
     ):
         """
         Update execution results after a provider responds.
@@ -379,6 +399,11 @@ class InteractionLogger:
             ("advisor_input_tokens", advisor_input_tokens),
             ("advisor_output_tokens", advisor_output_tokens),
             ("advisor_calls", advisor_calls),
+            ("compression_mode", compression_mode),
+            ("compression_attempted", int(compression_attempted) if compression_attempted is not None else None),
+            ("compression_ratio", compression_ratio),
+            ("tokens_before_compression", tokens_before_compression),
+            ("tokens_after_compression", tokens_after_compression),
         ]:
             if val is not None:
                 updates.append(f"{col} = ?")
@@ -564,6 +589,60 @@ class InteractionLogger:
         conn = self._connect()
         try:
             return conn.execute("SELECT COUNT(*) FROM interaction_log").fetchone()[0]
+        finally:
+            conn.close()
+
+    def get_compression_stats(self, since_iso: str) -> Dict[str, Any]:
+        """Aggregate compression metrics since a given ISO timestamp.
+
+        Returns dict with avg_ratio, total_saved, by_mode breakdown,
+        and count of compressed interactions. Used by evolution daemon.
+        """
+        conn = self._connect()
+        try:
+            # Overall stats
+            row = conn.execute(
+                "SELECT "
+                "  COUNT(*) as total, "
+                "  SUM(CASE WHEN compression_attempted = 1 THEN 1 ELSE 0 END) as compressed_count, "
+                "  AVG(CASE WHEN compression_attempted = 1 THEN compression_ratio END) as avg_ratio, "
+                "  SUM(CASE WHEN compression_attempted = 1 "
+                "    THEN tokens_before_compression - tokens_after_compression ELSE 0 END) as total_saved, "
+                "  AVG(CASE WHEN compression_attempted = 1 AND audit_score > 0 "
+                "    THEN audit_score END) as avg_audit "
+                "FROM interaction_log WHERE timestamp >= ?",
+                (since_iso,),
+            ).fetchone()
+
+            stats: Dict[str, Any] = {
+                "total_interactions": row["total"] if row else 0,
+                "compressed_count": (row["compressed_count"] or 0) if row else 0,
+                "avg_ratio": round(row["avg_ratio"], 4) if row and row["avg_ratio"] else 0.0,
+                "total_tokens_saved": (row["total_saved"] or 0) if row else 0,
+                "avg_audit_score": round(row["avg_audit"], 2) if row and row["avg_audit"] else 0.0,
+            }
+
+            # Per-mode breakdown
+            mode_rows = conn.execute(
+                "SELECT compression_mode, COUNT(*) as cnt, "
+                "  AVG(compression_ratio) as avg_r, "
+                "  SUM(tokens_before_compression - tokens_after_compression) as saved "
+                "FROM interaction_log "
+                "WHERE timestamp >= ? AND compression_attempted = 1 AND compression_mode != '' "
+                "GROUP BY compression_mode",
+                (since_iso,),
+            ).fetchall()
+
+            stats["by_mode"] = {
+                r["compression_mode"]: {
+                    "count": r["cnt"],
+                    "avg_ratio": round(r["avg_r"], 4) if r["avg_r"] else 0.0,
+                    "tokens_saved": r["saved"] or 0,
+                }
+                for r in mode_rows
+            }
+
+            return stats
         finally:
             conn.close()
 

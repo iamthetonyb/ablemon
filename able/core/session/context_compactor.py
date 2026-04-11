@@ -20,7 +20,7 @@ import json
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -69,11 +69,15 @@ class ContextCompactor:
         compact_threshold: float = COMPACT_THRESHOLD,
         compact_ratio: float = COMPACT_RATIO,
         max_attempts: int = MAX_COMPRESSION_ATTEMPTS,
+        event_callback: Optional[Callable] = None,
     ):
         self.threshold = compact_threshold
         self.ratio = compact_ratio
         self.max_attempts = max_attempts
         self._compression_attempts = 0  # Tracks attempts within a session
+        self._event_callback = event_callback  # Called after successful compaction
+        self._last_compaction_event: Optional[Dict[str, Any]] = None  # Accumulated event for gateway
+        self._first_tokens_before: Optional[int] = None  # Track across multiple compactions
 
     def estimate_tokens(self, messages: List[Dict[str, Any]]) -> int:
         """Estimate total token count for a message list."""
@@ -199,6 +203,7 @@ class ContextCompactor:
             )
             return messages
 
+        reduction_pct = (1 - new_tokens / max(old_tokens, 1)) * 100
         logger.info(
             "Context compacted: %d messages → %d (%d → ~%d tokens, %.0f%% reduction) "
             "[attempt %d/%d]",
@@ -206,10 +211,33 @@ class ContextCompactor:
             len(result),
             old_tokens,
             new_tokens,
-            (1 - new_tokens / max(old_tokens, 1)) * 100,
+            reduction_pct,
             self._compression_attempts,
             self.max_attempts,
         )
+
+        # Store compaction event for telemetry (gateway reads this at update_result time)
+        # Accumulate: first compaction's tokens_before + latest tokens_after = true savings
+        if self._first_tokens_before is None:
+            self._first_tokens_before = old_tokens
+        _event = {
+            "event": "context_compaction",
+            "tokens_before": self._first_tokens_before,  # Original size before any compaction
+            "tokens_after": new_tokens,
+            "ratio": round(new_tokens / max(self._first_tokens_before, 1), 4),
+            "messages_before": total,
+            "messages_after": len(result),
+            "reduction_pct": round((1 - new_tokens / max(self._first_tokens_before, 1)) * 100, 1),
+            "attempt": self._compression_attempts,
+        }
+        self._last_compaction_event = _event
+
+        # Emit via callback if configured
+        if self._event_callback is not None:
+            try:
+                self._event_callback(_event)
+            except Exception:
+                logger.debug("Compression event callback failed", exc_info=True)
 
         return result
 

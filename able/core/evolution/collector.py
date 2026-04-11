@@ -68,6 +68,9 @@ class MetricsCollector:
         # Enrich with durable memory context (operator learnings, domain signals)
         summary["memory_context"] = self._collect_memory_context(summary)
 
+        # Add compression analysis for evolution daemon
+        summary["compression_analysis"] = self._collect_compression_metrics(since)
+
         self._last_collection = datetime.now(timezone.utc).isoformat()
         return summary
 
@@ -169,6 +172,29 @@ class MetricsCollector:
             "query": query,
             "learnings": learnings,
         }
+
+    def _collect_compression_metrics(self, since: str) -> Dict[str, Any]:
+        """Aggregate compression telemetry for the evolution daemon.
+
+        Returns avg_ratio, total_saved, by_mode breakdown, and saturation flag.
+        Used by the analyzer to recommend compression rule changes.
+        """
+        try:
+            from able.core.routing.interaction_log import InteractionLogger
+            il = InteractionLogger(db_path=self._queries._db_path)
+            stats = il.get_compression_stats(since)
+        except Exception:
+            logger.debug("Compression metrics unavailable", exc_info=True)
+            return {"available": False}
+
+        # Saturation detection: if avg_ratio < 0.25 and quality is high,
+        # compression is near-optimal — no further changes needed
+        avg_ratio = stats.get("avg_ratio", 1.0)
+        saturated = avg_ratio < 0.25 and stats.get("compressed_count", 0) >= 10
+
+        stats["saturated"] = saturated
+        stats["available"] = True
+        return stats
 
     @property
     def queries(self) -> LogQueries:

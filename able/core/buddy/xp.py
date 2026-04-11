@@ -36,6 +36,8 @@ logger = logging.getLogger(__name__)
 
 XP_SPECIALTY_BONUS = 4
 XP_AETHER_ORCHESTRATION_BONUS = 12
+XP_COMPRESSION_EFFICIENT = 8      # Good ratio + quality maintained
+XP_COMPRESSION_SATURATED = 15     # 70%+ savings with quality preserved
 
 
 def _species_specialty_bonus(
@@ -303,6 +305,46 @@ def award_distillation_xp(new_pairs: int = 0) -> Optional[int]:
     logger.info("Buddy %s gained %d XP from %d new pairs", buddy.name, xp, new_pairs)
     if legendary_title:
         logger.info("Buddy %s unlocked legendary form: %s", buddy.name, legendary_title)
+    return xp
+
+
+def award_compression_xp(
+    *,
+    tokens_saved: int,
+    compression_ratio: float,
+    quality_maintained: bool = True,
+) -> Optional[int]:
+    """Award XP for efficient compression in a session.
+
+    Called by compression-xp-award cron job based on aggregated metrics.
+    tokens_saved: total tokens saved across compressed interactions.
+    compression_ratio: avg ratio (lower = more savings).
+    quality_maintained: True if audit scores stayed above threshold.
+    """
+    buddy = load_buddy()
+    if buddy is None:
+        return None
+
+    if not quality_maintained or tokens_saved < 100:
+        return 0
+
+    # Scale XP by savings: base + bonus for saturation
+    if compression_ratio < 0.3:
+        xp = XP_COMPRESSION_SATURATED  # Excellent compression
+    else:
+        xp = XP_COMPRESSION_EFFICIENT  # Good compression
+
+    # Bonus for large savings volumes
+    xp += min(tokens_saved // 5000, 10)  # +1 XP per 5K tokens saved, max +10
+
+    buddy.award_xp(xp)
+    buddy.water("compression")  # Efficient token use = hydration
+
+    save_buddy(buddy)
+    logger.info(
+        "Buddy %s gained %d XP from compression (ratio=%.2f, saved=%d tokens)",
+        buddy.name, xp, compression_ratio, tokens_saved,
+    )
     return xp
 
 

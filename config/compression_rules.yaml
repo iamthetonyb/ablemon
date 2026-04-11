@@ -1,0 +1,40 @@
+# ABLE Compression Rules
+# =====================
+# Evolution daemon reads this to understand current compression rules.
+# Can propose bounded additions (max 3 per cycle, must pass accuracy gate).
+# Synced back to ~/.claude/skills/ultramode/compression_dict.yaml
+#
+# Source of truth: ~/.claude/skills/ultramode/compression_dict.yaml
+# This file is a reference copy for the evolution daemon.
+
+version: 1
+source: "~/.claude/skills/ultramode/compression_dict.yaml"
+
+# Evolution constraints
+evolution:
+  max_additions_per_cycle: 3
+  accuracy_gate_threshold: 0.95  # New abbreviation must maintain 95% accuracy
+  min_occurrences: 3             # Phrase must appear 3+ times before acronym
+  review_required: true          # Proposed additions logged for human review
+
+# Current abbreviation counts (auto-updated by evolution daemon)
+stats:
+  pronouns: 7
+  connectives: 14
+  nouns: 17
+  tech: 28
+  project: 17
+  domain: 14
+  able: 12
+  wenyan_symbols: 12
+  total: 121
+
+# Proposed additions queue (evolution daemon writes, human reviews)
+pending_additions: []
+
+# Rejected additions (prevent re-proposal)
+rejected: []
+
+# Last evolution cycle
+last_updated: "2026-04-10"
+last_cycle_id: null

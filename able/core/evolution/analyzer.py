@@ -216,6 +216,52 @@ class EvolutionAnalyzer:
                     ),
                 })
 
+        # ── Compression analysis ──────────────────────────────────
+        comp = metrics.get("compression_analysis", {})
+        if comp.get("available") and comp.get("compressed_count", 0) > 0:
+            avg_r = comp.get("avg_ratio", 1.0)
+            saved = comp.get("total_tokens_saved", 0)
+
+            if avg_r > 0.5:
+                # Less than 50% savings — recommend new abbreviations
+                recommendations.append({
+                    "type": "compression_expansion",
+                    "severity": "medium",
+                    "description": (
+                        f"Compression avg ratio {avg_r:.2f} — less than 50% savings. "
+                        f"Consider adding new abbreviations to compression_dict.yaml"
+                    ),
+                })
+            elif avg_r >= 0.25:
+                # 25-50% savings — moderate, room to improve
+                opportunities.append({
+                    "type": "compression_moderate",
+                    "description": (
+                        f"Compression moderate: {avg_r:.2f} avg ratio, "
+                        f"{saved:,} tokens saved. Room for improvement — "
+                        f"target <0.25 via more aggressive shorthand."
+                    ),
+                })
+            elif not comp.get("saturated"):
+                # Under 25% = excellent compression
+                opportunities.append({
+                    "type": "compression_efficient",
+                    "description": (
+                        f"Compression efficient: {avg_r:.2f} avg ratio, "
+                        f"{saved:,} tokens saved. Near-optimal."
+                    ),
+                })
+
+            # Per-mode breakdown alerts
+            for mode, mode_stats in comp.get("by_mode", {}).items():
+                mode_r = mode_stats.get("avg_ratio", 1.0)
+                if mode_r > 0.6:
+                    problems.append({
+                        "type": "compression_underperforming",
+                        "severity": "low",
+                        "description": f"Mode '{mode}' avg ratio {mode_r:.2f} — below target",
+                    })
+
         confidence = 0.6 if problems or recommendations else 0.9
         return AnalysisResult(
             problems=problems,
