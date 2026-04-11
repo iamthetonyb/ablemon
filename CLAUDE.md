@@ -202,7 +202,7 @@ Claude and other models emit synthetic declarations that never run — those are
 
 ### Context Compaction (`able/core/session/context_compactor.py`)
 - **Wired into gateway** — runs before each LLM call in the tool loop
-- At 80% context window: compacts to 25% of max tokens, freeing 75% for new work
+- At 80% context window: compacts 75% of messages into summary, keeping recent 25%
 - **Strip-thinking recovery** (gemma-gem pattern): before full compaction, strips `<think>` blocks from assistant messages — cheaper and preserves more context. Only falls back to full compaction if stripping is insufficient
 - **Death spiral prevention** (Hermes PR #4750): max 3 compression attempts per session, verifies each attempt actually reduces message count, min 3 tail messages always preserved
 - **Disconnect reclassification**: `RemoteProtocolError`, `ServerDisconnectedError`, `ConnectionResetError`, `ReadTimeout` treated as context-length errors (providers disconnect instead of returning 413)
@@ -210,11 +210,13 @@ Claude and other models emit synthetic declarations that never run — those are
 
 ### Shared Scratchpad (`able/core/session/shared_scratchpad.py`)
 - **macOS Universal Clipboard pattern** — cross-agent knowledge cache
-- SQLite-backed k-v store w/ 24h TTL auto-expiry
+- SQLite-backed k-v store w/ 24h TTL auto-expiry, **lazy-init** (DB created on first use, not startup)
 - Gateway auto-caches file reads → sibling agents skip re-reading
-- `get_context_block()` generates UM-compressed summary for agent injection
+- `get_context_block()` generates UM-compressed summary for agent injection (capped: 10 entries, 2000 chars max)
+- Compaction bridge: `_bridge_to_scratchpad()` preserves file modification records before discarding messages
 - Convenience: `put_file_summary()`, `put_decision()`, `list_keys()`, `stats()`
 - Namespaced: global (cross-session), per-session, per-agent
+- **24 tests** covering put/get, TTL, namespace isolation, context block, lazy init, cleanup
 
 ### Tool Result Persistence (`able/core/gateway/tool_result_storage.py`)
 - **3-layer defense** against context overflow from large tool outputs (Hermes PR #5210 + #6085):
