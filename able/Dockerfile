@@ -11,7 +11,7 @@
 # Run:
 #   docker compose up -d
 
-ARG PYTHON_VERSION=3.14
+ARG PYTHON_VERSION=3.13
 
 # ── Stage 1: Builder ──────────────────────────────────────────
 FROM python:${PYTHON_VERSION}-slim AS builder

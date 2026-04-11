@@ -52,10 +52,10 @@ Response                           |
 | 4 | Managed Agents Opus | managed-agent-opus (Anthropic SSE) | $0.08/hr | 200K | Premium -- primary T4 |
 | 4 (fallback) | Claude Code CLI | claude-opus-4-6 (Max sub) | $0 | 200K | Managed Agents unavailable |
 | 4 (last resort) | Claude Opus 4.6 API | claude-opus-4-6 (Anthropic API) | $15.00/$75.00 | 200K | Budget-gated API fallback |
-| 5 | Gemma 4 31B cloud | gemma4:31b-cloud (Ollama cloud) | $0 | 131K | Primary offline |
-| 5 (fallback) | Qwen 3.5 27B | qwen3.5-27b-ud (Ollama local) | $0 | 131K | Distillation base |
-| 5 (edge) | Qwen 3.5 9B | qwen3.5-9b-edge (Ollama local) | $0 | 131K | Edge/mobile deployment |
-| 0 (future) | able-student-27b | Custom fine-tuned (Ollama) | $0 | 131K | Self-hosted student model |
+| 5 | Gemma 4 E4B | able-gemma4-e4b (Ollama, primary) | $0 | 131K | Primary offline / distillation target |
+| 5 (fallback) | Gemma 4 31B cloud | gemma4:31b-cloud (Ollama cloud) | $0 | 131K | Heavier offline tasks |
+| 5 (edge) | Qwen 3.5 9B | qwen3.5-9b-ud (Ollama local) | $0 | 131K | Edge/mobile deployment |
+| 0 (future) | able-gemma4-e4b | Custom fine-tuned (Ollama) | $0 | 131K | Self-hosted student model |
 
 **M2.7 is never user-facing.** It only runs as the evolution daemon's analysis brain.
 
@@ -264,7 +264,7 @@ When enabled, Tier 0 sits below the current tier_1_max threshold:
 
 | Score | Tier | Provider |
 |-------|------|----------|
-| < 0.2 | 0 | able-student-27b (Ollama, local) |
+| < 0.2 | 0 | able-gemma4-e4b (Ollama, local) |
 | 0.2 - 0.4 | 1 | GPT 5.4 Mini (OpenAI OAuth) |
 | 0.4 - 0.7 | 2 | GPT 5.4 (OpenAI OAuth) |
 | > 0.7 | 4 | Claude Opus 4.6 (budget-gated) |
@@ -275,7 +275,7 @@ Tier 0 is disabled by default. Enable via `config/routing_config.yaml`:
 routing:
   tier_0_enabled: false
   tier_0_max_score: 0.2
-  tier_0_model: "able-student-27b"
+  tier_0_model: "able-gemma4-e4b"
 ```
 
 ## Tenant Routing

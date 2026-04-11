@@ -37,17 +37,9 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
 
-      - name: Pull Vercel Environment
-        working-directory: able-studio
-        run: pnpm dlx vercel@latest pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
-
-      - name: Build
-        working-directory: able-studio
-        run: pnpm dlx vercel@latest build --prod --token=${{ secrets.VERCEL_TOKEN }}
-
-      - name: Deploy
+      - name: Deploy to Vercel
         working-directory: able-studio
         run: |
-          URL=$(pnpm dlx vercel@latest deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
+          URL=$(pnpm dlx vercel@latest deploy --prod --token=${{ secrets.VERCEL_TOKEN }})
           echo "Deployed to: $URL"
           echo "DEPLOY_URL=$URL" >> $GITHUB_ENV

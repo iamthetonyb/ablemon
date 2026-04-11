@@ -61,7 +61,7 @@ ABLE/
 ├── config/
 │   ├── routing_config.yaml        # 5-tier provider registry + budget caps
 │   ├── scorer_weights.yaml        # Complexity scorer (evolution-tuned, versioned)
-│   ├── distillation/              # 27B and 9B training configs
+│   ├── distillation/              # E4B, 9B training configs
 │   └── ollama/                    # Modelfiles for local deployment
 ├── scripts/
 │   ├── able-auth.py               # OpenAI OAuth setup
@@ -111,7 +111,7 @@ User → TrustGate → Scanner → Auditor → PromptEnricher → ComplexityScor
 | 0.4-0.7 | 2    | GPT 5.4 (OAuth)          | $0 (subscription)  |
 | > 0.7   | 4    | Claude Opus 4.6          | $15/$75 per M      |
 | bg only | 3    | MiniMax M2.7 (OpenRouter) | $0.30/$1.20 per M |
-| offline | 5    | Ollama Qwen 3.5 27B/9B  | FREE               |
+| offline | 5    | Gemma 4 E4B (primary) → Qwen 3.5 9B | FREE |
 
 Budget caps (source of truth: `config/routing_config.yaml`):
 - Opus API fallback: $25/day, $150/month
@@ -162,7 +162,7 @@ Every request logs a 25-field record to `data/interaction_log.db` (SQLite WAL): 
 Classifies eval failures into 7 categories: thinking_bleed, skill_gap, format_violation, under_routing, content_quality, over_routing, model_regression. Routing actions stay in the evolution daemon; skill/content-quality actions now submit approval-gated SKILL.md section updates through `SelfImprovementEngine`.
 
 ### 5. Distillation Pipeline (`able/core/distillation/`)
-Harvests successful T4 (gold) completions from interaction log → exports JSONL training pairs → fine-tunes Qwen 3.5 via Axolotl + Unsloth on H100 (27B) or T4 Colab (9B) → re-quantizes to UD targets → deploys to Ollama T5 lane. Currently ~20 pairs collected, needs 100+ for first H100 run.
+Harvests successful T4 (gold) completions from interaction log → exports JSONL training pairs → fine-tunes via Unsloth on free Colab T4 (E4B primary, 9B fallback) → exports GGUF → deploys to Ollama T5 lane. 684 total pairs, 165 domain-balanced corpus v048 ready for first E4B fine-tune.
 
 ### 6. Prompt Enricher (`able/core/routing/prompt_enricher.py`)
 953-line rule-based enricher (0ms, $0). Detects 8 domains, expands 11 flavor words with domain-specific criteria. Four enrichment levels (none/light/standard/deep). Integrates memory context when available. A/B validated: baseline 0% vs enriched 60% pass on T1.
@@ -183,18 +183,17 @@ Root-level shim packages have been removed. All 87 bare imports migrated.
 
 Pinned sizes — do not change without re-measuring.
 
-- `able-student-27b`: `UD-Q4_K_XL` = 17.6 GB | `Q5_K_M` = 19.6 GB | `Q8_0` = 28.6 GB
+- **`able-gemma4-e4b`**: `UD-Q4_K_XL` = 3.2 GB | `UD-IQ2_M` = 1.8 GB (primary distillation target)
 - `able-nano-9b`: `UD-IQ2_M` = 3.65 GB | `UD-Q4_K_XL` = 5.97 GB | `Q5_K_M` = 6.58 GB
 - `able-gemma4-31b`: `UD-Q4_K_XL` = 18.8 GB | `Q5_K_M` = 21.0 GB | `Q8_0` = 31.0 GB
 - `able-gemma4-e4b`: `UD-Q4_K_XL` = 3.2 GB | `UD-IQ2_M` = 1.8 GB
 
 Config source of truth:
-- `config/distillation/able_student_27b.yaml`
 - `config/distillation/able_nano_9b.yaml`
 - `able/core/distillation/training/model_configs.py`
 
 Training lanes:
-- **27B**: H100-only, seq_len=8192, micro_batch=1, bf16
+- **E4B (primary)**: Free T4 Colab (10GB QLoRA), seq_len=4096, micro_batch=2, fp16, Unsloth mandatory (KV-sharing bug)
 - **9B**: T4-first default, seq_len=2048, micro_batch=1, fp16, checkpoint every 100 steps
 - **Gemma 4 31B**: A100/H100, seq_len=8192, micro_batch=1, bf16, Unsloth LoRA r=8/alpha=8
 - **Gemma 4 E4B**: Free T4 Colab (10GB QLoRA), seq_len=4096, micro_batch=2, fp16, Unsloth mandatory (KV-sharing bug)

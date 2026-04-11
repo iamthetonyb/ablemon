@@ -15,7 +15,7 @@ Simple questions hit GPT 5.4 Mini through your ChatGPT subscription — $0 per t
 Every conversation is evaluated, scored, and turned into training data. Wins get reinforced. Corrections get captured. Over time it builds a fine-tuned local model that sounds like your actual use case.
 
 **It doesn't crash when conversations get long.**  
-A 10-layer robustness stack handles context overflow, stuck tool loops, and provider disconnects automatically. Context gets compacted, large outputs get persisted to disk, idle agents get pressure, spinning agents get killed. You don't notice any of it.
+A 10-layer robustness stack handles context overflow, stuck tool loops, and provider disconnects automatically. Thinking blocks get compressed (not stripped) to preserve training data while freeing context. Large outputs get persisted to disk, idle agents get pressure, spinning agents get killed. You don't notice any of it.
 
 **It has a companion that grows with it.**  
 Your buddy starts at a level based on how you already use AI. Feed it, train it, watch it evolve. It's not decorative — it reflects real system activity.
@@ -74,7 +74,7 @@ Every message gets complexity-scored in under 5ms. No LLM call needed.
 | 0.5–0.7 | T2.5 | Sonnet + Opus advisor (API fallback only) | ~$3/$15/M |
 | > 0.7 | T4 | Managed Agents Opus → Claude Code CLI → Opus API | **$0** (Max sub) |
 | Background | T3 | MiniMax M2.7 | $0.30/$1.20/M |
-| Offline | T5 | Gemma 4 31B cloud → Qwen 3.5 27B/9B local | **Free** |
+| Offline | T5 | Gemma 4 E4B (primary) → Gemma 4 31B cloud → Qwen 3.5 9B local | **Free** |
 
 The routing weights self-tune every 6 hours using a background daemon.
 
@@ -102,7 +102,9 @@ ABLE turns your conversations into training data automatically.
 
 **When you're ready to fine-tune:**
 - Training pairs are in `data/distillation_*.jsonl`
-- Unsloth notebooks generated automatically for Qwen 3.5 9B / 27B
+- Primary target: **Gemma 4 E4B** (5.1B params, fits free Colab T4, Apache 2.0)
+- Unsloth notebooks auto-generated for E4B, Nano 9B, Student 27B, Gemma 4 31B
+- Standalone Python trainers + MLX scripts for Apple Silicon included
 - Fine-tuned model plugs into T5 (local), promotes to T1 when it passes eval
 - Apple Silicon ANE-aware: battery mode uses Neural Engine prefill + GPU decode
 
@@ -185,10 +187,10 @@ able/
 ├── core/routing/        Complexity scorer + provider chain + effort levels + budget tracker
 ├── core/buddy/          Companion system (XP, evolution, renderer)
 ├── core/evolution/      Self-tuning weights + cumulative research scout
-├── core/distillation/   Training data pipeline (harvest → score → export)
+├── core/distillation/   Training data pipeline (harvest → score → corpus → Colab/MLX → GGUF)
 ├── core/federation/     Network sharing + distributed compute mesh
 ├── core/observability/  Phoenix tracing (every LLM call, every tool, every cron)
-├── core/session/        Context compaction + session versioning
+├── core/session/        Context compaction + compress-thinking + shared scratchpad + versioning
 ├── core/security/       TrustGate, CommandGuard, egress inspector
 ├── scheduler/           15+ cron jobs (audit, harvest, evolution, research, lint)
 ├── tools/trilium/       TriliumNext knowledge base (wiki, research ingestion)

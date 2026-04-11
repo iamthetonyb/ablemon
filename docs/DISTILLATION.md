@@ -62,35 +62,37 @@ Assembles graded, formatted data into versioned training corpora:
 | Growth | 2,000-10,000 | Improved training |
 | Full | 10,000-50,000 | Comprehensive |
 
-## Dual Student Models
+## Student Models
 
 | Model | Base | Quant | Size | Role |
 |-------|------|-------|------|------|
-| able-student-27b | Qwen 3.5 27B | UD-Q4_K_XL | 17.6GB | Server |
+| **able-gemma4-e4b** | Gemma 4 E4B | GGUF (Unsloth) | ~5GB | **Primary** — fits free Colab T4, Apache 2.0 |
 | able-nano-9b | Qwen 3.5 9B | UD-IQ2_M | 3.65GB | Edge/Mobile |
 | able-nano-9b-balanced | Qwen 3.5 9B | UD-Q4_K_XL | 5.97GB | Balanced Edge |
 
-The 27B model targets server deployment as a T0/T1 replacement. The 9B models target edge devices where VRAM and storage are constrained.
+Gemma 4 E4B (5.1B params) is the primary distillation target — smallest, fastest, fits free Colab T4 (8GB VRAM). The 9B models target edge devices where VRAM and storage are constrained.
+
+**Safety**: Gemma 4 requires Unsloth (CUDA) for training. Vanilla PEFT + gradient checkpointing causes KV-sharing corruption.
 
 ## Training Pipeline
 
 ### QLoRA Configuration
 
-| Parameter | 27B | 9B |
-|-----------|-----|-----|
-| LoRA rank (r) | 32 | 16 |
-| LoRA alpha | 64 | 32 |
-| Sequence length | 8192 | 4096 |
+| Parameter | E4B (primary) | 9B |
+|-----------|---------------|-----|
+| LoRA rank (r) | 16 | 16 |
+| LoRA alpha | 16 | 32 |
+| Sequence length | 4096 | 4096 |
 | Quantization | QLoRA 4-bit | QLoRA 4-bit |
-| Template | ChatML | ChatML |
+| Template | Gemma 4 (`<start_of_turn>`) | ChatML |
 | Masking | train_on_responses_only | train_on_responses_only |
+| Framework | Unsloth (mandatory) | Unsloth or vanilla PEFT |
 
 ### GPU Budget
 
-- 20h/month H100 80GB (Colab)
-- ~8h core model training, ~12h tenant-specific training, 2.5h buffer
-- 27B: ~0.9h per 1K training examples
-- 9B: ~0.3h per 1K training examples
+- Free Colab T4 (15GB VRAM) — primary training target
+- E4B: ~0.2h per 1K training examples on T4
+- 9B: ~0.3h per 1K training examples on T4
 
 ### Preflight Check
 
@@ -174,11 +176,11 @@ After validation passes all 4 stages:
 ### Ollama Registration
 
 ```bash
-# Create Ollama model from fine-tuned GGUF
-ollama create able-student-27b -f config/ollama/Modelfile.student-27b
+# Create Ollama model from fine-tuned E4B GGUF
+ollama create able-gemma4-e4b -f config/ollama/Modelfile.e4b
 
 # Verify model loads
-ollama run able-student-27b "Hello, are you ABLE?"
+ollama run able-gemma4-e4b "Hello, are you ABLE?"
 ```
 
 ## CLI Commands
@@ -191,7 +193,7 @@ python -m able.core.distillation.training --check
 python -m able.core.distillation.training --train all
 
 # Train specific model
-python -m able.core.distillation.training --train 27b
+python -m able.core.distillation.training --train e4b
 python -m able.core.distillation.training --train 9b
 
 # GPU budget report
@@ -210,36 +212,30 @@ python -m able.core.distillation.training --export --format jsonl
 ## Ollama Setup (Base Models)
 
 ```bash
-# Download GGUFs from HuggingFace
-huggingface-cli download unsloth/Qwen3.5-27B-GGUF \
-    Qwen3.5-27B-UD-Q4_K_XL.gguf --local-dir ./models
+# After Colab fine-tune, download E4B GGUF and register:
+ollama create able-gemma4-e4b -f config/ollama/Modelfile.e4b
+
+# Fallback: Qwen 3.5 9B for edge deployment
 huggingface-cli download unsloth/Qwen3.5-9B-GGUF \
     Qwen3.5-9B-UD-IQ2_M.gguf --local-dir ./models
-huggingface-cli download unsloth/Qwen3.5-9B-GGUF \
-    Qwen3.5-9B-UD-Q4_K_XL.gguf --local-dir ./models
-
-# Create Ollama models from base GGUFs
-ollama create qwen3.5-27b-ud -f config/ollama/Modelfile.27b
 ollama create qwen3.5-9b-edge -f config/ollama/Modelfile.9b-edge
-ollama create qwen3.5-9b-balanced -f config/ollama/Modelfile.9b-balanced
 ```
 
-## Current State
+## Current State (2026-04-11)
 
-- ~20 training pairs collected, targeting 500 for seed tier
-- H100 cluster access: ~10-20 hours per Colab session
-- Schedule: weekly/bi-weekly fine-tuning after data accumulation
-- Base models: Qwen 3.5 27B + 9B with Unsloth Dynamic 2.0 quants
-- Modelfiles: `config/ollama/Modelfile.{27b,9b-edge,9b-balanced}`
+- 684 total pairs, corpus v048: 165 domain-balanced training pairs
+- Primary model: **Gemma 4 E4B** (5.1B params, fits free Colab T4)
+- Training tooling: 4 Colab notebooks, 4 local notebooks, 4 standalone trainers, 4 MLX scripts
+- **Next step**: Run `notebooks/unsloth_finetune_able-gemma4-e4b.ipynb` on Colab T4
 
 ## File Map
 
 | File | Purpose |
 |------|---------|
 | `config/routing_config.yaml` | Tier 5 Ollama provider definitions |
-| `config/ollama/Modelfile.27b` | Ollama config for 27B server model |
+| `config/ollama/Modelfile.e4b` | Ollama config for E4B primary model |
 | `config/ollama/Modelfile.9b-edge` | Ollama config for 9B edge model |
-| `config/ollama/Modelfile.9b-balanced` | Ollama config for 9B balanced model |
 | `config/scorer_weights.yaml` | Tier thresholds (Tier 0 when enabled) |
 | `data/interaction_log.db` | Source for ABLE harvester |
 | `data/distillation_*.jsonl` | Exported training pairs |
+| `notebooks/unsloth_finetune_able-gemma4-e4b.ipynb` | Primary Colab training notebook |

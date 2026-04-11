@@ -106,8 +106,8 @@ User Input → TrustGate → Scanner → Auditor → PromptEnricher → Complexi
 | 4 | **Managed Agents Opus** | Anthropic SSE ($0.08/hr) | — | 200K | Premium — primary T4 |
 | 4 (fallback) | Claude Code CLI | Max subscription ($0) | — | 200K | Managed Agents unavailable |
 | 4 (last resort) | Claude Opus 4.6 API | Anthropic ($15/$75/M) | — | 200K | Budget-gated API fallback |
-| 5 | Gemma 4 31B cloud | Ollama cloud | — | 131K | Primary offline |
-| 5 (fallback) | Qwen 3.5 27B UD | Ollama local (free) | — | 131K | Distillation base |
+| 5 | **Gemma 4 E4B** | Ollama (primary distillation target) | — | 131K | Primary offline — 5.1B params, fits free T4 |
+| 5 (fallback) | Gemma 4 31B cloud | Ollama cloud | — | 131K | Heavier offline tasks |
 | 5 (edge) | Qwen 3.5 9B UD | Ollama local (free) | — | 131K | Edge/mobile |
 
 **T1 and T2 cost $0 per token** — routed through your ChatGPT subscription via OAuth PKCE.
@@ -318,39 +318,36 @@ Live training pipeline — 579 total pairs collected, 339 eligible, corpus v046 
 
 | Target | Base | Quant | Size | Use Case |
 |--------|------|-------|------|----------|
-| Server | Qwen 3.5 27B | UD-Q4_K_XL | 17.6GB | Primary local T1 replacement |
-| Edge (primary) | Qwen 3.5 9B | UD-IQ2_M | 3.65GB | Mobile/offline deployment |
-| Edge (balanced) | Qwen 3.5 9B | UD-Q4_K_XL | 5.97GB | When device has more room |
+| **Primary** | **Gemma 4 E4B** | GGUF (via Unsloth) | ~5GB | Primary distillation target — fits free Colab T4 |
+| Nano | Qwen 3.5 9B | UD-IQ2_M | 3.65GB | Edge/mobile deployment |
+| Student | Qwen 3.5 9B | UD-Q4_K_XL | 5.97GB | When device has more room |
 
 ### Pipeline
 1. **Harvest**: 13 harvesters collect training data from all channels (Claude Code, Codex, ChatGPT, Grok, Cursor, Windsurf, Gemini, Manus, Perplexity, claude.ai exports, ABLE interactions, external tools, batch trajectories)
 2. **Federation**: Network pairs from other ABLE instances ingested via nightly sync (3:30am cron)
 3. **Export**: Distillation JSONL pairs (`~/.able/distillation/corpus/`) — ChatML format, domain-balanced (30% cap)
-4. **Train**: Unsloth fine-tuning via Colab notebooks (9B on free T4, 27B on H100). `UnslothExporter` generates Colab notebooks, MLX scripts (Apple Silicon), and standalone Python training scripts.
+4. **Train**: Unsloth fine-tuning via Colab notebooks (E4B primary on free T4, 9B/31B on larger GPUs). `UnslothExporter` generates Colab notebooks, MLX scripts (Apple Silicon), and standalone Python training scripts. Gemma 4 requires Unsloth (CUDA) — vanilla PEFT causes KV-sharing corruption.
 5. **Requant**: Export to GGUF via Unsloth Dynamic 2.0 quants (Q4_K_XL, IQ2_M)
 6. **Deploy**: Register fine-tuned models in Ollama, swap into T5 (then promote to T1)
 
 ### Ollama Setup
 ```bash
-# Download GGUFs from HuggingFace
-huggingface-cli download unsloth/Qwen3.5-27B-GGUF Qwen3.5-27B-UD-Q4_K_XL.gguf --local-dir ./models
-huggingface-cli download unsloth/Qwen3.5-9B-GGUF Qwen3.5-9B-UD-IQ2_M.gguf --local-dir ./models
-huggingface-cli download unsloth/Qwen3.5-9B-GGUF Qwen3.5-9B-UD-Q4_K_XL.gguf --local-dir ./models
+# After fine-tuning E4B on Colab T4, download GGUF and register:
+ollama create able-gemma4-e4b -f config/ollama/Modelfile.e4b
 
-# Create Ollama models
-ollama create qwen3.5-27b-ud -f config/ollama/Modelfile.27b
+# Fallback local models
+huggingface-cli download unsloth/Qwen3.5-9B-GGUF Qwen3.5-9B-UD-IQ2_M.gguf --local-dir ./models
 ollama create qwen3.5-9b-edge -f config/ollama/Modelfile.9b-edge
-ollama create qwen3.5-9b-balanced -f config/ollama/Modelfile.9b-balanced
 ```
 
-### Current State (2026-04-07)
-- 579 total pairs, 339 corpus-eligible (quality ≥ 0.8)
-- Corpus v046 built: 153 domain-balanced pairs (train=133, val=13, test=7)
-- Domain distribution: coding 59, copywriting 47, behavioral-profiling 24, devops 16, data 5, security 1, general 1
-- Unsloth notebooks generated: `notebooks/unsloth_finetune_able-nano-9b.ipynb` (Colab T4), `notebooks/train_mlx_able-nano-9b.sh` (Apple Silicon MLX)
-- **Next step**: Run Colab notebook on free T4, register fine-tuned GGUF in Ollama as T5
-- Base models: Qwen 3.5 27B + 9B with Unsloth Dynamic quants
-- Modelfiles: `config/ollama/Modelfile.{27b,9b-edge,9b-balanced}`
+### Current State (2026-04-11)
+- 684 total pairs in distillation DB
+- Corpus v048: 165 domain-balanced training pairs (train=139, val=16, test=10)
+- Primary model: **Gemma 4 E4B** (5.1B params, 8GB VRAM, fits free Colab T4, Apache 2.0)
+- Fallback models: nano-9b (Qwen 3.5), gemma4-31b
+- Training tooling complete: 4 Colab notebooks, 4 local notebooks, 4 standalone trainers, 4 MLX scripts
+- Safety: Gemma 4 blocks PEFT on non-CUDA, correct Ollama templates per model family
+- **Next step**: Run `notebooks/unsloth_finetune_able-gemma4-e4b.ipynb` on Colab T4 → GGUF → `ollama create` → T5 routing
 
 ### Harvest Sources (13 adapters)
 
