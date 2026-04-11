@@ -192,12 +192,27 @@ class ContextCompactor:
         old_messages = messages[:compact_count]
         recent_messages = messages[compact_count:]
 
-        summary = self._extractive_summary(old_messages)
+        # ── E8: Iterative compression ─────────────────────────────
+        # If the first old message is already a context summary from a
+        # prior compaction, merge the new summary into it rather than
+        # re-summarizing from scratch. This preserves more actionable
+        # state across multiple compressions.
+        existing_summary = self._extract_existing_summary(old_messages)
+        new_summary = self._extractive_summary(
+            old_messages[1:] if existing_summary else old_messages
+        )
+
+        if existing_summary:
+            summary = self._merge_summaries(existing_summary, new_summary)
+            _total_compacted = compact_count  # Includes the prior summary msg
+        else:
+            summary = new_summary
+            _total_compacted = compact_count
 
         summary_message = {
             "role": "system",
             "content": (
-                f"[CONTEXT SUMMARY — {compact_count} messages compacted]\n\n"
+                f"[CONTEXT SUMMARY — {_total_compacted} messages compacted]\n\n"
                 f"{summary}\n\n"
                 f"[END CONTEXT SUMMARY — conversation continues below]"
             ),
@@ -478,6 +493,94 @@ class ContextCompactor:
                     parts.append(block)
             return " ".join(parts)
         return str(content)
+
+    # ── E8: Iterative compression helpers ───────────────────────
+
+    _SUMMARY_MARKER = "[CONTEXT SUMMARY"
+
+    def _extract_existing_summary(self, messages: List[Dict[str, Any]]) -> Optional[str]:
+        """Check if the first message is a prior context summary.
+
+        Returns the summary text (between markers) or None.
+        """
+        if not messages:
+            return None
+        first = messages[0]
+        if first.get("role") != "system":
+            return None
+        content = self._get_text(first)
+        if not content.startswith(self._SUMMARY_MARKER):
+            return None
+        # Extract body between the header and footer markers
+        start = content.find("\n\n")
+        end = content.rfind("\n\n[END CONTEXT SUMMARY")
+        if start == -1 or end == -1 or end <= start:
+            return content  # Malformed but still a summary
+        return content[start + 2:end]
+
+    def _merge_summaries(self, existing: str, new: str) -> str:
+        """Merge an existing context summary with new extractive content.
+
+        Strategy: parse both into section dicts, merge per section
+        (deduplicated, capped), produce a single combined summary.
+        This preserves historical context while adding new observations.
+        """
+        existing_sections = self._parse_summary_sections(existing)
+        new_sections = self._parse_summary_sections(new)
+
+        # Section merge order and limits
+        SECTION_LIMITS = {
+            "User requests": 7,
+            "Tool calls executed": 12,
+            "Key conclusions": 7,
+            "Issues noted": 5,
+        }
+
+        merged_parts = []
+        all_keys = list(dict.fromkeys(list(existing_sections) + list(new_sections)))
+        for key in all_keys:
+            limit = SECTION_LIMITS.get(key, 8)
+            old_items = existing_sections.get(key, [])
+            new_items = new_sections.get(key, [])
+            # New items first (more recent), then old, deduped
+            seen = set()
+            combined = []
+            for item in new_items + old_items:
+                # Strip numbering/bullets before dedup comparison
+                _stripped = item.strip().lower()
+                _stripped = re.sub(r"^\d+\.\s*", "", _stripped)  # "1. foo" → "foo"
+                _stripped = re.sub(r"^-\s*", "", _stripped)      # "- foo" → "foo"
+                normalized = _stripped[:80]
+                if normalized not in seen:
+                    seen.add(normalized)
+                    combined.append(item)
+            combined = combined[:limit]
+            if combined:
+                merged_parts.append(f"**{key}:**")
+                merged_parts.extend(combined)
+                merged_parts.append("")
+
+        return "\n".join(merged_parts).strip() if merged_parts else new or existing
+
+    @staticmethod
+    def _parse_summary_sections(text: str) -> Dict[str, List[str]]:
+        """Parse a structured summary into {section_name: [items]}.
+
+        Expects format like:
+            **Section Name:**
+              - item 1
+              - item 2
+        """
+        sections: Dict[str, List[str]] = {}
+        current_section = None
+        for line in text.split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("**") and stripped.endswith(":**"):
+                current_section = stripped.strip("*").strip().rstrip(":")
+                sections[current_section] = []
+            elif current_section is not None and stripped:
+                sections[current_section].append(line)
+        return sections
 
     def snapshot_hash(self, messages: List[Dict[str, Any]]) -> str:
         """Compute a SHA-256 hash of the current context state (Merkle-style)."""
