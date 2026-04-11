@@ -380,6 +380,75 @@ Training lanes:
 
     **Test results**: 1093 passing, 0 failures (64 new tests: 34 subprocess runner + 30 layered memory).
 
+75. **Codex P1 Fixes** (Session 2026-04-11):
+    - P1: Gateway role corruption — `Role.__members__.values()` contains enum objects, not strings. Fixed with try/except `Role(_role_str)`.
+    - P1: MCP stdio framing — `run_stdio()` now supports both Content-Length framing (standard MCP) and bare JSON-per-line.
+    - P1: `set_gateway()` wired to store gateway and propagate to handlers. `handle_message()` routes through gateway when available.
+    - P2: Persistent shell stderr deadlock — concurrent stderr drain via asyncio task prevents pipe buffer deadlock.
+
+76. **Wove Patterns — ReadTracker** (read-before-write enforcement):
+    - NEW FILE `able/core/gateway/read_tracker.py` (~115 lines). Tracks file reads per session, blocks writes to unread existing files.
+    - `check_write_large()` blocks full-file rewrites on files >200 lines, forces targeted edits.
+    - LRU eviction at 500 tracked files. Symlink canonicalization prevents bypass.
+    - 10 tests in `able/tests/test_read_tracker.py`.
+
+77. **Claurst Patterns — Memory Freshness** (staleness warnings):
+    - NEW FILE `able/memory/freshness.py` (~100 lines). Age-scaled caveats: <2d = fresh, 2-7d = verify warning, 7-30d = STALE, 30-90d = months stale, 90d+ = archival.
+    - `annotate_memory()` prepends caveat to stale memory content.
+    - Supports Unix timestamp, datetime, and ISO string inputs.
+    - 14 tests in `able/tests/test_freshness.py`.
+
+78. **Claurst Patterns — Effort Levels** (user routing control):
+    - NEW FILE `able/core/routing/effort_levels.py` (~90 lines). 4 levels: low (force T1), medium (auto), high (bias up), max (force T4, session-scoped).
+    - `apply_effort()` returns `EffortOverride` with adjusted score or forced tier.
+    - `ABLE_EFFORT_LEVEL` env var support. MAX is session-scoped for cost protection.
+    - 12 tests in `able/tests/test_effort_levels.py`.
+
+79. **Claurst Patterns — Budget Tracker** (millicent-based):
+    - NEW FILE `able/core/routing/budget_tracker.py` (~160 lines). Integer millicent tracking (1/100,000 USD) avoids floating-point accumulation errors.
+    - Per-tier cost recording with breakdown. `suggest_downgrade()` auto-downgrades when budget <20%.
+    - `ABLE_MAX_BUDGET_USD` env var. Budget exceeded → graceful downgrade, not hard stop.
+    - 12 tests in `able/tests/test_budget_tracker.py`.
+
+80. **D2 — RTK Token Compression** (previously blocked, Rust dep resolved):
+    - NEW FILE `able/tools/rtk/wrapper.py` (~130 lines). Wraps shell commands through RTK for 60-90% token savings on tool outputs.
+    - `should_compress()` identifies compressible commands (git, ls, find, docker, kubectl, etc.).
+    - NEW FILE `able/tools/rtk/tracking.py` (~130 lines). SQLite analytics for compression savings per command prefix.
+    - 12 tests in `able/tests/test_rtk_wrapper.py`.
+
+81. **D8 — WebGPU Edge Inference** (previously blocked, TypeScript dep resolved):
+    - NEW FILE `able-studio/lib/webgpu-inference.ts` (~230 lines).
+    - WebGPU detection with VRAM estimation. Fallback chain: WebGPU → Ollama → Cloud.
+    - Tool call parser: `<|tool_call>call:name{params}<tool_call|>` format (gemma-gem pattern).
+    - Streaming support with callback. Feature flag: `NEXT_PUBLIC_ENABLE_WEBGPU=true`.
+
+82. **F12 — Media Generation Fallback** (previously stretch goal):
+    - NEW FILE `able/tools/media/generator.py` (~250 lines). Auto-fallback media generation.
+    - Intent detection via regex patterns for image/audio/video requests.
+    - Provider fallback chains: DALL-E 3 → placeholder (image), ElevenLabs → placeholder (audio).
+    - `MediaGenerator` orchestrator with `available_providers()` introspection.
+    - 13 tests in `able/tests/test_media_generator.py`.
+
+    **Test results**: 3296 passing, 0 failures (73 new tests this batch).
+    **Plan status**: 74/74 items implemented. 0 blocked.
+
+---
+
+## External Repo Adoptions (Session 2026-04-11)
+
+**Claurst** (github.com/Kuberwastaken/claurst):
+- Memory freshness/staleness warnings → `able/memory/freshness.py`
+- User effort levels for routing control → `able/core/routing/effort_levels.py`
+- Millicent-based budget tracking → `able/core/routing/budget_tracker.py`
+
+**Wove** (github.com/mits-pl/wove):
+- Read-before-write enforcement → `able/core/gateway/read_tracker.py`
+- Large file protection (>200 lines blocks full rewrite)
+
+**Remaining high-value patterns identified (future work):**
+- Claurst: layered config resolution, named agent profiles, plugin capability declarations, deterministic gacha bones/soul split, AutoDream memory consolidation
+- Wove: three-tier context architecture (tech-tag filtering), sub-task isolation with fresh context, repo map via tree-sitter, sibling file reference, output discipline guardrails (25-word limit between tool calls)
+
 ---
 
 ## Previous Work (same session, earlier)
