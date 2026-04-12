@@ -54,6 +54,12 @@ export function useLiveEvents(onEvent: (event: GatewayEvent) => void) {
       // Don't attempt SSE if gateway URL isn't configured
       if (!CONTROL_BASE_URL) return;
       if (retries >= MAX_SSE_RETRIES) return;
+      // Block mixed content: HTTPS page can't SSE to HTTP gateway
+      if (
+        typeof window !== "undefined" &&
+        window.location.protocol === "https:" &&
+        CONTROL_BASE_URL.startsWith("http://")
+      ) return;
       try {
         es = new EventSource(`${CONTROL_BASE_URL}/events`);
 
