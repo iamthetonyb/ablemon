@@ -5,7 +5,7 @@ import { useState, useCallback } from "react";
 import { Activity, Briefcase, Zap, DollarSign, Database } from "lucide-react";
 import { useLiveEvents, type GatewayEvent } from "@/lib/use-live-events";
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+import { fetcher } from "@/lib/fetcher";
 
 const SEVERITY_COLORS: Record<string, string> = {
   info: "badge-blue",

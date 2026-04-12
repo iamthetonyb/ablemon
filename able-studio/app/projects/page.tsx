@@ -4,7 +4,7 @@ import { useState } from "react";
 import useSWR, { mutate } from "swr";
 import { Plus, GripVertical, Trash2 } from "lucide-react";
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+import { fetcher } from "@/lib/fetcher";
 
 const LANES = [
   { id: "backlog", label: "Backlog", color: "text-text-muted" },

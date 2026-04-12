@@ -45,7 +45,7 @@ const RISK_COLORS: Record<string, string> = {
   high: "badge-red",
 };
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+import { fetcher } from "@/lib/fetcher";
 
 export default function SettingsPage() {
   const [tools, setTools] = useState<ToolCatalogEntry[]>([]);

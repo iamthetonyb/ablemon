@@ -4,7 +4,7 @@ import { useState } from "react";
 import useSWR from "swr";
 import ControlArtifact from "@/app/components/ControlArtifact";
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+import { fetcher } from "@/lib/fetcher";
 
 const STATUS_DOTS: Record<string, string> = {
   active: "status-dot-active",

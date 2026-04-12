@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import useSWR from "swr";
 import { CalendarRange, Activity, Zap } from "lucide-react";
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+import { fetcher } from "@/lib/fetcher";
 
 const SEVERITY_DOT: Record<string, string> = {
   info: "bg-info",

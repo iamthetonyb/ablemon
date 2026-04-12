@@ -3,7 +3,7 @@
 import useSWR from "swr";
 import { Heart, Zap, Shield, Droplets, Battery, Trophy, Star } from "lucide-react";
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+import { fetcher } from "@/lib/fetcher";
 
 const SPECIES_COLORS: Record<string, string> = {
   blaze: "text-orange-400",

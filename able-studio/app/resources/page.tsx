@@ -3,7 +3,7 @@
 import Link from "next/link";
 import useSWR from "swr";
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+import { fetcher } from "@/lib/fetcher";
 
 const STATUS_DOTS: Record<string, string> = {
   active: "status-dot-active",

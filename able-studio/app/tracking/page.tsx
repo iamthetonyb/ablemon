@@ -4,7 +4,7 @@ import { useState, useCallback } from "react";
 import useSWR, { mutate } from "swr";
 import { FileText, Plus, Pin, Trash2, Save, Brain, ScrollText, Target, BookOpen } from "lucide-react";
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+import { fetcher } from "@/lib/fetcher";
 
 const CATEGORIES = [
   { id: "", label: "All", icon: FileText },

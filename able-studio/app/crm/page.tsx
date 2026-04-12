@@ -4,7 +4,7 @@ import { useState } from "react";
 import useSWR, { mutate } from "swr";
 import { UserPlus, DollarSign, Plus, Mail, Phone, Building2, ArrowRight } from "lucide-react";
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+import { fetcher } from "@/lib/fetcher";
 
 const CONTACT_STATUS = [
   { id: "lead", label: "Lead", class: "badge-blue" },
