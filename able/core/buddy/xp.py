@@ -8,7 +8,7 @@ the evolution daemon after each cycle.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from .model import (
     BuddyState,
@@ -79,11 +79,13 @@ def award_interaction_xp(
     approval_granted: bool = False,
     domain: str = "default",
     selected_tier: int | None = None,
-) -> Optional[int]:
+) -> Optional[Dict[str, Any]]:
     """
     Award XP for a completed interaction.  Call after process_message.
 
-    Returns the XP awarded, or None if no buddy exists.
+    Returns a dict with XP details and buddy state, or None if no buddy exists.
+    The dict includes: xp, leveled_up, new_level, evolved, legendary,
+    buddy_name, buddy_emoji, mood, level.
     """
     buddy = load_buddy()
     if buddy is None:
@@ -164,7 +166,18 @@ def award_interaction_xp(
     if collection_update["easter_egg_unlocked"]:
         logger.info("Buddy collection milestone unlocked: full completion reached")
 
-    return xp
+    return {
+        "xp": xp,
+        "leveled_up": leveled_up,
+        "new_level": buddy.level,
+        "old_level": old_level,
+        "evolved": new_stage.value if new_stage else None,
+        "legendary": legendary_title or None,
+        "buddy_name": buddy.name,
+        "buddy_emoji": buddy.display_emoji,
+        "mood": buddy.mood,
+        "level": buddy.level,
+    }
 
 
 def buddy_autonomous_tick() -> Optional[dict]:

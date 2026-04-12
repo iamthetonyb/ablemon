@@ -7,7 +7,7 @@ Used by the proactive engine and Telegram handler to send care reminders.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from .model import BuddyState, BuddyNeeds, load_buddy, save_buddy
 
@@ -74,3 +74,42 @@ def get_status_line(buddy: Optional[BuddyState] = None) -> str:
     emoji = buddy.display_emoji
     mood_msg = needs.mood_message
     return f"\n{emoji} {buddy.name}: {mood_msg}"
+
+
+def format_buddy_footer(update: Dict[str, Any]) -> str:
+    """Format a one-line buddy footer for Telegram messages.
+
+    Shows XP gain, level-ups, evolutions, and mood on every message.
+    Returns empty string if update is None or empty.
+
+    Examples:
+        🌿 Atlas Lv5 +14 XP · thriving
+        🌿 Atlas leveled up! Lv4 → Lv5 +14 XP 🎉
+        🌿 Atlas EVOLVED to Stage 2! +14 XP 🔥
+        🌿 Atlas Lv5 +14 XP · hungry — evals needed
+    """
+    if not update:
+        return ""
+
+    emoji = update.get("buddy_emoji", "🥚")
+    name = update.get("buddy_name", "Buddy")
+    xp = update.get("xp", 0)
+    level = update.get("level", 1)
+    mood = update.get("mood", "")
+    leveled_up = update.get("leveled_up", False)
+    old_level = update.get("old_level", level)
+    evolved = update.get("evolved")
+    legendary = update.get("legendary")
+
+    if legendary:
+        return f"\n{emoji} {name} unlocked legendary form: **{legendary}** +{xp} XP ✨"
+
+    if evolved:
+        return f"\n{emoji} {name} EVOLVED to Stage {evolved}! +{xp} XP 🔥"
+
+    if leveled_up:
+        return f"\n{emoji} {name} leveled up! Lv{old_level} → Lv{level} +{xp} XP 🎉"
+
+    # Normal: show XP gain + mood
+    mood_suffix = f" · {mood}" if mood else ""
+    return f"\n{emoji} {name} Lv{level} +{xp} XP{mood_suffix}"

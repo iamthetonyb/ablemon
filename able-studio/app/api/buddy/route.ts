@@ -12,6 +12,35 @@ const EMPTY_BUDDY = {
   _message: "ABLE gateway not reachable — set ABLE_CONTROL_API_BASE in env",
 };
 
+export async function POST(request: Request) {
+  if (!isGatewayConfigured()) {
+    return NextResponse.json({ error: "Gateway not configured" }, { status: 503 });
+  }
+
+  try {
+    const body = await request.json();
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    };
+    const serviceToken = process.env.ABLE_SERVICE_TOKEN;
+    if (serviceToken) headers["x-able-service-token"] = serviceToken;
+
+    const resp = await fetch(`${CONTROL_BASE_URL}/api/buddy`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      cache: "no-store",
+      signal: AbortSignal.timeout(5000),
+    });
+
+    const data = await resp.json();
+    return NextResponse.json(data, { status: resp.status });
+  } catch {
+    return NextResponse.json({ error: "Failed to create buddy" }, { status: 502 });
+  }
+}
+
 export async function GET() {
   if (!isGatewayConfigured()) {
     return NextResponse.json({ ...EMPTY_BUDDY, _status: "unconfigured" });

@@ -1809,23 +1809,26 @@ class ABLEGateway:
                 # ── Buddy XP + needs (system-wide, all channels) ──
                 try:
                     from able.core.buddy.xp import award_interaction_xp
-                    from able.core.buddy.model import load_buddy
+                    from able.core.buddy.nudge import format_buddy_footer
                     _complexity = scoring_result.score if scoring_result else 0.5
                     _domain = scoring_result.domain if scoring_result else "default"
-                    award_interaction_xp(
+                    _xp_result = award_interaction_xp(
                         complexity_score=_complexity,
                         used_tools=_used_tools,
                         domain=_domain,
                         selected_tier=scoring_result.selected_tier if scoring_result else None,
                     )
-                    # Push buddy XP event to SSE subscribers
-                    _buddy = load_buddy()
-                    if _buddy:
+                    if _xp_result:
+                        # Append buddy status to every response
+                        _footer = format_buddy_footer(_xp_result)
+                        if _footer:
+                            final_text += _footer
+                        # Push buddy XP event to SSE subscribers
                         asyncio.ensure_future(self._push_event("buddy_xp", {
-                            "name": _buddy.name,
-                            "level": _buddy.level,
-                            "xp": _buddy.xp,
-                            "mood": _buddy.mood,
+                            "name": _xp_result["buddy_name"],
+                            "level": _xp_result["level"],
+                            "xp": _xp_result["xp"],
+                            "mood": _xp_result["mood"],
                         }))
                 except Exception:
                     pass  # Buddy is optional — never block the pipeline
@@ -2149,22 +2152,24 @@ class ABLEGateway:
         # Buddy XP (system-wide)
         try:
             from able.core.buddy.xp import award_interaction_xp
-            from able.core.buddy.model import load_buddy
+            from able.core.buddy.nudge import format_buddy_footer
             _complexity = scoring_result.score if scoring_result else 0.5
             _domain = scoring_result.domain if scoring_result else "default"
-            award_interaction_xp(
+            _xp_result = award_interaction_xp(
                 complexity_score=_complexity,
                 used_tools=False,
                 domain=_domain,
                 selected_tier=scoring_result.selected_tier if scoring_result else None,
             )
-            _buddy = load_buddy()
-            if _buddy:
+            if _xp_result:
+                _footer = format_buddy_footer(_xp_result)
+                if _footer:
+                    yield _footer
                 asyncio.ensure_future(self._push_event("buddy_xp", {
-                    "name": _buddy.name,
-                    "level": _buddy.level,
-                    "xp": _buddy.xp,
-                    "mood": _buddy.mood,
+                    "name": _xp_result["buddy_name"],
+                    "level": _xp_result["level"],
+                    "xp": _xp_result["xp"],
+                    "mood": _xp_result["mood"],
                 }))
         except Exception:
             pass
@@ -2660,15 +2665,6 @@ class ABLEGateway:
                 })
 
                 await self._send_telegram_chunked(update, response, user_id=user_id)
-
-                # Buddy nudge — notify if needs are low
-                try:
-                    from able.core.buddy.nudge import get_status_line
-                    _nudge = get_status_line()
-                    if _nudge:
-                        await update.message.reply_text(_nudge)
-                except Exception:
-                    pass
             except Exception as e:
                 logger.error(f"Pipeline error: {e}", exc_info=True)
                 try:
@@ -3027,6 +3023,44 @@ class ABLEGateway:
             logger.warning("buddy_handler error: %s", e)
             return web.json_response({"buddy": None, "error": "Failed to load buddy state"}, status=500)
 
+    async def _buddy_create_handler(self, request: web.Request) -> web.Response:
+        """POST /api/buddy — Create a starter buddy if none exists."""
+        if not self._verify_service_token(request):
+            return self._unauthorized_response()
+        try:
+            from able.core.buddy.model import (
+                Species,
+                create_starter_buddy,
+                load_buddy,
+                save_buddy,
+            )
+
+            existing = load_buddy()
+            if existing is not None:
+                return web.json_response(
+                    {"error": "Buddy already exists", "buddy": existing.name},
+                    status=409,
+                )
+
+            body = await request.json()
+            name = body.get("name", "Atlas")
+            species_str = body.get("species", "root").lower()
+            try:
+                species = Species(species_str)
+            except ValueError:
+                return web.json_response(
+                    {"error": f"Unknown species: {species_str}", "valid": [s.value for s in Species]},
+                    status=400,
+                )
+
+            buddy = create_starter_buddy(name=name, species=species)
+            save_buddy(buddy)
+            logger.info("Created starter buddy: %s (%s)", name, species_str)
+            return web.json_response({"created": True, "buddy": {"name": buddy.name, "species": buddy.species, "level": buddy.level}})
+        except Exception as e:
+            logger.warning("buddy_create_handler error: %s", e)
+            return web.json_response({"error": str(e)}, status=500)
+
     # ── Metrics endpoints (shared logic via metrics_queries) ──────────────────
 
     async def _metrics_summary_handler(self, request: web.Request) -> web.Response:
@@ -3346,6 +3380,7 @@ class ABLEGateway:
         app.router.add_get("/api/reports/research/latest.md", self._research_report_md_handler)
         # Buddy
         app.router.add_get("/api/buddy", self._buddy_handler)
+        app.router.add_post("/api/buddy", self._buddy_create_handler)
         # Metrics
         app.router.add_get("/metrics", self._metrics_summary_handler)
         app.router.add_get("/metrics/routing", self._metrics_routing_handler)

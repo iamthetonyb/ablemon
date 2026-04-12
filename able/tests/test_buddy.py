@@ -42,6 +42,7 @@ from able.core.buddy.renderer import (
 )
 from able.core.buddy.battle import run_battle, list_available_battles
 from able.core.buddy.xp import award_interaction_xp, buddy_autonomous_tick
+from able.core.buddy.nudge import format_buddy_footer, get_status_line
 
 
 # ── Model tests ──────────────────────────────────────────────────────────
@@ -574,13 +575,15 @@ def test_award_interaction_xp_with_buddy(tmp_path, monkeypatch):
     monkeypatch.setattr("able.core.buddy.xp.load_buddy", fake_load)
     monkeypatch.setattr("able.core.buddy.xp.save_buddy", fake_save)
 
-    xp = award_interaction_xp(
+    result = award_interaction_xp(
         complexity_score=0.7,
         used_tools=True,
         domain="coding",  # Blaze bonus domain
     )
-    assert xp is not None
-    assert xp > 10  # Base + complexity + tool + domain bonus
+    assert result is not None
+    assert result["xp"] > 10  # Base + complexity + tool + domain bonus
+    assert "buddy_name" in result
+    assert "mood" in result
     assert saved[0] is True
 
 
@@ -590,14 +593,70 @@ def test_award_interaction_xp_aether_gets_orchestration_bonus(tmp_path, monkeypa
     monkeypatch.setattr("able.core.buddy.xp.load_buddy", lambda: buddy)
     monkeypatch.setattr("able.core.buddy.xp.save_buddy", lambda current: None)
 
-    xp = award_interaction_xp(
+    result = award_interaction_xp(
         complexity_score=0.8,
         used_tools=True,
         domain="default",
         selected_tier=4,
     )
 
-    assert xp == 43
+    assert result["xp"] == 43
+
+
+# ── Buddy footer tests ──────────────────────────────────────────────────
+
+
+def test_format_buddy_footer_empty():
+    assert format_buddy_footer(None) == ""
+    assert format_buddy_footer({}) == ""
+
+
+def test_format_buddy_footer_normal():
+    result = format_buddy_footer({
+        "xp": 14, "leveled_up": False, "level": 5, "old_level": 5,
+        "evolved": None, "legendary": None,
+        "buddy_name": "Atlas", "buddy_emoji": "\U0001f33f", "mood": "thriving",
+    })
+    assert "Atlas" in result
+    assert "Lv5" in result
+    assert "+14 XP" in result
+    assert "thriving" in result
+
+
+def test_format_buddy_footer_level_up():
+    result = format_buddy_footer({
+        "xp": 14, "leveled_up": True, "level": 6, "old_level": 5,
+        "evolved": None, "legendary": None,
+        "buddy_name": "Atlas", "buddy_emoji": "\U0001f33f", "mood": "thriving",
+    })
+    assert "leveled up" in result
+    assert "Lv5" in result
+    assert "Lv6" in result
+
+
+def test_format_buddy_footer_evolution():
+    result = format_buddy_footer({
+        "xp": 14, "leveled_up": False, "level": 10, "old_level": 10,
+        "evolved": 2, "legendary": None,
+        "buddy_name": "Atlas", "buddy_emoji": "\U0001f33f", "mood": "thriving",
+    })
+    assert "EVOLVED" in result
+    assert "Stage 2" in result
+
+
+def test_format_buddy_footer_legendary():
+    result = format_buddy_footer({
+        "xp": 14, "leveled_up": False, "level": 20, "old_level": 20,
+        "evolved": None, "legendary": "Ancient Root",
+        "buddy_name": "Atlas", "buddy_emoji": "\U0001f33f", "mood": "thriving",
+    })
+    assert "legendary" in result
+    assert "Ancient Root" in result
+
+
+def test_get_status_line_no_buddy(monkeypatch):
+    monkeypatch.setattr("able.core.buddy.nudge.load_buddy", lambda: None)
+    assert get_status_line() == ""
 
 
 # ── Needs / Tamagotchi tests ──────────────────────────────────────────────
