@@ -1,7 +1,12 @@
 const CONTROL_BASE_URL =
   process.env.ABLE_CONTROL_API_BASE ||
   process.env.ABLE_GATEWAY_URL ||
-  "http://127.0.0.1:8080";
+  "";
+
+/** True when a gateway URL is configured. */
+export function isGatewayConfigured(): boolean {
+  return !!CONTROL_BASE_URL;
+}
 
 function buildUrl(path: string) {
   const base = CONTROL_BASE_URL.endsWith("/")
@@ -28,6 +33,7 @@ async function fetchControl<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: buildHeaders(init?.headers),
     cache: "no-store",
+    signal: init?.signal ?? AbortSignal.timeout(5000),
   });
 
   if (!response.ok) {

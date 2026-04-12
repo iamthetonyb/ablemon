@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isGatewayConfigured } from "@/lib/control-plane";
 
 const CONTROL_BASE_URL =
   process.env.ABLE_CONTROL_API_BASE ||
   process.env.ABLE_GATEWAY_URL ||
-  "http://127.0.0.1:8080";
+  "";
 
 const ALLOWED_METRICS = new Set([
   "routing",
@@ -24,6 +25,12 @@ export async function GET(req: NextRequest, context: RouteContext) {
 
   if (!ALLOWED_METRICS.has(metric)) {
     return NextResponse.json({ error: `Unknown metric: ${metric}` }, { status: 404 });
+  }
+
+  const emptyMetric = { metric, data: {}, _status: "gateway_unavailable" };
+
+  if (!isGatewayConfigured()) {
+    return NextResponse.json({ ...emptyMetric, _status: "unconfigured" });
   }
 
   try {
@@ -49,18 +56,12 @@ export async function GET(req: NextRequest, context: RouteContext) {
     });
 
     if (!resp.ok) {
-      return NextResponse.json(
-        { error: `Gateway returned ${resp.status}` },
-        { status: 502 }
-      );
+      return NextResponse.json(emptyMetric);
     }
 
     const data = await resp.json();
     return NextResponse.json(data);
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Gateway unreachable" },
-      { status: 502 }
-    );
+  } catch {
+    return NextResponse.json(emptyMetric);
   }
 }

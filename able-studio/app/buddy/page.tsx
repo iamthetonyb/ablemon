@@ -72,6 +72,7 @@ function XpBar({ xp, xpToNext }: { xp: number; xpToNext: number }) {
 export default function BuddyPage() {
   const { data, error, isLoading, mutate } = useSWR("/api/buddy", fetcher, {
     refreshInterval: 15000,
+    errorRetryCount: 3,
   });
 
   if (isLoading) {

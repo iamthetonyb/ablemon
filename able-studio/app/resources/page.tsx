@@ -20,6 +20,7 @@ const STATUS_DOTS: Record<string, string> = {
 export default function ResourcesPage() {
   const { data, error, isLoading } = useSWR("/api/resources", fetcher, {
     refreshInterval: 30000,
+    errorRetryCount: 3,
   });
 
   if (isLoading) {

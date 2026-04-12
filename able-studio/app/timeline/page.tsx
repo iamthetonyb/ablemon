@@ -21,8 +21,8 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export default function TimelinePage() {
-  const { data: auditData } = useSWR("/api/audit?limit=50", fetcher, { refreshInterval: 30000 });
-  const { data: dashData } = useSWR("/api/dashboard", fetcher, { refreshInterval: 60000 });
+  const { data: auditData } = useSWR("/api/audit?limit=50", fetcher, { refreshInterval: 30000, errorRetryCount: 3 });
+  const { data: dashData } = useSWR("/api/dashboard", fetcher, { refreshInterval: 60000, errorRetryCount: 3 });
 
   const logs = auditData?.logs || [];
   const metrics = dashData?.metrics;

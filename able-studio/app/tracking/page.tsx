@@ -25,7 +25,7 @@ const CAT_BADGE: Record<string, string> = {
 
 export default function TrackingPage() {
   const [category, setCategory] = useState("");
-  const { data } = useSWR(`/api/notes${category ? `?category=${category}` : ""}`, fetcher, { refreshInterval: 30000 });
+  const { data } = useSWR(`/api/notes${category ? `?category=${category}` : ""}`, fetcher, { refreshInterval: 30000, errorRetryCount: 3 });
   const [selectedDoc, setSelectedDoc] = useState<any>(null);
   const [editContent, setEditContent] = useState("");
   const [editTitle, setEditTitle] = useState("");

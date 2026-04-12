@@ -22,6 +22,7 @@ export default function ResourceDetailPanel({ resourceId }: { resourceId: string
   const encodedId = encodeURIComponent(resourceId);
   const { data, error, isLoading, mutate } = useSWR(`/api/resources/${encodedId}`, fetcher, {
     refreshInterval: 30000,
+    errorRetryCount: 3,
   });
   const [approvedBy, setApprovedBy] = useState("");
   const [runningAction, setRunningAction] = useState<string | null>(null);

@@ -28,8 +28,8 @@ const PLAN_BADGE: Record<string, string> = {
 };
 
 export default function DashboardPage() {
-  const { data, error, isLoading, mutate } = useSWR("/api/dashboard", fetcher, { refreshInterval: 30000 });
-  const { data: corpusData } = useSWR("/api/metrics/corpus", fetcher, { refreshInterval: 60000 });
+  const { data, error, isLoading, mutate } = useSWR("/api/dashboard", fetcher, { refreshInterval: 30000, errorRetryCount: 3 });
+  const { data: corpusData } = useSWR("/api/metrics/corpus", fetcher, { refreshInterval: 60000, errorRetryCount: 3 });
   const [liveEvents, setLiveEvents] = useState<GatewayEvent[]>([]);
 
   const handleLiveEvent = useCallback((event: GatewayEvent) => {

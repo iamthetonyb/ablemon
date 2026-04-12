@@ -19,6 +19,7 @@ const STATUS_DOTS: Record<string, string> = {
 export default function SetupPage() {
   const { data, error, isLoading } = useSWR("/api/setup-wizard", fetcher, {
     refreshInterval: 60000,
+    errorRetryCount: 3,
   });
 
   if (isLoading) {

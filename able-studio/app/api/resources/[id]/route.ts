@@ -1,25 +1,39 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getResource, performResourceAction } from "@/lib/control-plane";
+import {
+  getResource,
+  performResourceAction,
+  isGatewayConfigured,
+} from "@/lib/control-plane";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
 export async function GET(_: NextRequest, context: RouteContext) {
+  if (!isGatewayConfigured()) {
+    return NextResponse.json({ resource: null, _status: "unconfigured" });
+  }
+
   try {
     const { id } = await context.params;
     const payload = await getResource(id);
     return NextResponse.json(payload);
-  } catch (error) {
-    console.error("Failed to load resource:", error);
-    return NextResponse.json(
-      { error: "Failed to load resource" },
-      { status: 502 },
-    );
+  } catch {
+    return NextResponse.json({
+      resource: null,
+      _status: "gateway_unavailable",
+    });
   }
 }
 
 export async function POST(req: NextRequest, context: RouteContext) {
+  if (!isGatewayConfigured()) {
+    return NextResponse.json(
+      { error: "Gateway not configured" },
+      { status: 503 },
+    );
+  }
+
   try {
     const { id } = await context.params;
     const body = await req.json();
@@ -29,11 +43,10 @@ export async function POST(req: NextRequest, context: RouteContext) {
       body.approved_by,
     );
     return NextResponse.json(payload);
-  } catch (error) {
-    console.error("Failed to execute resource action:", error);
+  } catch {
     return NextResponse.json(
-      { error: "Failed to execute resource action" },
-      { status: 502 },
+      { error: "Gateway unreachable" },
+      { status: 503 },
     );
   }
 }

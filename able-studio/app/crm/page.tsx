@@ -23,7 +23,7 @@ const DEAL_STAGES = [
 ];
 
 export default function CRMPage() {
-  const { data: crmData } = useSWR("/api/crm", fetcher, { refreshInterval: 30000 });
+  const { data: crmData } = useSWR("/api/crm", fetcher, { refreshInterval: 30000, errorRetryCount: 3 });
   const [tab, setTab] = useState<"contacts" | "deals">("contacts");
   const [showAddContact, setShowAddContact] = useState(false);
   const [showAddDeal, setShowAddDeal] = useState(false);

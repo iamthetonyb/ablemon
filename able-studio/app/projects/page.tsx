@@ -18,7 +18,7 @@ const PRI_CLASS: Record<string, string> = { low: "badge-blue", medium: "badge-go
 const PRI_BORDER: Record<string, string> = { low: "priority-low", medium: "priority-medium", high: "priority-high", urgent: "priority-urgent" };
 
 export default function ProjectsPage() {
-  const { data } = useSWR("/api/tasks", fetcher, { refreshInterval: 30000 });
+  const { data } = useSWR("/api/tasks", fetcher, { refreshInterval: 30000, errorRetryCount: 3 });
   const [showNewTask, setShowNewTask] = useState<string | null>(null);
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskPriority, setNewTaskPriority] = useState("medium");

@@ -12,6 +12,7 @@ const MATURITY_BADGES: Record<string, string> = {
 export default function CollectionsPage() {
   const { data, error, isLoading } = useSWR("/api/collections", fetcher, {
     refreshInterval: 60000,
+    errorRetryCount: 3,
   });
 
   if (isLoading) {
