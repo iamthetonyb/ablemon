@@ -1,9 +1,8 @@
 /**
  * NextAuth session enforcement middleware.
  *
- * Protects page routes only — /dashboard/*, /settings/*, /admin/*.
- * API routes are NOT in the matcher: AJAX calls can't follow redirects,
- * so auth on API routes must be checked in the route handler itself.
+ * Protects ALL page routes — unauthenticated visitors redirect to /login.
+ * API routes excluded from matcher (AJAX can't follow redirects).
  */
 
 import { auth } from "@/lib/auth";
@@ -20,5 +19,6 @@ export default auth((req) => {
 });
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/settings/:path*", "/admin/:path*"],
+  // Match all paths EXCEPT: /api/*, /login, /_next/*, static files
+  matcher: ["/((?!api|_next|login|icon\\.svg|favicon\\.ico).*)"],
 };

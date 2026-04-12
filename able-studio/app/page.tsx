@@ -30,6 +30,7 @@ const PLAN_BADGE: Record<string, string> = {
 export default function DashboardPage() {
   const { data, error, isLoading, mutate } = useSWR("/api/dashboard", fetcher, { refreshInterval: 30000, errorRetryCount: 3 });
   const { data: corpusData } = useSWR("/api/metrics/corpus", fetcher, { refreshInterval: 60000, errorRetryCount: 3 });
+  const { data: buddyData } = useSWR("/api/buddy", fetcher, { refreshInterval: 60000, errorRetryCount: 3 });
   const [liveEvents, setLiveEvents] = useState<GatewayEvent[]>([]);
 
   const handleLiveEvent = useCallback((event: GatewayEvent) => {
@@ -206,13 +207,39 @@ export default function DashboardPage() {
             </>
           )}
 
-          {/* Quick Actions */}
-          <h3 className="text-[13px] font-semibold text-gold-400 uppercase tracking-wider mb-4 mt-8">Quick Actions</h3>
-          <div className="space-y-2">
-            <a href="/buddy" className="block glass-card p-4 hover:border-gold-400/30 transition-colors">
-              <p className="text-[14px] text-text-primary">Buddy Status</p>
-              <p className="text-[11px] text-text-muted mt-0.5">Companion needs, level, battles</p>
+          {/* Buddy Status */}
+          <h3 className="text-[13px] font-semibold text-gold-400 uppercase tracking-wider mb-4 mt-8">Buddy</h3>
+          {buddyData?.buddy ? (
+            <a href="/buddy" className="block glass-card-elevated p-5 hover:border-gold-400/30 transition-colors mb-6">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <p className="text-[14px] font-medium text-text-primary">{buddyData.buddy.name}</p>
+                  <p className="text-[11px] text-text-muted capitalize">{buddyData.buddy.species} &middot; {buddyData.buddy.mood}</p>
+                </div>
+                <span className="text-[11px] font-mono text-gold-400">Lv {buddyData.buddy.level}</span>
+              </div>
+              <div className="w-full bg-white/5 rounded-full h-1.5">
+                <div
+                  className="bg-gold-400 h-1.5 rounded-full transition-all"
+                  style={{ width: `${Math.min(100, (buddyData.buddy.xp / (buddyData.buddy.xp_to_next || 1)) * 100)}%` }}
+                />
+              </div>
+              <div className="flex justify-between mt-1.5">
+                <span className="text-[10px] text-text-muted">{buddyData.buddy.xp} XP</span>
+                <span className="text-[10px] text-text-muted">{buddyData.buddy.xp_to_next} to next</span>
+              </div>
             </a>
+          ) : (
+            <a href="/buddy" className="block glass-card p-5 text-center hover:border-gold-400/30 transition-colors mb-6">
+              <p className="text-2xl mb-2">🥚</p>
+              <p className="text-[13px] text-text-muted">No buddy active</p>
+              <p className="text-[11px] text-text-muted mt-1">Start a chat to choose your starter</p>
+            </a>
+          )}
+
+          {/* Quick Actions */}
+          <h3 className="text-[13px] font-semibold text-gold-400 uppercase tracking-wider mb-4">Quick Actions</h3>
+          <div className="space-y-2">
             <a href="/settings" className="block glass-card p-4 hover:border-gold-400/30 transition-colors">
               <p className="text-[14px] text-text-primary">Agent Controls</p>
               <p className="text-[11px] text-text-muted mt-0.5">Toggle tools & approval gates</p>
