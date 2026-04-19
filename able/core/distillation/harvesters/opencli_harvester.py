@@ -130,6 +130,7 @@ class OpenCLIHarvester(BaseHarvester):
         role_map = cfg.get("role_mapping", {})
         message_path = cfg.get("message_path", "")
         thinking_field = cfg.get("thinking_field", None)
+        payload_key = cfg.get("payload_key", "")
 
         results: list[HarvestedConversation] = []
         for pattern in patterns:
@@ -147,7 +148,7 @@ class OpenCLIHarvester(BaseHarvester):
                 try:
                     convos = self._parse_export_file(
                         path, platform, model_name, role_map,
-                        message_path, thinking_field,
+                        message_path, thinking_field, payload_key,
                     )
                     results.extend(convos)
                 except Exception:
@@ -163,6 +164,7 @@ class OpenCLIHarvester(BaseHarvester):
         role_map: dict,
         message_path: str,
         thinking_field: str | None,
+        payload_key: str = "",
     ) -> list[HarvestedConversation]:
         """Parse a platform export file (JSON or JSONL) into conversations."""
         data = self._load_file(path)
@@ -225,7 +227,7 @@ class OpenCLIHarvester(BaseHarvester):
 
             # Flat event-per-line format (Codex, etc.)
             messages, thinking = self._collect_jsonl_session(
-                data, role_map, thinking_field,
+                data, role_map, thinking_field, payload_key,
             )
             # Strip scaffolding from all messages (Codex, ChatGPT, etc.)
             messages = self._clean_messages(messages)
@@ -309,12 +311,14 @@ class OpenCLIHarvester(BaseHarvester):
         records: list[dict],
         role_map: dict,
         thinking_field: str | None,
+        payload_key: str = "",
     ) -> tuple[list[dict], list[str]]:
         """Collect messages from a JSONL session log (e.g. Codex format).
 
         Codex records have ``type: "response_item"`` with a ``payload`` dict
-        containing ``role`` and ``content``.  Other platforms may use different
-        record shapes — we try common patterns.
+        containing ``role`` and ``content``.  Pi records have
+        ``type: "message"`` with a ``message`` dict containing the same.
+        ``payload_key`` overrides the nested key used as the payload object.
         """
         messages: list[dict] = []
         thinking: list[str] = []
@@ -323,8 +327,11 @@ class OpenCLIHarvester(BaseHarvester):
             # Skip non-message records (session_meta, tool calls, etc.)
             rec_type = record.get("type", "")
 
-            # Codex format: type=response_item, payload has role+content
-            payload = record.get("payload", record)
+            # Payload extraction: explicit key > "payload" > top-level
+            if payload_key and payload_key in record:
+                payload = record[payload_key]
+            else:
+                payload = record.get("payload", record)
             if not isinstance(payload, dict):
                 continue
 

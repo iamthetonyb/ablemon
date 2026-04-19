@@ -1,0 +1,15 @@
+platform: opencode
+description: "Extract OpenCode AI conversations from session logs"
+model_name: "opencode"
+harvest_method: "file"
+file_patterns:
+  - "~/.config/opencode/sessions/**/*.jsonl"
+  - "~/.config/opencode/sessions/**/*.json"
+  - "~/.local/share/opencode/sessions/**/*.jsonl"
+  - "~/Library/Application Support/opencode/sessions/**/*.json"
+message_path: "messages"
+role_mapping:
+  user: user
+  assistant: assistant
+  system: system
+thinking_field: "reasoning"

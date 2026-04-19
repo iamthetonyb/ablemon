@@ -1,0 +1,13 @@
+platform: pi
+description: "Extract pi-coding-agent (Mario Zechner) conversations from session JSONL logs"
+model_name: "pi"
+harvest_method: "file"
+file_patterns:
+  - "~/.pi/agent/sessions/**/*.jsonl"
+message_path: ""
+payload_key: "message"
+role_mapping:
+  user: user
+  assistant: assistant
+  system: system
+thinking_field: "thinking"
