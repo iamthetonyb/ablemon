@@ -114,6 +114,17 @@ class InteractionRecord:
     tokens_before_compression: int = 0
     tokens_after_compression: int = 0
 
+    # ── Skill routing telemetry (2026-04-19) ─────────────────
+    # Tracks dynamic skill selection across CC + Codex + pi + OpenCode.
+    # Used by Pattern E self-improving loop: top-1 accuracy, dead-skill detection,
+    # DPO pair generation from high-vs-low audit outcomes.
+    skill_invoked: str = ""                 # "ui-ux-pro-max"|"ads-google"|""
+    skill_routing_query: str = ""           # original user query (truncated)
+    skill_routing_source: str = ""          # "able"|"standalone"|"manual"
+    skill_routing_rank: int = 0             # position in ranked result (1=top)
+    skill_routing_score: float = 0.0        # cosine sim or BM25 score
+    skill_routing_host: str = ""            # "cc"|"codex"|"pi"|"opencode"|"desktop"
+
 
 class InteractionLogger:
     """
@@ -198,6 +209,13 @@ class InteractionLogger:
         ("compression_ratio", "REAL DEFAULT 0.0"),
         ("tokens_before_compression", "INTEGER DEFAULT 0"),
         ("tokens_after_compression", "INTEGER DEFAULT 0"),
+        # Skill routing telemetry (2026-04-19) — Pattern E self-improving loop
+        ("skill_invoked", "TEXT DEFAULT ''"),
+        ("skill_routing_query", "TEXT DEFAULT ''"),
+        ("skill_routing_source", "TEXT DEFAULT ''"),
+        ("skill_routing_rank", "INTEGER DEFAULT 0"),
+        ("skill_routing_score", "REAL DEFAULT 0.0"),
+        ("skill_routing_host", "TEXT DEFAULT ''"),
     ]
 
     def __init__(self, db_path: str = DEFAULT_DB_PATH):
@@ -237,6 +255,14 @@ class InteractionLogger:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_log_corpus_eligible "
                 "ON interaction_log(corpus_eligible)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_log_skill_invoked "
+                "ON interaction_log(skill_invoked)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_log_skill_host "
+                "ON interaction_log(skill_routing_host)"
             )
             conn.commit()
         finally:
@@ -351,6 +377,12 @@ class InteractionLogger:
         compression_ratio: Optional[float] = None,    # tokens_after / tokens_before
         tokens_before_compression: Optional[int] = None,
         tokens_after_compression: Optional[int] = None,
+        skill_invoked: Optional[str] = None,            # "ui-ux-pro-max"|""
+        skill_routing_query: Optional[str] = None,     # original query (truncated)
+        skill_routing_source: Optional[str] = None,    # "able"|"standalone"|"manual"
+        skill_routing_rank: Optional[int] = None,      # rank in results, 1=top
+        skill_routing_score: Optional[float] = None,   # cosine/BM25 score
+        skill_routing_host: Optional[str] = None,      # "cc"|"codex"|"pi"|"opencode"|"desktop"
     ):
         """
         Update execution results after a provider responds.
@@ -404,6 +436,12 @@ class InteractionLogger:
             ("compression_ratio", compression_ratio),
             ("tokens_before_compression", tokens_before_compression),
             ("tokens_after_compression", tokens_after_compression),
+            ("skill_invoked", skill_invoked),
+            ("skill_routing_query", skill_routing_query[:500] if skill_routing_query is not None else None),
+            ("skill_routing_source", skill_routing_source),
+            ("skill_routing_rank", skill_routing_rank),
+            ("skill_routing_score", skill_routing_score),
+            ("skill_routing_host", skill_routing_host),
         ]:
             if val is not None:
                 updates.append(f"{col} = ?")

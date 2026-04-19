@@ -179,6 +179,12 @@ class ABLEToolHandlers:
                     "category": "security",
                     "description": "List pending approval requests",
                 },
+                {
+                    "name": "able_skill_route",
+                    "category": "capabilities",
+                    "description": "Route query to top-K skills (ABLE + CC library)",
+                    "input": {"query": "string", "k": "int (default 5)"},
+                },
             ],
             "routing_tiers": [
                 {"tier": 1, "models": "GPT 5.4 Mini", "complexity": "<0.4"},
@@ -281,6 +287,74 @@ class ABLEToolHandlers:
         """List registered tools."""
         tools = self._load_tool_list()
         return MCPToolResult().text(json.dumps(tools, indent=2))
+
+    def handle_skill_route(self, args: Dict[str, Any]) -> MCPToolResult:
+        """Route a query to top-K most relevant skills.
+
+        Cascade: ABLE hybrid memory (when `search_skills` wired — currently
+        unimplemented, graceful skip) → standalone
+        ~/.claude/tools/skill-router CLI → error. Non-fatal on each miss.
+        """
+        raw_query = args.get("query", "")
+        if not isinstance(raw_query, str) or not raw_query.strip():
+            return MCPToolResult().error("Missing or non-string 'query' parameter")
+        query = raw_query[:2000]  # hard cap — argv + embedding sanity
+        try:
+            k = max(1, min(20, int(args.get("k", 5))))
+        except (TypeError, ValueError):
+            k = 5
+
+        # Try ABLE hybrid memory first (opt-in — index_skills must be wired)
+        try:
+            from able.memory.hybrid_memory import HybridMemory
+            mem = HybridMemory()
+            if hasattr(mem, "search_skills"):
+                results = mem.search_skills(query, limit=k)
+                if results:
+                    return MCPToolResult().text(json.dumps({
+                        "skills": self._safe_dict(results),
+                        "source": "able_hybrid_memory",
+                        "query": query[:200],
+                        "k": k,
+                    }, default=str))
+        except Exception as e:
+            logger.debug("ABLE skill search unavailable: %s", e)
+
+        # Fallback: standalone skill-router CLI @ ~/.claude/tools/skill-router/cli.py
+        try:
+            import subprocess
+            import sys as _sys
+            from pathlib import Path
+            cli = Path.home() / ".claude" / "tools" / "skill-router" / "cli.py"
+            if cli.exists():
+                proc = subprocess.run(
+                    [_sys.executable, str(cli), "--query", query, "--k", str(k)],
+                    capture_output=True, timeout=10, text=True,
+                )
+                if proc.returncode == 0 and proc.stdout:
+                    try:
+                        parsed = json.loads(proc.stdout)
+                    except json.JSONDecodeError:
+                        parsed = proc.stdout.strip()
+                    return MCPToolResult().text(json.dumps({
+                        "skills": parsed,
+                        "source": "standalone_cli",
+                        "query": query[:200],
+                        "k": k,
+                    }))
+                # CLI ran but failed — surface rc + stderr
+                err_tail = (proc.stderr or "")[-400:]
+                return MCPToolResult().error(
+                    f"skill-router CLI returned rc={proc.returncode}: {err_tail}"
+                )
+        except Exception as e:
+            logger.debug("Standalone CLI fallback failed: %s", e)
+            return MCPToolResult().error(f"skill routing failed: {type(e).__name__}: {e}")
+
+        return MCPToolResult().error(
+            "skill routing unavailable — ABLE memory not indexed + CLI missing @ "
+            "~/.claude/tools/skill-router/cli.py"
+        )
 
     # ── Internal helpers ───────────────────────────────────────
 
@@ -445,6 +519,22 @@ TOOL_DEFINITIONS: List[MCPToolDef] = [
         description="List all registered tools.",
         input_schema={"type": "object", "properties": {}},
     ),
+    MCPToolDef(
+        name="able_skill_route",
+        description=(
+            "Route a query to the top-K most relevant skills across ABLE + CC "
+            "skill libraries. Returns ranked skills by semantic/BM25 match. "
+            "Use before invoking a skill to pick the right one."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "User intent to route"},
+                "k": {"type": "integer", "description": "Top K skills", "default": 5},
+            },
+            "required": ["query"],
+        },
+    ),
 ]
 
 
@@ -479,6 +569,7 @@ class ABLEMCPServer:
             "able_permissions": self._handlers.handle_permissions,
             "able_config": self._handlers.handle_config,
             "able_tool_list": self._handlers.handle_tool_list,
+            "able_skill_route": self._handlers.handle_skill_route,
         }
 
     def set_gateway(self, gateway: Any) -> None:
