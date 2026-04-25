@@ -15,8 +15,9 @@
 #
 # Cron leader:
 #   local/dev defaults to follower mode. Set ABLE_CRON_ENABLED=1 and
-#   ABLE_TELEGRAM_ENABLED=1 only on one production/server runtime so Telegram
-#   reports do not double-send and getUpdates polling does not conflict.
+#   ABLE_TELEGRAM_ENABLED=1 only on one production/server runtime. Set
+#   ABLE_TELEGRAM_MODE=webhook plus ABLE_TELEGRAM_WEBHOOK_URL for production
+#   push delivery instead of getUpdates polling.
 #
 # OAuth (one-time, needs browser):
 #   python able/scripts/able-auth.py

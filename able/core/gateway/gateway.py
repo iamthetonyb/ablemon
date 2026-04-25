@@ -495,21 +495,26 @@ class ABLEGateway:
             self.config.get("owner_telegram_id", "")
         )
         self.cron_enabled = self._cron_enabled_from_env()
-        self.telegram_polling_enabled = self._telegram_polling_enabled_from_env(
-            cron_enabled=self.cron_enabled
+        self.telegram_webhook_url = self._normalize_telegram_webhook_url(
+            os.environ.get("ABLE_TELEGRAM_WEBHOOK_URL", "")
         )
+        self.telegram_webhook_secret = os.environ.get("ABLE_TELEGRAM_WEBHOOK_SECRET", "").strip()
+        self.telegram_mode = self._telegram_mode_from_env(cron_enabled=self.cron_enabled)
+        self.telegram_polling_enabled = self._telegram_polling_enabled_from_env(
+            cron_enabled=self.cron_enabled,
+            mode=self.telegram_mode,
+        )
+        self.telegram_webhook_enabled = self.telegram_mode == "webhook"
 
-        if self.telegram_polling_enabled and not self.bot_token and require_telegram:
+        if self.telegram_mode in {"polling", "webhook"} and not self.bot_token and require_telegram:
             raise ValueError(
                 "TELEGRAM_BOT_TOKEN environment variable is not set. "
                 "Set it in your .env file or Docker environment."
             )
         if not self.bot_token and not require_telegram:
             logger.info("TELEGRAM_BOT_TOKEN not set; starting in local-only mode")
-        if self.bot_token and not self.telegram_polling_enabled:
-            logger.info(
-                "Telegram polling disabled; set ABLE_TELEGRAM_ENABLED=1 on the single bot leader"
-            )
+        if self.bot_token and self.telegram_mode == "off":
+            logger.info("Telegram disabled; set ABLE_TELEGRAM_ENABLED=1 on the single channel leader")
 
         # Initialize audit directory
         self.audit_dir = Path("audit/logs")
@@ -728,11 +733,61 @@ class ABLEGateway:
         return False
 
     @classmethod
+    def _normalize_telegram_webhook_url(cls, value: str) -> str:
+        """Accept either a base URL or the full Telegram webhook endpoint."""
+        url = value.strip().rstrip("/")
+        if not url:
+            return ""
+        if "/webhook/telegram" in url:
+            return url
+        return f"{url}/webhook/telegram"
+
+    @classmethod
+    def _telegram_mode_from_env(
+        cls,
+        env: Optional[Dict[str, str]] = None,
+        *,
+        cron_enabled: Optional[bool] = None,
+    ) -> str:
+        """Resolve Telegram delivery mode: off, polling, or webhook.
+
+        Webhook mode is the durable production path: Telegram pushes one HTTPS
+        endpoint and stale long-pollers stop competing for getUpdates. Polling
+        remains as a fallback for installs without a public webhook URL.
+        """
+        env = env or os.environ
+        raw_mode = env.get("ABLE_TELEGRAM_MODE", "").strip().lower()
+        if raw_mode in {"off", "disabled", "none", "0", "false", "no"}:
+            return "off"
+        if raw_mode in {"polling", "poll", "getupdates"}:
+            return "polling"
+        webhook_url = cls._normalize_telegram_webhook_url(env.get("ABLE_TELEGRAM_WEBHOOK_URL", ""))
+        if raw_mode in {"webhook", "webhooks", "push"}:
+            return "webhook" if webhook_url else "off"
+
+        explicit_enabled = None
+        for key in ("ABLE_TELEGRAM_ENABLED", "ABLE_TELEGRAM_POLLING_ENABLED"):
+            explicit = env.get(key)
+            if explicit is not None:
+                explicit_enabled = explicit.strip().lower() in cls._TRUE_ENV_VALUES
+                break
+
+        if cron_enabled is None:
+            cron_enabled = cls._cron_enabled_from_env(env)
+        enabled = bool(cron_enabled) if explicit_enabled is None else explicit_enabled
+        if not enabled:
+            return "off"
+        if webhook_url:
+            return "webhook"
+        return "polling"
+
+    @classmethod
     def _telegram_polling_enabled_from_env(
         cls,
         env: Optional[Dict[str, str]] = None,
         *,
         cron_enabled: Optional[bool] = None,
+        mode: Optional[str] = None,
     ) -> bool:
         """Return True only for the single runtime that should poll Telegram.
 
@@ -740,15 +795,10 @@ class ABLEGateway:
         deploy sets ABLE_TELEGRAM_ENABLED=1; local/dev runs default to follower
         mode so a laptop with the production token cannot steal polling.
         """
+        if mode is not None:
+            return mode == "polling"
         env = env or os.environ
-        for key in ("ABLE_TELEGRAM_ENABLED", "ABLE_TELEGRAM_POLLING_ENABLED"):
-            explicit = env.get(key)
-            if explicit is not None:
-                return explicit.strip().lower() in cls._TRUE_ENV_VALUES
-
-        if cron_enabled is None:
-            cron_enabled = cls._cron_enabled_from_env(env)
-        return bool(cron_enabled)
+        return cls._telegram_mode_from_env(env, cron_enabled=cron_enabled) == "polling"
 
     def _get_voice_transcriber(self):
         """Instantiate ASR only when explicitly configured and first needed."""
@@ -2897,8 +2947,44 @@ class ABLEGateway:
             "control_plane": "enabled",
             "cron_enabled": getattr(self, "cron_enabled", False),
             "cron_jobs": len(getattr(getattr(self, "scheduler", None), "jobs", {})),
+            "telegram_mode": getattr(self, "telegram_mode", "off"),
             "telegram_polling_enabled": getattr(self, "telegram_polling_enabled", False),
+            "telegram_webhook_enabled": getattr(self, "telegram_webhook_enabled", False),
         })
+
+    def _verify_telegram_webhook_request(self, request: web.Request) -> bool:
+        """Validate Telegram webhook requests when a secret token is configured."""
+        expected = getattr(self, "telegram_webhook_secret", "")
+        if not expected:
+            return True
+        header_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        path_secret = request.match_info.get("secret", "")
+        return (
+            bool(header_secret) and hmac.compare_digest(header_secret, expected)
+        ) or (
+            bool(path_secret) and hmac.compare_digest(path_secret, expected)
+        )
+
+    async def _telegram_webhook_handler(self, request: web.Request) -> web.Response:
+        """Receive Telegram updates through the gateway HTTP plane."""
+        _ensure_aiohttp()
+        if not getattr(self, "telegram_webhook_enabled", False):
+            return web.json_response({"error": "telegram_webhook_disabled"}, status=404)
+        if not self._verify_telegram_webhook_request(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        if self.master_bot is None:
+            return web.json_response({"error": "telegram_not_ready"}, status=503)
+
+        try:
+            payload = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid_json"}, status=400)
+
+        _ensure_telegram()
+        update = Update.de_json(payload, self.master_bot.bot)
+        if update is not None:
+            await self.master_bot.process_update(update)
+        return web.json_response({"ok": True})
 
     def _verify_service_token(self, request: web.Request) -> bool:
         """Allow control endpoints to share the same service-token contract as Studio/webhooks."""
@@ -3430,6 +3516,8 @@ class ABLEGateway:
         app = web.Application()
         app.router.add_get("/health", self._health_handler)
         app.router.add_get("/", self._health_handler)
+        app.router.add_post("/webhook/telegram", self._telegram_webhook_handler)
+        app.router.add_post("/webhook/telegram/{secret}", self._telegram_webhook_handler)
         app.router.add_get("/control/tools/catalog", self._control_tools_catalog_handler)
         app.router.add_get("/control/resources", self._control_resources_handler)
         app.router.add_post("/control/resources/{resource_id}/action", self._control_resource_action_handler)
@@ -3565,7 +3653,20 @@ class ABLEGateway:
         # Wire approval workflow to the bot
         self.approval_workflow.set_bot(self.master_bot.bot)
 
-        await self.master_bot.updater.start_polling(drop_pending_updates=True)
+        if self.telegram_webhook_enabled:
+            webhook_url = self.telegram_webhook_url.rstrip("/")
+            if not webhook_url:
+                raise RuntimeError("ABLE_TELEGRAM_WEBHOOK_URL is required for webhook mode")
+            await self.master_bot.bot.set_webhook(
+                url=webhook_url,
+                secret_token=self.telegram_webhook_secret or None,
+                drop_pending_updates=True,
+            )
+            logger.info("Telegram webhook registered: %s", webhook_url)
+            print("✅ Telegram webhook mode active")
+        else:
+            await self.master_bot.bot.delete_webhook(drop_pending_updates=True)
+            await self.master_bot.updater.start_polling(drop_pending_updates=True)
 
     async def start_client_bot(self, client_id: str):
         """Start a client's Telegram bot"""
@@ -3659,23 +3760,26 @@ class ABLEGateway:
         # Start queue
         await self.queue.start()
 
-        if self.telegram_polling_enabled:
-            # Start master bot (non-fatal — health server stays up even if token is invalid)
+        if self.telegram_mode in {"polling", "webhook"}:
+            # Start master Telegram integration (non-fatal — health server stays up even if token is invalid)
             try:
                 await self.start_master_bot()
             except Exception as e:
                 print(f"⚠ Telegram bot failed to start: {e}")
                 print("  Health server still running. Fix TELEGRAM_BOT_TOKEN and restart.")
 
-            # Start all registered client bots
-            for client_id in self.client_registry.clients:
-                try:
-                    await self.start_client_bot(client_id)
-                except Exception as e:
-                    print(f"Failed to start bot for {client_id}: {e}")
+            if self.telegram_polling_enabled:
+                # Client bots still use polling until they get first-class webhook routes.
+                for client_id in self.client_registry.clients:
+                    try:
+                        await self.start_client_bot(client_id)
+                    except Exception as e:
+                        print(f"Failed to start bot for {client_id}: {e}")
+            elif self.client_registry.clients:
+                logger.warning("Client Telegram bots skipped in webhook mode until per-client webhooks are configured")
         else:
-            logger.info("Telegram polling disabled; gateway running without getUpdates")
-            print("⏸️ Telegram polling disabled (set ABLE_TELEGRAM_ENABLED=1 on one bot leader only)")
+            logger.info("Telegram disabled; gateway running without Telegram channel")
+            print("⏸️ Telegram disabled (set ABLE_TELEGRAM_ENABLED=1 on one channel leader only)")
 
         # Start event bus + SSE bridge
         await self.event_bus.start()

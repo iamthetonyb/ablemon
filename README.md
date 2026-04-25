@@ -146,7 +146,12 @@ Push to `main` → GitHub Actions builds → pushes to GHCR → deploys via SSH.
 ./deploy-to-server.sh <server_ip> [ssh_key_path]
 ```
 
-Docker auto-installs on the server. Pre-built image pulls from GHCR. Cron and Telegram polling are leader-gated: server deploys set `ABLE_CRON_ENABLED=1` and `ABLE_TELEGRAM_ENABLED=1`, while local/dev runs default to follower mode. Cron state lives in the `able_db` volume (`/home/able/app/able/data`) and uses per-scheduled-run claims so deploy restarts do not re-fire nightly jobs.
+Docker auto-installs on the server. Pre-built image pulls from GHCR. Cron and Telegram are leader-gated: server deploys set `ABLE_CRON_ENABLED=1` and `ABLE_TELEGRAM_ENABLED=1`, while local/dev runs default to follower mode. Cron state lives in the `able_db` volume (`/home/able/app/able/data`) and uses per-scheduled-run claims so deploy restarts do not re-fire nightly jobs.
+
+Telegram supports 3 modes:
+- `ABLE_TELEGRAM_MODE=off`: no Telegram channel.
+- `ABLE_TELEGRAM_MODE=polling`: legacy `getUpdates` polling.
+- `ABLE_TELEGRAM_MODE=webhook`: Telegram pushes to `ABLE_TELEGRAM_WEBHOOK_URL`; this is the preferred production mode because it avoids multiple-poller conflicts.
 
 ---
 
@@ -156,6 +161,9 @@ Docker auto-installs on the server. Pre-built image pulls from GHCR. Cron and Te
 |----------|---------------|
 | `TELEGRAM_BOT_TOKEN` | Your bot (from @BotFather) |
 | `ABLE_OWNER_TELEGRAM_ID` | Your Telegram user ID |
+| `ABLE_TELEGRAM_MODE` | `off`, `polling`, or `webhook` |
+| `ABLE_TELEGRAM_WEBHOOK_URL` | Public HTTPS base URL or full `/webhook/telegram` endpoint |
+| `ABLE_TELEGRAM_WEBHOOK_SECRET` | Optional Telegram webhook secret-token verifier |
 | `OPENROUTER_API_KEY` | Fallback models + evolution daemon |
 | `ANTHROPIC_API_KEY` | Claude Opus 4.6 (T4 premium tier) |
 | `NVIDIA_API_KEY` | Gemma 4 31B (free T1 fallback via NIM) |

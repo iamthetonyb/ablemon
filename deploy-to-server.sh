@@ -48,8 +48,10 @@ if [ -f "able/.env" ]; then
   ssh_run 'chmod 600 /opt/able/.env'
 fi
 
-# The server is the only cron + Telegram polling leader. Local/dev gateways
-# default to follower mode so they cannot steal Telegram getUpdates.
+# The server is the only cron + Telegram channel leader. Local/dev gateways
+# default to follower mode so they cannot steal Telegram getUpdates. If
+# ABLE_TELEGRAM_MODE=webhook and ABLE_TELEGRAM_WEBHOOK_URL are present in .env,
+# the gateway uses Telegram setWebhook instead of polling.
 ssh_run "touch /opt/able/.env && \
   if grep -q '^ABLE_CRON_ENABLED=' /opt/able/.env; then \
     sed -i 's/^ABLE_CRON_ENABLED=.*/ABLE_CRON_ENABLED=1/' /opt/able/.env; \
@@ -124,6 +126,10 @@ ssh_run "
   curl -fsS http://127.0.0.1:8080/health && echo '✅ Health OK' || echo '⚠ Health not ready yet'
   echo ''
   docker compose logs --tail 20
+  echo ''
+  echo 'Pruning unused Docker images/build cache older than 24h (volumes preserved)...'
+  docker image prune -af --filter 'until=24h' >/dev/null || true
+  docker builder prune -af --filter 'until=24h' >/dev/null || true
 "
 
 echo ""
