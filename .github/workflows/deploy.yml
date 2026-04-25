@@ -162,6 +162,7 @@ jobs:
             ABLE_SERVICE_TOKEN=$ABLE_SERVICE_TOKEN
             GITHUB_WEBHOOK_SECRET=$GITHUB_WEBHOOK_SECRET
             WEBHOOK_PORT=8080
+            ABLE_CRON_ENABLED=1
             EOF
             chmod 600 /opt/able/.env
             echo "✓ .env written"
@@ -189,6 +190,7 @@ jobs:
                 environment:
                   - ABLE_HOME=/home/able/.able
                   - PYTHONUNBUFFERED=1
+                  - ABLE_CRON_ENABLED=1
                 volumes:
                   - able_data:/home/able/.able
                   - able_db:/home/able/app/able/data

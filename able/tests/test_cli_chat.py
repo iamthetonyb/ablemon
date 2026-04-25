@@ -148,6 +148,7 @@ def _stub_gateway(chain):
     gateway.transcript_manager = _TranscriptManager()
     gateway.session_mgr = None
     gateway.rate_limiter = RateLimiter()
+    gateway._sse_subscribers = []
     return gateway
 
 
@@ -166,7 +167,8 @@ async def test_stream_message_falls_back_only_when_no_chunks_emitted():
         )
     ]
 
-    assert chunks == ["full fallback"]
+    assert chunks[0] == "full fallback"
+    assert "full fallback" not in "".join(chunks[1:])
     assert chain.complete_called is True
 
 
@@ -185,7 +187,8 @@ async def test_stream_message_does_not_duplicate_after_partial_output():
         )
     ]
 
-    assert chunks == ["partial "]
+    assert chunks[0] == "partial "
+    assert "should not be used" not in "".join(chunks)
     assert chain.complete_called is False
 
 

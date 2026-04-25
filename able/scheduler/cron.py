@@ -20,6 +20,20 @@ from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
+# Absolute path — never relative to cwd. cwd changes between restarts (PM2, systemd)
+# break recovery if this is relative and points to a different/empty DB each time.
+# parents[1] = able/ package dir = /home/able/app/able (matches the Docker volume mount)
+# parents[2] would be /home/able/app (outside the volume) — wrong path, caused fresh DB on restart
+_SCHEDULER_DB_DEFAULT = Path(__file__).resolve().parents[1] / "data" / "cron_executions.db"
+SCHEDULER_DB_DEFAULT = _SCHEDULER_DB_DEFAULT
+
+
+def _minute_slot(dt: datetime) -> int:
+    """Return a stable epoch-minute slot for scheduled/recovery dedupe."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_get_tz())
+    return int(dt.replace(second=0, microsecond=0).timestamp())
+
 
 def _get_tz() -> ZoneInfo:
     """Get configured timezone from ABLE_TIMEZONE env var, default to UTC."""
@@ -144,6 +158,7 @@ class JobResult:
     started_at: float = field(default_factory=time.time)
     attempt: int = 1
     trigger: str = "scheduled"  # "scheduled" | "manual" | "recovery" | "retry"
+    run_slot: Optional[int] = None  # epoch-minute scheduled slot for dedupe
 
 
 # ── Persistent execution log (SQLite) ─────────────────────────────────────
@@ -151,13 +166,15 @@ class JobResult:
 class CronExecutionDB:
     """SQLite-backed execution log. Survives restarts."""
 
-    def __init__(self, db_path: str = "data/cron_executions.db"):
-        self.db_path = Path(db_path)
+    def __init__(self, db_path: str = None):
+        self.db_path = Path(db_path) if db_path else _SCHEDULER_DB_DEFAULT
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
     def _init_db(self):
         with sqlite3.connect(self.db_path) as conn:
+            conn.execute("PRAGMA busy_timeout = 5000")
+            conn.execute("PRAGMA journal_mode = WAL")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS executions (
                     id TEXT PRIMARY KEY,
@@ -169,24 +186,63 @@ class CronExecutionDB:
                     error TEXT,
                     attempt INTEGER DEFAULT 1,
                     trigger TEXT DEFAULT 'scheduled',
-                    output_preview TEXT
+                    output_preview TEXT,
+                    run_slot INTEGER
                 )
             """)
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(executions)").fetchall()}
+            if "run_slot" not in columns:
+                conn.execute("ALTER TABLE executions ADD COLUMN run_slot INTEGER")
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_executions_job_time
                 ON executions (job_name, started_at DESC)
             """)
             conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_executions_job_slot
+                ON executions (job_name, run_slot)
+            """)
+            conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_executions_time
                 ON executions (started_at DESC)
+            """)
+            # Cross-process dedupe: one durable claim for each scheduled job slot.
+            # This is intentionally stronger than per-minute locking. A 1am daily job
+            # keeps the same run_slot across recovery/restart attempts, so it cannot
+            # re-fire just because the container restarted at 1:03 or 9:00.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS job_run_claims (
+                    job_name TEXT NOT NULL,
+                    run_slot INTEGER NOT NULL,
+                    execution_id TEXT,
+                    trigger TEXT DEFAULT 'scheduled',
+                    claimed_by TEXT NOT NULL,
+                    claimed_at REAL NOT NULL,
+                    heartbeat_at REAL NOT NULL,
+                    expires_at REAL NOT NULL,
+                    finished_at REAL,
+                    success INTEGER,
+                    PRIMARY KEY (job_name, run_slot)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_job_run_claims_expiry
+                ON job_run_claims (expires_at)
             """)
 
     def record_start(self, result: JobResult):
         """Record job start (before execution)."""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
-                "INSERT INTO executions (id, job_name, started_at, attempt, trigger) VALUES (?, ?, ?, ?, ?)",
-                (result.id, result.name, result.started_at, result.attempt, result.trigger),
+                "INSERT INTO executions (id, job_name, started_at, attempt, trigger, run_slot) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    result.id,
+                    result.name,
+                    result.started_at,
+                    result.attempt,
+                    result.trigger,
+                    result.run_slot,
+                ),
             )
 
     def record_finish(self, result: JobResult):
@@ -216,18 +272,34 @@ class CronExecutionDB:
             ).fetchone()
         return row[0] if row else None
 
+    def get_in_flight(self, job_name: str, window_seconds: float = 3600) -> Optional[float]:
+        """Return started_at of an unfinished execution within window_seconds, or None.
+
+        Detects zombie rows left by a container crash mid-run — the row has
+        started_at but no finished_at because SIGKILL prevented record_finish().
+        """
+        cutoff = time.time() - window_seconds
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT started_at FROM executions "
+                "WHERE job_name = ? AND finished_at IS NULL AND started_at > ? "
+                "ORDER BY started_at DESC LIMIT 1",
+                (job_name, cutoff),
+            ).fetchone()
+        return row[0] if row else None
+
     def get_recent(self, limit: int = 50, job_name: str = None) -> List[Dict]:
         """Get recent execution history."""
         with sqlite3.connect(self.db_path) as conn:
             if job_name:
                 rows = conn.execute(
-                    "SELECT id, job_name, started_at, finished_at, success, duration_s, error, attempt, trigger "
+                    "SELECT id, job_name, started_at, finished_at, success, duration_s, error, attempt, trigger, run_slot "
                     "FROM executions WHERE job_name = ? ORDER BY started_at DESC LIMIT ?",
                     (job_name, limit),
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT id, job_name, started_at, finished_at, success, duration_s, error, attempt, trigger "
+                    "SELECT id, job_name, started_at, finished_at, success, duration_s, error, attempt, trigger, run_slot "
                     "FROM executions ORDER BY started_at DESC LIMIT ?",
                     (limit,),
                 ).fetchall()
@@ -236,6 +308,7 @@ class CronExecutionDB:
                 "id": r[0], "name": r[1], "started_at": r[2], "finished_at": r[3],
                 "success": bool(r[4]) if r[4] is not None else None,
                 "duration_s": r[5], "error": r[6], "attempt": r[7], "trigger": r[8],
+                "run_slot": r[9],
             }
             for r in rows
         ]
@@ -263,6 +336,122 @@ class CronExecutionDB:
             "success_rate": round((row[1] or 0) / max(row[0] or 1, 1) * 100, 1),
         }
 
+    def count_records(self) -> int:
+        """Return total execution records across all jobs."""
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute("SELECT COUNT(*) FROM executions").fetchone()
+        return int(row[0] or 0)
+
+    def try_claim_run(
+        self,
+        job_name: str,
+        run_slot: int,
+        *,
+        ttl_seconds: float,
+        execution_id: str,
+        trigger: str,
+    ) -> bool:
+        """Atomically claim one scheduled job slot across local/remote processes.
+
+        The uniqueness key is (job_name, run_slot), where run_slot is the actual
+        scheduled occurrence. That makes recovery idempotent: a 1am job keeps the
+        same key whether recovery happens at 1:01, 9:00, or after a deploy.
+        """
+        now = time.time()
+        expires_at = now + ttl_seconds
+        claimed_by = f"{os.uname().nodename}:{os.getpid()}"
+
+        with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+            conn.execute("PRAGMA busy_timeout = 5000")
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT finished_at, expires_at FROM job_run_claims "
+                "WHERE job_name = ? AND run_slot = ?",
+                (job_name, run_slot),
+            ).fetchone()
+            if row:
+                finished_at, existing_expires_at = row
+                if finished_at is not None:
+                    return False
+                if existing_expires_at and existing_expires_at > now:
+                    return False
+                conn.execute(
+                    """UPDATE job_run_claims
+                       SET execution_id = ?, trigger = ?, claimed_by = ?,
+                           claimed_at = ?, heartbeat_at = ?, expires_at = ?
+                       WHERE job_name = ? AND run_slot = ?""",
+                    (
+                        execution_id,
+                        trigger,
+                        claimed_by,
+                        now,
+                        now,
+                        expires_at,
+                        job_name,
+                        run_slot,
+                    ),
+                )
+                return True
+
+            conn.execute(
+                """INSERT INTO job_run_claims
+                   (job_name, run_slot, execution_id, trigger, claimed_by,
+                    claimed_at, heartbeat_at, expires_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    job_name,
+                    run_slot,
+                    execution_id,
+                    trigger,
+                    claimed_by,
+                    now,
+                    now,
+                    expires_at,
+                ),
+            )
+            return True
+
+    def finish_run_claim(self, job_name: str, run_slot: int, result: JobResult) -> None:
+        """Mark the final outcome for a claimed scheduled slot."""
+        with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+            conn.execute("PRAGMA busy_timeout = 5000")
+            conn.execute(
+                """UPDATE job_run_claims
+                   SET finished_at = ?, heartbeat_at = ?, success = ?
+                   WHERE job_name = ? AND run_slot = ?""",
+                (
+                    time.time(),
+                    time.time(),
+                    1 if result.success else 0,
+                    job_name,
+                    run_slot,
+                ),
+            )
+
+    def get_run_claim(self, job_name: str, run_slot: int) -> Optional[Dict[str, Any]]:
+        """Fetch a run claim for tests/status surfaces."""
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                """SELECT job_name, run_slot, execution_id, trigger, claimed_by,
+                          claimed_at, heartbeat_at, expires_at, finished_at, success
+                   FROM job_run_claims WHERE job_name = ? AND run_slot = ?""",
+                (job_name, run_slot),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "job_name": row[0],
+            "run_slot": row[1],
+            "execution_id": row[2],
+            "trigger": row[3],
+            "claimed_by": row[4],
+            "claimed_at": row[5],
+            "heartbeat_at": row[6],
+            "expires_at": row[7],
+            "finished_at": row[8],
+            "success": bool(row[9]) if row[9] is not None else None,
+        }
+
     def cleanup(self, max_age_days: int = 90):
         """Purge records older than max_age_days."""
         cutoff = time.time() - (max_age_days * 86400)
@@ -270,6 +459,10 @@ class CronExecutionDB:
             deleted = conn.execute(
                 "DELETE FROM executions WHERE started_at < ?", (cutoff,)
             ).rowcount
+            conn.execute(
+                "DELETE FROM job_run_claims WHERE claimed_at < ? AND finished_at IS NOT NULL",
+                (cutoff,),
+            )
         if deleted:
             logger.info(f"Cron DB cleanup: purged {deleted} records older than {max_age_days} days")
 
@@ -293,11 +486,11 @@ class CronScheduler:
         await scheduler.run_forever()
     """
 
-    def __init__(self, audit_log=None, db_path: str = "data/cron_executions.db"):
+    def __init__(self, audit_log=None, db_path: str = None):
         self.jobs: Dict[str, CronJob] = {}
         self.audit_log = audit_log
         self._running = False
-        self.db = CronExecutionDB(db_path)
+        self.db = CronExecutionDB(db_path)  # None → _SCHEDULER_DB_DEFAULT (absolute)
         self._startup_time = time.time()
         # Completion queue — gateway drains this after each agent turn
         # to inject background job notifications into the conversation.
@@ -354,25 +547,44 @@ class CronScheduler:
         if name in self.jobs:
             self.jobs[name].enabled = False
 
+    @staticmethod
+    def _claim_ttl_seconds(job: CronJob) -> float:
+        """Lease long enough to cover timeout + retries + retry backoff."""
+        retry_count = max(job.max_retries - 1, 0)
+        backoff_budget = sum(
+            job.retry_backoff_base * (2 ** attempt_index)
+            for attempt_index in range(retry_count)
+        )
+        return max(600.0, (job.timeout_seconds * max(job.max_retries, 1)) + backoff_budget + 300.0)
+
     async def recover_missed_jobs(self, max_lookback_hours: int = 48):
         """
         On startup, detect jobs that should have run during downtime and execute them.
 
         Only recovers jobs with schedules coarser than every-5-minutes (skip health checks).
         Only recovers if the last successful run is older than the expected interval.
-        If the DB is empty (first boot or wiped), limits lookback to 2 hours to avoid
-        flooding all channels with stale briefings.
+        If the DB is empty (first boot or wiped), recovery is disabled by default
+        so deploy/reinstall events do not flood channels with stale briefings.
+        Set ABLE_CRON_EMPTY_DB_RECOVERY_HOURS to opt into first-boot catchup.
         """
         tz = _get_tz()
         now = _now()
         recovered = 0
 
-        # If DB has zero records, this is likely a fresh DB (first boot or wipe).
-        # Limit lookback to 2 hours to avoid recovering stale daily/weekly jobs.
-        total_records = self.db.get_job_stats("__any__", days=9999)["total"]
+        # Correct whole-table check. The previous "__any__" stats query always
+        # returned 0, so every restart looked like a fresh DB and recovery could
+        # re-fire daily notification jobs.
+        total_records = self.db.count_records()
         if total_records == 0:
-            effective_lookback = min(max_lookback_hours, 2)
-            logger.info(f"Empty cron DB — limiting recovery lookback to {effective_lookback}h (fresh boot)")
+            empty_recovery_hours = float(os.environ.get("ABLE_CRON_EMPTY_DB_RECOVERY_HOURS", "0") or 0)
+            if empty_recovery_hours <= 0:
+                logger.info("Empty cron DB — startup recovery disabled; jobs will run at next scheduled slot")
+                return
+            effective_lookback = min(max_lookback_hours, empty_recovery_hours)
+            logger.info(
+                "Empty cron DB — limiting recovery lookback to %.1fh via ABLE_CRON_EMPTY_DB_RECOVERY_HOURS",
+                effective_lookback,
+            )
         else:
             effective_lookback = max_lookback_hours
 
@@ -393,17 +605,30 @@ class CronScheduler:
             else:
                 last_dt = lookback  # never ran — check full lookback
 
-            # Find expected runs since last success
-            expected = _expected_runs_since(job.schedule, last_dt.replace(tzinfo=None), now.replace(tzinfo=None))
+            # Find expected runs since last success. Keep timezone attached so the
+            # persisted run_slot uses the same local schedule on macOS + Docker.
+            expected = _expected_runs_since(job.schedule, last_dt, now)
             if not expected:
                 continue
 
             # Check if the most recent expected run was missed
             most_recent_expected = expected[-1]
-            # Re-attach ABLE timezone before converting to epoch (naive .timestamp() assumes server tz)
-            most_recent_ts = most_recent_expected.replace(tzinfo=tz).timestamp()
-            if last_success and last_success >= most_recent_ts:
+            most_recent_slot = _minute_slot(most_recent_expected)
+            if last_success and last_success >= most_recent_slot:
                 continue  # Already ran
+
+            # Skip if there is an in-flight (zombie) execution — a row with started_at
+            # but no finished_at, left by a container crash mid-run (SIGKILL prevented
+            # record_finish). Window = 2× the job timeout to handle slow jobs.
+            in_flight = self.db.get_in_flight(name, window_seconds=job.timeout_seconds * 2)
+            if in_flight:
+                logger.info(
+                    "Skipping recovery of %s: in-flight execution from %s "
+                    "(zombie from crashed container — will not double-fire)",
+                    name,
+                    datetime.fromtimestamp(in_flight, tz=tz).isoformat(),
+                )
+                continue
 
             # This job missed its last scheduled run — recover it
             logger.warning(
@@ -412,8 +637,13 @@ class CronScheduler:
                 f"expected: {most_recent_expected.isoformat()})"
             )
             try:
-                await self._run_job(job, trigger="recovery")
-                recovered += 1
+                result = await self._run_job_with_retry(
+                    job,
+                    trigger="recovery",
+                    run_slot=most_recent_slot,
+                )
+                if not (isinstance(result.output, dict) and result.output.get("skipped")):
+                    recovered += 1
             except Exception as e:
                 logger.error(f"Recovery failed for {name}: {e}")
 
@@ -449,10 +679,11 @@ class CronScheduler:
         # Daily DB cleanup at startup
         self.db.cleanup(max_age_days=90)
 
-        _heartbeat_path = Path("data/.cron_heartbeat")
+        _heartbeat_path = self.db.db_path.parent / ".cron_heartbeat"
 
         while self._running:
             now = _now()
+            run_slot = _minute_slot(now)
             due = [j for j in self.jobs.values() if j.enabled and cron_matches(j.schedule, now)]
 
             for job in due:
@@ -460,7 +691,7 @@ class CronScheduler:
                 if job.last_run and (time.time() - job.last_run) < 60:
                     continue
                 # Await execution — no fire-and-forget
-                await self._run_job_with_retry(job)
+                await self._run_job_with_retry(job, run_slot=run_slot)
 
             # Write heartbeat so proactive engine can detect stale scheduler
             try:
@@ -477,9 +708,43 @@ class CronScheduler:
             raise ValueError(f"Job '{name}' not found")
         return await self._run_job_with_retry(job, trigger="manual")
 
-    async def _run_job_with_retry(self, job: CronJob, trigger: str = "scheduled") -> JobResult:
+    async def _run_job_with_retry(
+        self,
+        job: CronJob,
+        trigger: str = "scheduled",
+        run_slot: Optional[int] = None,
+    ) -> JobResult:
         """Execute a job with retry on failure (exponential backoff)."""
-        result = await self._run_job(job, trigger=trigger)
+        claim_slot = run_slot if trigger in ("scheduled", "recovery") else None
+        if claim_slot is None and trigger in ("scheduled", "recovery"):
+            claim_slot = int(time.time() // 60) * 60
+
+        if claim_slot is not None:
+            claim_id = str(uuid.uuid4())[:12]
+            if not self.db.try_claim_run(
+                job.name,
+                claim_slot,
+                ttl_seconds=self._claim_ttl_seconds(job),
+                execution_id=claim_id,
+                trigger=trigger,
+            ):
+                logger.info(
+                    "⚡ Skipping %s [%s] slot=%s — run already claimed or finished",
+                    job.name,
+                    trigger,
+                    claim_slot,
+                )
+                return JobResult(
+                    name=job.name,
+                    started_at=time.time(),
+                    attempt=1,
+                    trigger=trigger,
+                    success=True,
+                    run_slot=claim_slot,
+                    output={"skipped": True, "reason": "run_slot_claimed", "run_slot": claim_slot},
+                )
+
+        result = await self._run_job(job, trigger=trigger, run_slot=claim_slot)
 
         attempt = 1
         while not result.success and attempt < job.max_retries:
@@ -487,18 +752,28 @@ class CronScheduler:
             backoff = job.retry_backoff_base * (2 ** (attempt - 2))  # 30s, 60s, 120s
             logger.info(f"🔄 Retrying {job.name} in {backoff:.0f}s (attempt {attempt}/{job.max_retries})")
             await asyncio.sleep(backoff)
-            result = await self._run_job(job, trigger="retry", attempt=attempt)
+            result = await self._run_job(job, trigger="retry", attempt=attempt, run_slot=claim_slot)
 
         if not result.success and attempt >= job.max_retries:
             logger.error(f"💀 Job '{job.name}' failed after {attempt} attempts — giving up until next schedule")
 
+        if claim_slot is not None:
+            self.db.finish_run_claim(job.name, claim_slot, result)
+
         return result
 
-    async def _run_job(self, job: CronJob, trigger: str = "scheduled", attempt: int = 1) -> JobResult:
+    async def _run_job(
+        self,
+        job: CronJob,
+        trigger: str = "scheduled",
+        attempt: int = 1,
+        run_slot: Optional[int] = None,
+    ) -> JobResult:
         """Execute a single job with timeout, persistence, and audit logging."""
         from able.core.observability.tracer import trace_operation
 
         start = time.time()
+
         job.last_run = start
         job.run_count += 1
 
@@ -507,6 +782,7 @@ class CronScheduler:
             started_at=start,
             attempt=attempt,
             trigger=trigger,
+            run_slot=run_slot,
         )
 
         # Persist start BEFORE execution
@@ -522,6 +798,7 @@ class CronScheduler:
                 "cron.schedule": job.schedule,
                 "cron.timeout_seconds": job.timeout_seconds,
                 "cron.run_count": job.run_count,
+                "cron.run_slot": run_slot,
             },
             tracer_name="able.cron",
         ) as span:
@@ -590,6 +867,7 @@ class CronScheduler:
                         "error": result.error,
                         "trigger": trigger,
                         "attempt": attempt,
+                        "run_slot": run_slot,
                     },
                 )
             except Exception:
