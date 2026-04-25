@@ -22,6 +22,9 @@ jobs:
           ABLE_OWNER_TELEGRAM_ID=1
           ABLE_OWNER_USERNAME=smoke
           ABLE_TIMEZONE=America/Los_Angeles
+          ABLE_CRON_ENABLED=0
+          ABLE_TELEGRAM_ENABLED=0
+          ABLE_TELEGRAM_MODE=off
           EOF
 
       - name: Build gateway image
@@ -35,6 +38,13 @@ jobs:
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8080/health > /tmp/able-health.json; then
               cat /tmp/able-health.json
+              python3 - <<'PY'
+          import json
+          from pathlib import Path
+          health = json.loads(Path("/tmp/able-health.json").read_text())
+          assert health["telegram_mode"] == "off", health
+          assert health["telegram_polling_enabled"] is False, health
+          PY
               exit 0
             fi
             sleep 2
