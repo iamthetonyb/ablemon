@@ -100,6 +100,7 @@ All wired into the gateway tool loop (`gateway.py` lines ~1090-1620). Context co
 ### P2 — Production verification
 
 - Confirm deployed container sees `/home/able/.able/auth.json`
+- Confirm deployed `/health` reports `cron_enabled=true` and `telegram_polling_enabled=true`
 - Confirm T1 resolves to `gpt-5.4-mini` on live server
 - Send a real Telegram buddy query and verify dispatch
 - Confirm CI smoke stays green

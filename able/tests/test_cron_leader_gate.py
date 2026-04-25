@@ -19,6 +19,15 @@ def test_cron_leader_gate_allows_explicit_leader():
     assert ABLEGateway._cron_enabled_from_env({"ABLE_CRON_ROLE": "leader"}) is True
 
 
+def test_telegram_polling_defaults_to_cron_leader_only():
+    assert ABLEGateway._telegram_polling_enabled_from_env({}) is False
+    assert ABLEGateway._telegram_polling_enabled_from_env({"ABLE_CRON_ENABLED": "1"}) is True
+    assert ABLEGateway._telegram_polling_enabled_from_env(
+        {"ABLE_CRON_ENABLED": "1", "ABLE_TELEGRAM_ENABLED": "0"}
+    ) is False
+    assert ABLEGateway._telegram_polling_enabled_from_env({"ABLE_TELEGRAM_ENABLED": "1"}) is True
+
+
 @pytest.mark.asyncio
 async def test_github_digest_missing_token_logs_without_telegram(monkeypatch, tmp_path):
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)

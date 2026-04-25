@@ -146,7 +146,7 @@ Push to `main` → GitHub Actions builds → pushes to GHCR → deploys via SSH.
 ./deploy-to-server.sh <server_ip> [ssh_key_path]
 ```
 
-Docker auto-installs on the server. Pre-built image pulls from GHCR. Cron is leader-gated: server deploys set `ABLE_CRON_ENABLED=1`, while local/dev runs default to follower mode. Cron state lives in the `able_db` volume (`/home/able/app/able/data`) and uses per-scheduled-run claims so deploy restarts do not re-fire nightly jobs.
+Docker auto-installs on the server. Pre-built image pulls from GHCR. Cron and Telegram polling are leader-gated: server deploys set `ABLE_CRON_ENABLED=1` and `ABLE_TELEGRAM_ENABLED=1`, while local/dev runs default to follower mode. Cron state lives in the `able_db` volume (`/home/able/app/able/data`) and uses per-scheduled-run claims so deploy restarts do not re-fire nightly jobs.
 
 ---
 
