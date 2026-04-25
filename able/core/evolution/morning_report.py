@@ -22,6 +22,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from able.scheduler.cron import SCHEDULER_DB_DEFAULT
+
 import yaml
 
 logger = logging.getLogger(__name__)
@@ -95,7 +97,7 @@ class MorningReporter:
     def __init__(
         self,
         interaction_db: str = "data/interaction_log.db",
-        cron_db: str = "data/cron_executions.db",
+        cron_db: str = str(SCHEDULER_DB_DEFAULT),
         evolution_dir: str = "data/evolution_cycles",
         actions_dir: str = "data/self_scheduled",
         routing_config: str = "config/routing_config.yaml",

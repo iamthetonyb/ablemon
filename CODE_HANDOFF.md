@@ -1,7 +1,7 @@
 # ABLE — Code Handoff
 
-Date: 2026-04-07
-Branch: `main` is the current production baseline.
+Date: 2026-04-24
+Branch: `main` is the current production baseline; verify active work branch before editing.
 Git state: always verify with `git log --oneline -10` before starting work.
 
 ## Source Of Truth
@@ -102,6 +102,12 @@ User → TrustGate → Scanner → Auditor → PromptEnricher → ComplexityScor
 | Recovery | Thinking prefill | Re-run when model produces thinking but no output (max 2 retries) |
 | Recovery | 413 auto-compress | Catch provider context-length errors, auto-compact, retry |
 | Notification | Completion queue | Cron jobs with `notify_on_complete` push results to gateway |
+
+### Cron Reliability Contract
+
+`CronScheduler` uses SQLite as the durable coordination store. The default DB path is `able/data/cron_executions.db`, which maps to `/home/able/app/able/data` in Docker and is mounted as the `able_db` volume on the server.
+
+Scheduled and recovery runs claim `job_run_claims(job_name, run_slot)` before executing. `run_slot` is the actual scheduled epoch-minute, not the current recovery minute. This prevents duplicate fires across local + remote processes, deploy restarts, and recovery retries. Empty-DB startup recovery is disabled by default to avoid stale Telegram floods; set `ABLE_CRON_EMPTY_DB_RECOVERY_HOURS` only when a first-boot catchup is explicitly wanted.
 
 ### Model Routing (5 tiers)
 
@@ -481,6 +487,23 @@ Training lanes:
 
 ---
 
+## Current Patch (2026-04-24)
+
+**Cron duplicate-fire hardening**
+- Fixed startup recovery's empty-DB detector. The old `get_job_stats("__any__")` check always returned 0, so every restart behaved like a fresh DB and could recover daily notification jobs again.
+- Replaced current-minute dedupe with durable scheduled-run claims in `job_run_claims(job_name, run_slot)`.
+- Recovery now claims the actual missed scheduled slot, not the wall-clock minute when recovery runs. Example: `nightly-research` scheduled at 1am keeps the same idempotency key whether recovered at 1:01, 9:00, or after deploy.
+- Empty-DB recovery is disabled by default to prevent stale Telegram floods after reinstall/path changes. Optional override: `ABLE_CRON_EMPTY_DB_RECOVERY_HOURS`.
+- Scheduler heartbeat and morning-report cron history now use the scheduler DB path under `able/data/`, matching the Docker `able_db` volume.
+- Added `able/tests/test_cron_claims.py`: duplicate scheduler instances, empty-DB recovery suppression, recovery slot identity, stale lease takeover.
+
+Validation run this patch:
+- `python3 -m py_compile able/scheduler/cron.py able/core/evolution/morning_report.py`
+- `python3 -m pytest able/tests/test_cron_claims.py -q`
+- `python3 -m pytest able/tests/test_evolution_scheduler.py -q`
+
+---
+
 ## Previous Work (same session, earlier)
 
 42. **Phase 0 Critical Fixes — Gateway Robustness** (Plan Items 0b, 0c):
@@ -583,7 +606,7 @@ Still on the roadmap (saved for future sessions):
 - **Elicitation/interactive approval flows** — Tools can pause, collect structured user input via forms, then resume (richer than approve/deny)
 - **Python 3.14 JIT streaming for hot paths** — Leverage JIT compilation for hot paths alongside WebSocket improvements
 - ~~**Studio NextAuth session checks**~~ ✓ Done (Item 63): `able-studio/middleware.ts` enforces auth on all protected routes
-- **Morning briefing double-execution diagnosis** — No code duplication found; may be runtime issue (gateway restarting?)
+- ~~**Morning briefing / nightly research double-execution diagnosis**~~ ✓ Fixed: startup recovery no longer always treats DB as empty; scheduled/recovery jobs now use durable `job_run_claims(job_name, run_slot)` idempotency.
 
 ### Priority 10.5: Master Plan — Next immediate items
 
@@ -620,6 +643,7 @@ cd /tmp && printf '/resources\n/q\n' | ~/.local/bin/able chat --control-port 0
 cd /tmp && printf '/battle\n/q\n' | ~/.local/bin/able chat --control-port 0
 cd /tmp && printf '/compact\n/q\n' | ~/.local/bin/able chat --control-port 0
 python3 -m pytest able/tests/test_cli_chat.py -x
+python3 -m pytest able/tests/test_cron_claims.py -q
 python3 -m pytest able/tests/test_provider_registry_primary.py able/tests/test_telegram_buddy_dispatch.py -x
 python3 -m pytest able/tests/test_package_layout.py able/tests/test_runtime_boundaries.py -x
 python3 -m pytest able/tests/test_buddy.py -q

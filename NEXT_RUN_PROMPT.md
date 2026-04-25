@@ -84,6 +84,12 @@ All four learning feedback loops are closed and tested:
 - Deploy scripts now mount `auth.json` into `/home/able/.able/auth.json` with UID/GID `1000:1000`, so the non-root container process can actually read the OAuth token
 - CI now includes `gateway-health-smoke.yml`, which builds the image, starts the gateway, checks `/health`, and asserts `config/routing_config.yaml` exists in-container
 
+**Cron reliability**:
+- Scheduler DB default is `able/data/cron_executions.db`, matching the Docker `able_db` volume mount at `/home/able/app/able/data`
+- Scheduled/recovery jobs use durable `job_run_claims(job_name, run_slot)` idempotency keys; recovery claims the original scheduled slot, not the current recovery minute
+- Empty-DB startup recovery is disabled by default to prevent stale Telegram floods; use `ABLE_CRON_EMPTY_DB_RECOVERY_HOURS` only for intentional first-boot catchup
+- `able/tests/test_cron_claims.py` covers duplicate scheduler instances, empty-DB recovery suppression, recovery slot identity, and stale lease takeover
+
 **Runtime-first boundary cleanup**:
 - `docs/RUNTIME_REFACTOR_AUDIT.md` classifies the repo into `Core`, `Optional but kept`, `Seed / template assets`, and `Dead / accidental`
 - `able.__main__` and `able.start` now lazy-import chat/serve paths so `able chat --help` stays off the full gateway startup path
@@ -286,6 +292,7 @@ At minimum, rerun the CLI smoke test:
 ```bash
 python3 -m able chat --help
 python3 -m pytest able/tests/test_cli_chat.py -x
+python3 -m pytest able/tests/test_cron_claims.py -q
 python3 -m pytest able/tests/test_provider_registry_primary.py able/tests/test_telegram_buddy_dispatch.py -x
 python3 -m pytest able/tests/test_package_layout.py able/tests/test_runtime_boundaries.py -x
 cd /tmp && ~/.local/bin/able chat --help
