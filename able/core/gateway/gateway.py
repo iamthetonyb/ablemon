@@ -494,14 +494,22 @@ class ABLEGateway:
             "ABLE_OWNER_TELEGRAM_ID",
             self.config.get("owner_telegram_id", "")
         )
+        self.cron_enabled = self._cron_enabled_from_env()
+        self.telegram_polling_enabled = self._telegram_polling_enabled_from_env(
+            cron_enabled=self.cron_enabled
+        )
 
-        if not self.bot_token and require_telegram:
+        if self.telegram_polling_enabled and not self.bot_token and require_telegram:
             raise ValueError(
                 "TELEGRAM_BOT_TOKEN environment variable is not set. "
                 "Set it in your .env file or Docker environment."
             )
         if not self.bot_token and not require_telegram:
             logger.info("TELEGRAM_BOT_TOKEN not set; starting in local-only mode")
+        if self.bot_token and not self.telegram_polling_enabled:
+            logger.info(
+                "Telegram polling disabled; set ABLE_TELEGRAM_ENABLED=1 on the single bot leader"
+            )
 
         # Initialize audit directory
         self.audit_dir = Path("audit/logs")
@@ -563,7 +571,6 @@ class ABLEGateway:
         # Proactive Persistence Layer
         self.scheduler = CronScheduler()
         self.initiative = InitiativeEngine(self)
-        self.cron_enabled = self._cron_enabled_from_env()
         try:
             self.memory = HybridMemory()
         except Exception as e:
@@ -719,6 +726,29 @@ class ABLEGateway:
                 return False
 
         return False
+
+    @classmethod
+    def _telegram_polling_enabled_from_env(
+        cls,
+        env: Optional[Dict[str, str]] = None,
+        *,
+        cron_enabled: Optional[bool] = None,
+    ) -> bool:
+        """Return True only for the single runtime that should poll Telegram.
+
+        Telegram getUpdates allows one active poller per bot token. The server
+        deploy sets ABLE_TELEGRAM_ENABLED=1; local/dev runs default to follower
+        mode so a laptop with the production token cannot steal polling.
+        """
+        env = env or os.environ
+        for key in ("ABLE_TELEGRAM_ENABLED", "ABLE_TELEGRAM_POLLING_ENABLED"):
+            explicit = env.get(key)
+            if explicit is not None:
+                return explicit.strip().lower() in cls._TRUE_ENV_VALUES
+
+        if cron_enabled is None:
+            cron_enabled = cls._cron_enabled_from_env(env)
+        return bool(cron_enabled)
 
     def _get_voice_transcriber(self):
         """Instantiate ASR only when explicitly configured and first needed."""
@@ -2867,6 +2897,7 @@ class ABLEGateway:
             "control_plane": "enabled",
             "cron_enabled": getattr(self, "cron_enabled", False),
             "cron_jobs": len(getattr(getattr(self, "scheduler", None), "jobs", {})),
+            "telegram_polling_enabled": getattr(self, "telegram_polling_enabled", False),
         })
 
     def _verify_service_token(self, request: web.Request) -> bool:
@@ -3628,19 +3659,23 @@ class ABLEGateway:
         # Start queue
         await self.queue.start()
 
-        # Start master bot (non-fatal — health server stays up even if token is invalid)
-        try:
-            await self.start_master_bot()
-        except Exception as e:
-            print(f"⚠ Telegram bot failed to start: {e}")
-            print("  Health server still running. Fix TELEGRAM_BOT_TOKEN and restart.")
-
-        # Start all registered client bots
-        for client_id in self.client_registry.clients:
+        if self.telegram_polling_enabled:
+            # Start master bot (non-fatal — health server stays up even if token is invalid)
             try:
-                await self.start_client_bot(client_id)
+                await self.start_master_bot()
             except Exception as e:
-                print(f"Failed to start bot for {client_id}: {e}")
+                print(f"⚠ Telegram bot failed to start: {e}")
+                print("  Health server still running. Fix TELEGRAM_BOT_TOKEN and restart.")
+
+            # Start all registered client bots
+            for client_id in self.client_registry.clients:
+                try:
+                    await self.start_client_bot(client_id)
+                except Exception as e:
+                    print(f"Failed to start bot for {client_id}: {e}")
+        else:
+            logger.info("Telegram polling disabled; gateway running without getUpdates")
+            print("⏸️ Telegram polling disabled (set ABLE_TELEGRAM_ENABLED=1 on one bot leader only)")
 
         # Start event bus + SSE bridge
         await self.event_bus.start()

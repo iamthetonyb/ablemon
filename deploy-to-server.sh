@@ -48,12 +48,18 @@ if [ -f "able/.env" ]; then
   ssh_run 'chmod 600 /opt/able/.env'
 fi
 
-# The server is the only cron leader. Local/dev gateways default to follower mode.
+# The server is the only cron + Telegram polling leader. Local/dev gateways
+# default to follower mode so they cannot steal Telegram getUpdates.
 ssh_run "touch /opt/able/.env && \
   if grep -q '^ABLE_CRON_ENABLED=' /opt/able/.env; then \
     sed -i 's/^ABLE_CRON_ENABLED=.*/ABLE_CRON_ENABLED=1/' /opt/able/.env; \
   else \
     printf '\nABLE_CRON_ENABLED=1\n' >> /opt/able/.env; \
+  fi && \
+  if grep -q '^ABLE_TELEGRAM_ENABLED=' /opt/able/.env; then \
+    sed -i 's/^ABLE_TELEGRAM_ENABLED=.*/ABLE_TELEGRAM_ENABLED=1/' /opt/able/.env; \
+  else \
+    printf 'ABLE_TELEGRAM_ENABLED=1\n' >> /opt/able/.env; \
   fi && chmod 600 /opt/able/.env"
 
 AUTH_VOLUME_LINE=""
@@ -80,6 +86,7 @@ services:
       - ABLE_HOME=/home/able/.able
       - PYTHONUNBUFFERED=1
       - ABLE_CRON_ENABLED=1
+      - ABLE_TELEGRAM_ENABLED=1
     volumes:
       - able_data:/home/able/.able
       - able_db:/home/able/app/able/data
