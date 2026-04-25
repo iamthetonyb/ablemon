@@ -457,10 +457,7 @@ Keep it under 500 words."""
         """Scan repos and send a real digest."""
         # Check token before making the call — avoids opaque errors
         if not os.environ.get("GITHUB_TOKEN") and not os.environ.get("GH_TOKEN"):
-            await self._send_to_owner(
-                "📡 GitHub Digest: Skipped — GITHUB_TOKEN not set in environment.",
-                "github-digest",
-            )
+            logger.info("GitHub digest skipped: GITHUB_TOKEN not set")
             return
         try:
             repos = await self.gateway.github.list_repos()

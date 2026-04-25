@@ -470,6 +470,9 @@ class ABLEGateway:
     Master instance that oversees all client bots.
     """
 
+    _TRUE_ENV_VALUES = {"1", "true", "yes", "on", "leader", "primary"}
+    _FALSE_ENV_VALUES = {"0", "false", "no", "off", "follower", "disabled"}
+
     def __init__(
         self,
         config_path: str = "config/gateway.json",
@@ -560,6 +563,7 @@ class ABLEGateway:
         # Proactive Persistence Layer
         self.scheduler = CronScheduler()
         self.initiative = InitiativeEngine(self)
+        self.cron_enabled = self._cron_enabled_from_env()
         try:
             self.memory = HybridMemory()
         except Exception as e:
@@ -692,6 +696,29 @@ class ABLEGateway:
 
         # Interaction DB path (used by metrics handlers)
         self._interaction_db_path: str = "data/interaction_log.db"
+
+    @classmethod
+    def _cron_enabled_from_env(cls, env: Optional[Dict[str, str]] = None) -> bool:
+        """Return True only for the single process elected to run autonomous cron.
+
+        Local/dev gateways often share the production Telegram bot token. Defaulting
+        cron on lets a laptop and the VPS both send scheduled messages. Production
+        deploys set ABLE_CRON_ENABLED=1 explicitly; all other runtimes are followers.
+        """
+        env = env or os.environ
+        explicit = env.get("ABLE_CRON_ENABLED")
+        if explicit is not None:
+            return explicit.strip().lower() in cls._TRUE_ENV_VALUES
+
+        role = env.get("ABLE_CRON_ROLE")
+        if role is not None:
+            role_value = role.strip().lower()
+            if role_value in cls._TRUE_ENV_VALUES:
+                return True
+            if role_value in cls._FALSE_ENV_VALUES:
+                return False
+
+        return False
 
     def _get_voice_transcriber(self):
         """Instantiate ASR only when explicitly configured and first needed."""
@@ -2838,6 +2865,8 @@ class ABLEGateway:
             "providers": len(self.provider_chain.providers),
             "tool_count": self.tool_registry.tool_count,
             "control_plane": "enabled",
+            "cron_enabled": getattr(self, "cron_enabled", False),
+            "cron_jobs": len(getattr(getattr(self, "scheduler", None), "jobs", {})),
         })
 
     def _verify_service_token(self, request: web.Request) -> bool:
@@ -3643,38 +3672,42 @@ class ABLEGateway:
                 logger.warning("Smoke test error: %s — startup continues", e)
                 print(f"⚠️  Smoke test error: {e} — continuing anyway")
 
-        # Start the Persistence Layer (Proactive AGI)
-        self.initiative.register_jobs(self.scheduler)
+        if self.cron_enabled:
+            # Start the Persistence Layer (Proactive AGI)
+            self.initiative.register_jobs(self.scheduler)
 
-        # Register default ABLE jobs (evolution, distillation, morning report)
-        async def _send_telegram(text: str):
-            """Send a message to the owner via Telegram (used by morning report)."""
-            if self.master_bot and self.owner_telegram_id:
-                try:
-                    await self.master_bot.bot.send_message(
-                        chat_id=self.owner_telegram_id,
-                        text=text,
-                        parse_mode="Markdown",
-                    )
-                except Exception:
-                    await self.master_bot.bot.send_message(
-                        chat_id=self.owner_telegram_id,
-                        text=text,
-                    )
+            # Register default ABLE jobs (evolution, distillation, morning report)
+            async def _send_telegram(text: str):
+                """Send a message to the owner via Telegram (used by morning report)."""
+                if self.master_bot and self.owner_telegram_id:
+                    try:
+                        await self.master_bot.bot.send_message(
+                            chat_id=self.owner_telegram_id,
+                            text=text,
+                            parse_mode="Markdown",
+                        )
+                    except Exception:
+                        await self.master_bot.bot.send_message(
+                            chat_id=self.owner_telegram_id,
+                            text=text,
+                        )
 
-        # Initialize audit log for cron and system event tracking
-        from able.audit.logs.audit_log import AuditLog as _CronAuditLog
-        _audit_log_instance = _CronAuditLog()
+            # Initialize audit log for cron and system event tracking
+            from able.audit.logs.audit_log import AuditLog as _CronAuditLog
+            _audit_log_instance = _CronAuditLog()
 
-        register_default_jobs(
-            self.scheduler,
-            memory=self.memory,
-            audit_log=_audit_log_instance,
-            send_telegram=_send_telegram,
-            provider_chain=self.tier_chains.get(1, self.provider_chain),  # T1 as cheap judge
-            interaction_logger=self.interaction_logger,
-        )
-        print(f"🕰️ ABLE Persistent Scheduler started with {len(self.scheduler.jobs)} autonomous missions")
+            register_default_jobs(
+                self.scheduler,
+                memory=self.memory,
+                audit_log=_audit_log_instance,
+                send_telegram=_send_telegram,
+                provider_chain=self.tier_chains.get(1, self.provider_chain),  # T1 as cheap judge
+                interaction_logger=self.interaction_logger,
+            )
+            print(f"🕰️ ABLE Persistent Scheduler started with {len(self.scheduler.jobs)} autonomous missions")
+        else:
+            logger.info("ABLE cron disabled; set ABLE_CRON_ENABLED=1 on the single cron leader")
+            print("⏸️ ABLE Scheduler disabled (follower mode; set ABLE_CRON_ENABLED=1 on one server only)")
 
         # ── Startup Health Report ───────────────────────────────────
         # Run doctor checks and report degraded subsystems so operator
@@ -3697,19 +3730,21 @@ class ABLEGateway:
         except Exception as _doc_err:
             logger.warning("Doctor health check failed: %s", _doc_err)
 
-        # Recover any jobs missed during downtime (up to 48h lookback)
-        async def _supervised_scheduler():
-            while True:
-                try:
-                    await self.scheduler.recover_missed_jobs(max_lookback_hours=48)
-                    await self.scheduler.run_forever(poll_interval=30.0)
-                except asyncio.CancelledError:
-                    raise
-                except Exception as e:
-                    logger.error("Scheduler crashed, restarting in 30s: %s", e, exc_info=True)
-                    await asyncio.sleep(30)
+        if self.cron_enabled:
+            # Recovery runs once at startup. Keeping this outside the restart loop
+            # prevents a scheduler crash from re-running recovery and re-firing jobs.
+            async def _supervised_scheduler():
+                await self.scheduler.recover_missed_jobs(max_lookback_hours=48)
+                while True:
+                    try:
+                        await self.scheduler.run_forever(poll_interval=30.0)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as e:
+                        logger.error("Scheduler crashed, restarting in 30s: %s", e, exc_info=True)
+                        await asyncio.sleep(30)
 
-        asyncio.create_task(_supervised_scheduler())
+            asyncio.create_task(_supervised_scheduler())
 
         # ── Config hot-reload polling (60s interval) ──────────────────
         # Detects changes to routing_config.yaml, scorer_weights.yaml,
@@ -3771,45 +3806,49 @@ class ABLEGateway:
 
         asyncio.create_task(_config_reload_poller())
 
-        # Start the Evolution Daemon (M2.7 background self-improvement)
-        try:
-            from able.core.evolution.daemon import EvolutionDaemon, EvolutionConfig
-            evo_config = EvolutionConfig(
-                weights_path=str(_PROJECT_ROOT / "config" / "scorer_weights.yaml"),
-                interaction_db=str(_PROJECT_ROOT / "data" / "interaction_log.db"),
-                cycle_log_dir=str(_PROJECT_ROOT / "data" / "evolution_cycles"),
-                cycle_interval_hours=6,
-                min_interactions_for_cycle=20,
-                auto_deploy=True,
-            )
-            # Wire M2.7 provider if available from registry
-            m27_provider = None
-            if hasattr(self, 'provider_registry') and self.provider_registry:
-                m27_config = self.provider_registry.get_provider_config("minimax-m2.7")
-                if m27_config and m27_config.is_available:
-                    m27_provider = self.provider_registry._instantiate_provider(m27_config)
-                    logger.info("Evolution daemon connected to MiniMax M2.7")
-
-            # Wire split test policy for A/B testing weight changes
-            split_policy = None
+        # Start the Evolution Daemon only on the cron leader. It is autonomous
+        # background work and must not run from local follower gateways.
+        if self.cron_enabled:
             try:
-                from able.core.evolution.split_test_integration import EvolutionSplitTestPolicy
-                split_policy = EvolutionSplitTestPolicy()
-            except Exception as e:
-                logger.warning(f"Split test policy unavailable: {e}")
+                from able.core.evolution.daemon import EvolutionDaemon, EvolutionConfig
+                evo_config = EvolutionConfig(
+                    weights_path=str(_PROJECT_ROOT / "config" / "scorer_weights.yaml"),
+                    interaction_db=str(_PROJECT_ROOT / "data" / "interaction_log.db"),
+                    cycle_log_dir=str(_PROJECT_ROOT / "data" / "evolution_cycles"),
+                    cycle_interval_hours=6,
+                    min_interactions_for_cycle=20,
+                    auto_deploy=True,
+                )
+                # Wire M2.7 provider if available from registry
+                m27_provider = None
+                if hasattr(self, 'provider_registry') and self.provider_registry:
+                    m27_config = self.provider_registry.get_provider_config("minimax-m2.7")
+                    if m27_config and m27_config.is_available:
+                        m27_provider = self.provider_registry._instantiate_provider(m27_config)
+                        logger.info("Evolution daemon connected to MiniMax M2.7")
 
-            self.evolution_daemon = EvolutionDaemon(
-                config=evo_config,
-                m27_provider=m27_provider,
-                split_policy=split_policy,
-                approval_workflow=self.approval_workflow,
-                memory=getattr(self, "memory", None),
-            )
-            asyncio.create_task(self.evolution_daemon.run_continuous())
-            print(f"🧬 Evolution Daemon started (6h cycle, M2.7 {'connected' if m27_provider else 'rule-based fallback'}, split_test={'on' if split_policy else 'off'})")
-        except Exception as e:
-            logger.warning(f"Evolution daemon failed to start: {e}")
-            print(f"⚠️ Evolution daemon not started: {e}")
+                # Wire split test policy for A/B testing weight changes
+                split_policy = None
+                try:
+                    from able.core.evolution.split_test_integration import EvolutionSplitTestPolicy
+                    split_policy = EvolutionSplitTestPolicy()
+                except Exception as e:
+                    logger.warning(f"Split test policy unavailable: {e}")
+
+                self.evolution_daemon = EvolutionDaemon(
+                    config=evo_config,
+                    m27_provider=m27_provider,
+                    split_policy=split_policy,
+                    approval_workflow=self.approval_workflow,
+                    memory=getattr(self, "memory", None),
+                )
+                asyncio.create_task(self.evolution_daemon.run_continuous())
+                print(f"🧬 Evolution Daemon started (6h cycle, M2.7 {'connected' if m27_provider else 'rule-based fallback'}, split_test={'on' if split_policy else 'off'})")
+            except Exception as e:
+                logger.warning(f"Evolution daemon failed to start: {e}")
+                print(f"⚠️ Evolution daemon not started: {e}")
+        else:
+            logger.info("Evolution daemon disabled in cron follower mode")
 
         # Report observability status
         if self.phoenix and self.phoenix.is_available:

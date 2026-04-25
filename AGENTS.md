@@ -103,7 +103,7 @@ All wired into the gateway tool loop (`gateway.py` lines ~1090-1620). Context co
 - Confirm T1 resolves to `gpt-5.4-mini` on live server
 - Send a real Telegram buddy query and verify dispatch
 - Confirm CI smoke stays green
-- Confirm cron duplicate-fire hardening on server: `able/data/cron_executions.db` is on the Docker `able_db` volume and `job_run_claims` contains one row per scheduled run slot (especially `nightly-research`)
+- Confirm cron duplicate-fire hardening on server: `/health` reports `cron_enabled=true`, `able/data/cron_executions.db` is on the Docker `able_db` volume, and `job_run_claims` contains one row per scheduled run slot (especially `nightly-research` and `github-digest`)
 
 Full plan: see `adaptive-purring-kernighan.md` in `.claude/plans/`
 

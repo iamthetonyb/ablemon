@@ -107,7 +107,7 @@ User → TrustGate → Scanner → Auditor → PromptEnricher → ComplexityScor
 
 `CronScheduler` uses SQLite as the durable coordination store. The default DB path is `able/data/cron_executions.db`, which maps to `/home/able/app/able/data` in Docker and is mounted as the `able_db` volume on the server.
 
-Scheduled and recovery runs claim `job_run_claims(job_name, run_slot)` before executing. `run_slot` is the actual scheduled epoch-minute, not the current recovery minute. This prevents duplicate fires across local + remote processes, deploy restarts, and recovery retries. Empty-DB startup recovery is disabled by default to avoid stale Telegram floods; set `ABLE_CRON_EMPTY_DB_RECOVERY_HOURS` only when a first-boot catchup is explicitly wanted.
+Only one runtime should be the cron leader. Production deploys set `ABLE_CRON_ENABLED=1`; local/dev gateways default to follower mode so they can use Telegram/chat without sending scheduled reports. Scheduled and recovery runs claim `job_run_claims(job_name, run_slot)` before executing. `run_slot` is the actual scheduled epoch-minute, not the current recovery minute. This prevents duplicate fires across deploy restarts and same-DB process races. Empty-DB startup recovery is disabled by default to avoid stale Telegram floods; set `ABLE_CRON_EMPTY_DB_RECOVERY_HOURS` only when a first-boot catchup is explicitly wanted.
 
 ### Model Routing (5 tiers)
 
@@ -496,11 +496,15 @@ Training lanes:
 - Empty-DB recovery is disabled by default to prevent stale Telegram floods after reinstall/path changes. Optional override: `ABLE_CRON_EMPTY_DB_RECOVERY_HOURS`.
 - Scheduler heartbeat and morning-report cron history now use the scheduler DB path under `able/data/`, matching the Docker `able_db` volume.
 - Added `able/tests/test_cron_claims.py`: duplicate scheduler instances, empty-DB recovery suppression, recovery slot identity, stale lease takeover.
+- Added a cron-leader gate: `ABLE_CRON_ENABLED=1` is required before the gateway registers/runs cron jobs or the continuous evolution daemon. Deploy scripts set this on the server; local/dev runs default to follower mode.
+- `github-digest` no longer sends a Telegram "Skipped — GITHUB_TOKEN not set" message. Missing optional config is logged only.
+- Added `able/tests/test_cron_leader_gate.py`: env gate defaults, explicit leader mode, and no Telegram delivery for missing GitHub token.
 
 Validation run this patch:
 - `python3 -m py_compile able/scheduler/cron.py able/core/evolution/morning_report.py`
 - `python3 -m pytest able/tests/test_cron_claims.py -q`
 - `python3 -m pytest able/tests/test_evolution_scheduler.py -q`
+- `python3 -m pytest able/tests/test_cron_leader_gate.py able/tests/test_cron_claims.py able/tests/test_control_plane.py -q`
 
 ---
 
@@ -644,6 +648,7 @@ cd /tmp && printf '/battle\n/q\n' | ~/.local/bin/able chat --control-port 0
 cd /tmp && printf '/compact\n/q\n' | ~/.local/bin/able chat --control-port 0
 python3 -m pytest able/tests/test_cli_chat.py -x
 python3 -m pytest able/tests/test_cron_claims.py -q
+python3 -m pytest able/tests/test_cron_leader_gate.py -q
 python3 -m pytest able/tests/test_provider_registry_primary.py able/tests/test_telegram_buddy_dispatch.py -x
 python3 -m pytest able/tests/test_package_layout.py able/tests/test_runtime_boundaries.py -x
 python3 -m pytest able/tests/test_buddy.py -q

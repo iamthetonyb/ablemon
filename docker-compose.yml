@@ -13,6 +13,10 @@
 # Full build (ML, browser, billing):
 #   PROFILE=full docker compose up -d --build
 #
+# Cron leader:
+#   local/dev defaults to follower mode. Set ABLE_CRON_ENABLED=1 only on one
+#   production/server runtime so Telegram reports do not double-send.
+#
 # OAuth (one-time, needs browser):
 #   python able/scripts/able-auth.py
 #   Then uncomment the auth.json volume below.

@@ -88,7 +88,10 @@ All four learning feedback loops are closed and tested:
 - Scheduler DB default is `able/data/cron_executions.db`, matching the Docker `able_db` volume mount at `/home/able/app/able/data`
 - Scheduled/recovery jobs use durable `job_run_claims(job_name, run_slot)` idempotency keys; recovery claims the original scheduled slot, not the current recovery minute
 - Empty-DB startup recovery is disabled by default to prevent stale Telegram floods; use `ABLE_CRON_EMPTY_DB_RECOVERY_HOURS` only for intentional first-boot catchup
+- The gateway only registers/runs autonomous cron + continuous evolution when `ABLE_CRON_ENABLED=1`; deploy scripts set this on the server, local/dev defaults to follower mode
+- `github-digest` logs missing `GITHUB_TOKEN` instead of sending a daily Telegram skip message
 - `able/tests/test_cron_claims.py` covers duplicate scheduler instances, empty-DB recovery suppression, recovery slot identity, and stale lease takeover
+- `able/tests/test_cron_leader_gate.py` covers leader env behavior and missing GitHub token silence
 
 **Runtime-first boundary cleanup**:
 - `docs/RUNTIME_REFACTOR_AUDIT.md` classifies the repo into `Core`, `Optional but kept`, `Seed / template assets`, and `Dead / accidental`
@@ -293,6 +296,7 @@ At minimum, rerun the CLI smoke test:
 python3 -m able chat --help
 python3 -m pytest able/tests/test_cli_chat.py -x
 python3 -m pytest able/tests/test_cron_claims.py -q
+python3 -m pytest able/tests/test_cron_leader_gate.py -q
 python3 -m pytest able/tests/test_provider_registry_primary.py able/tests/test_telegram_buddy_dispatch.py -x
 python3 -m pytest able/tests/test_package_layout.py able/tests/test_runtime_boundaries.py -x
 cd /tmp && ~/.local/bin/able chat --help
