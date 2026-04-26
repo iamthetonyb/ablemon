@@ -153,6 +153,10 @@ Telegram supports 3 modes:
 - `ABLE_TELEGRAM_MODE=polling`: legacy `getUpdates` polling.
 - `ABLE_TELEGRAM_MODE=webhook`: Telegram pushes to `ABLE_TELEGRAM_WEBHOOK_URL`; this is the preferred production mode because it avoids multiple-poller conflicts.
 
+For production webhook setup, use [`docs/TELEGRAM_WEBHOOK.md`](docs/TELEGRAM_WEBHOOK.md). It covers the no-domain `sslip.io` path, custom domains, GitHub secrets, and verification commands.
+
+Runtime optimization notes from the local research reports are tracked in [`docs/OPTIMIZATION_ROADMAP.md`](docs/OPTIMIZATION_ROADMAP.md).
+
 ---
 
 ## Environment variables

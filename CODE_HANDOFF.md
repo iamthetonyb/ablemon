@@ -498,6 +498,9 @@ Training lanes:
 - Added `able/tests/test_cron_claims.py`: duplicate scheduler instances, empty-DB recovery suppression, recovery slot identity, stale lease takeover.
 - Added a cron/Telegram leader gate: `ABLE_CRON_ENABLED=1` is required before the gateway registers/runs cron jobs or the continuous evolution daemon; `ABLE_TELEGRAM_ENABLED=1` is required before Telegram polling unless cron leader mode implies it. Deploy scripts set both on the server; local/dev runs default to follower mode.
 - Added Telegram webhook mode: `ABLE_TELEGRAM_MODE=webhook` registers `ABLE_TELEGRAM_WEBHOOK_URL` through Telegram `setWebhook`, adds `POST /webhook/telegram` on the gateway HTTP plane, and avoids `getUpdates` polling conflicts. `ABLE_TELEGRAM_WEBHOOK_SECRET` validates Telegram's secret-token header.
+- Added `scripts/setup-telegram-webhook-https.sh` and `docs/TELEGRAM_WEBHOOK.md` so production can get a public HTTPS endpoint with Caddy. The no-domain path uses `<public-ip>.sslip.io`; custom domains are also supported.
+- Deploy now preserves existing server webhook env values when the corresponding GitHub secrets are blank, preventing a later deploy from silently reverting the server back to polling mode.
+- Added `docs/OPTIMIZATION_ROADMAP.md`, summarizing the deep-research reports as ABLE-specific follow-up work: stable-prefix prompt layout, bounded tool budgets, tiered capture/training artifacts, optional Arrow/Zstd evaluation, and Studio/media profiling.
 - `github-digest` no longer sends a Telegram "Skipped — GITHUB_TOKEN not set" message. Missing optional config is logged only.
 - Added `able/tests/test_cron_leader_gate.py`: env gate defaults, explicit leader mode, Telegram mode/webhook routing, and no Telegram delivery for missing GitHub token.
 
@@ -506,6 +509,7 @@ Validation run this patch:
 - `python3 -m pytest able/tests/test_cron_claims.py -q`
 - `python3 -m pytest able/tests/test_evolution_scheduler.py -q`
 - `python3 -m pytest able/tests/test_cron_leader_gate.py able/tests/test_cron_claims.py able/tests/test_control_plane.py -q`
+- `bash -n scripts/setup-telegram-webhook-https.sh deploy-to-server.sh`
 
 ---
 
@@ -543,6 +547,7 @@ Phase 2 ALL DONE: Items 6 (durable tasks), 7 (managed agents), 8a (SSRF), 9 (str
 ### Priority 1: Live production verification
 
 Run the now-hardened deploy path against production and verify the real operator path end-to-end:
+- activate Telegram webhook mode on production with `scripts/setup-telegram-webhook-https.sh`, then confirm `/health` reports `telegram_mode=webhook`, `telegram_polling_enabled=false`, and no `getUpdates` conflicts in logs
 - confirm the deployed container sees `/home/able/.able/auth.json`
 - confirm tier 1 resolves to `gpt-5.4-mini` on the live server, not Nemotron
 - send a real Telegram buddy query (`How's <buddy>?`) and verify it dispatches the buddy tool path
