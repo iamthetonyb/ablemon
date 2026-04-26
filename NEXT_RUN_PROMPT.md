@@ -89,6 +89,8 @@ All four learning feedback loops are closed and tested:
 - Scheduled/recovery jobs use durable `job_run_claims(job_name, run_slot)` idempotency keys; recovery claims the original scheduled slot, not the current recovery minute
 - Empty-DB startup recovery is disabled by default to prevent stale Telegram floods; use `ABLE_CRON_EMPTY_DB_RECOVERY_HOURS` only for intentional first-boot catchup
 - The gateway only registers/runs autonomous cron + continuous evolution when `ABLE_CRON_ENABLED=1`; Telegram channel startup uses `ABLE_TELEGRAM_ENABLED=1` plus `ABLE_TELEGRAM_MODE=off|polling|webhook`. Webhook mode is preferred in production when a public HTTPS `ABLE_TELEGRAM_WEBHOOK_URL` reaches `/webhook/telegram`
+- `scripts/setup-telegram-webhook-https.sh` creates a Caddy HTTPS reverse proxy and writes webhook env on the DigitalOcean host. If no domain is supplied, it uses `<public-ip>.sslip.io`
+- GitHub deploy preserves existing server webhook env values when webhook GitHub secrets are blank, so manual webhook setup is not erased by the next deploy
 - `github-digest` logs missing `GITHUB_TOKEN` instead of sending a daily Telegram skip message
 - `able/tests/test_cron_claims.py` covers duplicate scheduler instances, empty-DB recovery suppression, recovery slot identity, and stale lease takeover
 - `able/tests/test_cron_leader_gate.py` covers leader env behavior, Telegram mode/webhook routing, and missing GitHub token silence
@@ -244,6 +246,7 @@ A 79-item master plan lives at `.claude/plans/luminous-wibbling-pie.md` across 7
 **Completed (Phase 2.5-5):** A1 (arg sanitizer), A2 (NextAuth), A3 (PII redactor), A4 (subprocess runner), A+1 (advisor tool type), A+2 (advisor routing config), A+3 (gateway advisor injection), A+4 (advisor cost tracking), A+5 (T5 cloud advisor escalation), A+6 (subscription-aware fallback), B1 (durable task tests), B2 (overnight loop tests), B3 (context compactor tests), B4 (tool result storage tests), B6 (execution monitor tests), C1 (layered memory), E1 (concurrent tool execution).
 
 **Next immediate (HIGH VALUE):**
+- Activate production Telegram webhook mode and verify no `getUpdates` conflicts remain
 - B5: AutoImprover E2E pipeline test
 - C2: Temporal knowledge graph — fact lifecycle management
 - C3: Smart search pipeline — BM25+vector+rerank fusion

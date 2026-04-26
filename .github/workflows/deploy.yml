@@ -140,7 +140,18 @@ jobs:
             # Create app directory
             install -d -m 700 /opt/able
 
-            # Write .env (secrets from GitHub Actions)
+            # Preserve manually configured webhook mode when GitHub secrets are blank.
+            # This lets scripts/setup-telegram-webhook-https.sh configure production once
+            # without the next deploy silently falling back to polling.
+            existing_env_value() {
+              local key="$1"
+              grep "^${key}=" /opt/able/.env 2>/dev/null | tail -n 1 | cut -d= -f2- || true
+            }
+            ABLE_TELEGRAM_MODE="${ABLE_TELEGRAM_MODE:-$(existing_env_value ABLE_TELEGRAM_MODE)}"
+            ABLE_TELEGRAM_WEBHOOK_URL="${ABLE_TELEGRAM_WEBHOOK_URL:-$(existing_env_value ABLE_TELEGRAM_WEBHOOK_URL)}"
+            ABLE_TELEGRAM_WEBHOOK_SECRET="${ABLE_TELEGRAM_WEBHOOK_SECRET:-$(existing_env_value ABLE_TELEGRAM_WEBHOOK_SECRET)}"
+
+            # Write .env (secrets from GitHub Actions plus preserved server webhook config)
             cat > /opt/able/.env <<EOF
             TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
             ABLE_OWNER_TELEGRAM_ID=$ABLE_OWNER_TELEGRAM_ID
